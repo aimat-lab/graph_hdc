@@ -1,0 +1,2 @@
+Upon executing experiment modules, this folder should be populated with the resulting archive folders which
+persistently store all the results and the artifacts created during the execution of the experiments.
