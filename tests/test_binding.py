@@ -7,6 +7,7 @@ from graph_hdc.binding import circular_convolution_fft
 from graph_hdc.binding import circular_correlation
 from graph_hdc.binding import circular_correlation_fft
 
+
 class TestCircular:
     
     def test_circular_convolution_basically_works(self):

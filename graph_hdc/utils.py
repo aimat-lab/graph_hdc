@@ -6,11 +6,13 @@ import string
 import tempfile
 import random
 import subprocess
-from typing import List, Any
+from itertools import product
+from typing import List, Any, Dict, Tuple, Optional, Callable
 
 import torch
 import click
 import jinja2 as j2
+import networkx as nx
 import jsonpickle
 import jsonpickle.ext.numpy as jsonpickle_numpy
 
@@ -37,6 +39,46 @@ NULL_LOGGER = logging.Logger('NULL')
 NULL_LOGGER.addHandler(logging.NullHandler())
 
 
+class HypervectorCombinations:
+    
+    def __init__(self, 
+                 value_hv_dicts: Dict[str, Dict[Any, torch.Tensor]],
+                 bind_fn: Optional[Callable] = None,
+                 ):
+        self.value_hv_dicts = value_hv_dicts
+        self.bind_fn = bind_fn
+        
+        self.combinations: Dict[tuple] = {}
+        
+        key_tuples_list: List[List[Tuple[str, Any]]] = []
+        for name, value_hv_dict in value_hv_dicts.items():
+            key_tuples: List[Tuple[str, Any]] = [(name, key) for key, _ in value_hv_dict.items()]
+            key_tuples_list.append(key_tuples)
+            
+        key_tuple_combinations = list(product(*key_tuples_list))
+        for comb in key_tuple_combinations:
+            # hvs: (num_dicts, dim)
+            hvs: torch.Tensor = torch.stack([self.value_hv_dicts[name][key] for (name, key) in comb], dim=0)
+            # value: (num_dicts, dim)
+            value: torch.Tensor = torch_pairwise_reduce(hvs, func=self.bind_fn)
+            value = value.squeeze()
+            
+            comb_key = tuple(sorted(comb))
+            self.combinations[comb_key] = value
+
+    def get(self, query: dict) -> torch.Tensor:
+        comb_key = tuple(sorted(query.items()))
+        return self.combinations[comb_key]
+    
+    def __iter__(self):
+        self.__generator__ = self.__generate__()
+        return self.__generator__
+            
+    def __generate__(self):
+        for comb_key, value in self.combinations.items():
+            comb_dict = {name: key for (name, key) in comb_key}
+            yield comb_dict, value
+
 # == CLI RELATED ==
 
 def get_version():
@@ -59,6 +101,46 @@ class CsvString(click.ParamType):
 
         else:
             return value.split(',')
+
+# == NETWORKX UTILS ==
+
+def nx_random_uniform_edge_weight(g: nx.Graph,
+                                  lo: float = 0.0,
+                                  hi: float = 1.0,
+                                  ) -> nx.Graph:
+    
+    for u, v in g.edges():
+        g[u][v]['edge_weight'] = random.uniform(lo, hi)
+        
+    return g
+
+
+# == TORCH UTILS ==
+
+def torch_pairwise_reduce(tens: torch.Tensor, 
+                          func: callable, 
+                          dim: int = 0
+                          ) -> torch.Tensor:
+    """
+    Given a tensor ``tens`` with shape (M, N) this function will reduce the tensor along the dimension ``dim``
+    (e.g. dimension 0) using the function ``func``. The function ``func`` must be a callable which accepts two 
+    tensors of shape (N,) and returns a tensor of shape (N,). The result of the reduction will be a tensor of
+    shape (N,).
+    
+    :param tens: The input tensor
+    :param func: The reduction function which is a callable that maps 
+        (torch.Tensor, torch.Tensor) -> torch.Tensor
+    :param dim: The dimension along which the reduction should be performed. default 0
+    
+    :return: The reduced tensor
+    """
+    result = torch.index_select(tens, dim, torch.tensor(0))
+    
+    for i in range(1, tens.size(dim)):
+        result = func(result, torch.index_select(tens, dim, torch.tensor(i)))
+    
+    result = torch.squeeze(result, dim=dim)
+    return result
 
 
 # == JSON PICKLE ==

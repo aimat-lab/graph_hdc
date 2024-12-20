@@ -4,10 +4,18 @@ import tempfile
 import torch
 import numpy as np
 import jsonpickle
+from rich.pretty import pprint
+from torch.nn.functional import normalize
+from torch_geometric.loader import DataLoader
 
 import graph_hdc.utils
 from graph_hdc.models import AbstractEncoder
 from graph_hdc.models import CategoricalOneHotEncoder
+from graph_hdc.models import CategoricalIntegerEncoder
+from graph_hdc.models import HyperNet
+from graph_hdc.binding import circular_convolution_fft, circular_correlation_fft
+from graph_hdc.testing import generate_random_graphs
+from graph_hdc.graph import data_list_from_graph_dicts
 
 
 class TestCategoricalOneHotEncoder:
@@ -52,8 +60,8 @@ class TestCategoricalOneHotEncoder:
         The "decode" method takes the hv vector and returns the one-hot index that best (!) matches that given 
         embedding.
         """
-        value1 = [1, 0, 0]
-        value2 = [0, 0, 1]
+        value1 = torch.tensor([1, 0, 0])
+        value2 = torch.tensor([0, 0, 1])
         
         encoder = CategoricalOneHotEncoder(
             dim=2000,
@@ -89,3 +97,325 @@ class TestCategoricalOneHotEncoder:
         encoder_loaded = jsonpickle.loads(content)
         assert isinstance(encoder_loaded, AbstractEncoder)
         assert torch.allclose(encoder.embeddings, encoder_loaded.embeddings) 
+        
+        
+class TestHyperNet: 
+    """
+    Unittests for the HyperNet class.
+    """
+    
+    def test_construction_basically_works(self):
+        """
+        If a new HyperNet object can be constructed without error.
+        """
+        
+        dim = 1000
+        hyper_net = HyperNet(
+            hidden_dim=dim,
+            depth=3,
+            node_encoder_map={
+                'type': CategoricalOneHotEncoder(dim, 3),
+            }
+        )
+        assert isinstance(hyper_net, HyperNet)
+        assert hyper_net.hidden_dim == dim
+        assert hyper_net.depth == 3
+        assert isinstance(hyper_net.node_encoder_map, dict)
+        
+    def test_saving_loading_works(self):
+        """
+        It should be possible to use the "save_to_path" and "load_from_path" methods to save and load the 
+        an instance of a HyperNet object to and from a file.
+        """
+        
+        dim = 1000
+        type_encoder = CategoricalOneHotEncoder(dim, 3)
+        size_encoder = CategoricalOneHotEncoder(dim, 2)
+        hyper_net = HyperNet(
+            hidden_dim=dim,
+            depth=3,
+            node_encoder_map={
+                'type': type_encoder,
+            },
+            graph_encoder_map={
+                'size': size_encoder,
+            }
+        )
+        
+        with tempfile.TemporaryDirectory() as path:
+            model_path = os.path.join(path, 'model.pt')
+            hyper_net.save_to_path(model_path)
+            
+            assert os.path.exists(model_path)
+            
+            hyper_net_loaded = HyperNet(100, 2, {})
+            hyper_net_loaded.load_from_path(model_path)
+            
+            assert isinstance(hyper_net_loaded, HyperNet)
+            assert hyper_net_loaded.hidden_dim == hyper_net.hidden_dim
+            assert hyper_net_loaded.depth == hyper_net.depth
+            assert isinstance(hyper_net_loaded.node_encoder_map, dict)
+            
+            # The encoder should be loaded as well and should be the exact same as before!
+            assert isinstance(hyper_net_loaded.node_encoder_map['type'], AbstractEncoder)
+            assert torch.allclose(hyper_net_loaded.node_encoder_map['type'].embeddings, type_encoder.embeddings)
+            
+            # The same for the graph encoder map
+            assert isinstance(hyper_net_loaded.graph_encoder_map['size'], AbstractEncoder)
+            assert torch.allclose(hyper_net_loaded.graph_encoder_map['size'].embeddings, size_encoder.embeddings)
+            
+    def test_encode_properties_basically_works(self):
+        """
+        The HyperNet.encode_properties method should apply the initial encoding of the generic graph data into 
+        the node and graph hypervectors on top of which the message passing is then performed.
+        """
+        num_graphs = 10
+        graphs = generate_random_graphs(
+            num_graphs=num_graphs, 
+            num_node_features=3,
+            num_graph_labels=2,    
+        )
+            
+        dim = 1000
+        hyper_net = HyperNet(
+            hidden_dim=dim,
+            depth=3,
+            node_encoder_map={
+                'x': CategoricalOneHotEncoder(dim, 3),
+            },
+            graph_encoder_map={
+                'y': CategoricalOneHotEncoder(dim, 2),
+            }
+        )
+        
+        data_list = data_list_from_graph_dicts(graphs)
+        data_loader = DataLoader(data_list, batch_size=num_graphs, shuffle=False)
+        data = next(iter(data_loader))
+            
+        data = hyper_net.encode_properties(data)
+        
+        assert hasattr(data, 'node_hv')
+        assert isinstance(data.node_hv, torch.Tensor)
+        assert data.node_hv.shape == (data.x.size(0), dim)
+        
+        assert hasattr(data, 'graph_hv')
+        assert isinstance(data.graph_hv, torch.Tensor)
+        assert data.graph_hv.shape == (num_graphs, dim)
+            
+    def test_forward_basically_works(self):
+        """
+        A forward pass of the HyperNet model should take the PyG Data object and return a dictionary which 
+        most prominently includes the high-dimensional vector representation of the graph.
+        """
+        # generating mock data
+        num_graphs = 10
+        graphs = generate_random_graphs(10, num_node_features=3)
+        
+        # setting up model
+        dim = 1000
+        hyper_net = HyperNet(
+            hidden_dim=dim,
+            depth=3,
+            node_encoder_map={
+                'x': CategoricalOneHotEncoder(dim, 3),
+            }
+        )
+        
+        # converting graphs to pyg data object
+        data_list = data_list_from_graph_dicts(graphs)
+        data_loader = DataLoader(data_list, batch_size=num_graphs, shuffle=False)
+        data = next(iter(data_loader))
+        
+        # forward pass
+        result: dict = hyper_net.forward(data)
+        embedding = result['graph_embedding']
+        
+        assert isinstance(result, dict)
+        assert isinstance(embedding, torch.Tensor)
+        assert embedding.shape == (num_graphs, dim)
+        
+    def test_gradient_for_edge_weights_basically_works(self):
+        """
+        It should be possible to pass the additional "edge_weight" property which does then get a gradient 
+        assigned to it. 
+        """
+        # generating mock data
+        num_graphs = 10
+        graphs = generate_random_graphs(num_graphs, num_node_features=3)
+        
+        # setting up model
+        dim = 10_000
+        hyper_net = HyperNet(
+            hidden_dim=dim,
+            depth=3,
+            node_encoder_map={
+                'x': CategoricalOneHotEncoder(dim, 3),
+            }
+        )
+        
+        # converting graphs to pyg data object
+        data_list = data_list_from_graph_dicts(graphs)
+        data_loader = DataLoader(data_list, batch_size=num_graphs, shuffle=False)
+        data = next(iter(data_loader))
+        data.edge_weight.requires_grad = True
+        
+        # forward pass
+        result: dict = hyper_net.forward(data)
+        embedding = result['graph_embedding']
+        
+        # defining a loss based on the embedding proximity to a random vector
+        graphs_ = generate_random_graphs(num_graphs, num_node_features=3)
+        data_list_ = data_list_from_graph_dicts(graphs_)
+        data_loader_ = DataLoader(data_list_, batch_size=num_graphs, shuffle=False)
+        data_ = next(iter(data_loader_))
+        
+        result: dict = hyper_net.forward(data_)
+        target = result['graph_embedding']
+        loss = ((target - embedding).pow(2).mean(dim=1)).mean()
+        loss.backward()
+        
+        # checking if the gradients on the edge weights exist
+        print(data.edge_weight.grad)
+        print(loss)
+        assert data.edge_weight.grad is not None
+        
+    def test_recovering_nodes_from_embedding(self):
+        
+        # setting up model
+        dim = 10_000
+        encoder = CategoricalIntegerEncoder(dim, 5)
+        hyper_net = HyperNet(
+            hidden_dim=dim,
+            depth=2,
+            node_encoder_map={
+                'x': encoder,
+            },
+            bind_fn=circular_convolution_fft,
+            unbind_fn=circular_correlation_fft,
+        )
+        print('encoder_hv_dict', encoder.get_encoder_hv_dict())
+        
+        # setting up simple test graph
+        graph = {
+            'node_indices': np.array([0, 1, 2, 3], dtype=int),
+            'node_attributes': np.array([[0], [0], [1], [2]], dtype=float),
+            'edge_indices': np.array([[0, 1], [1, 2], [2, 3], [3, 0]], dtype=int),
+            'edge_attributes': np.array([[1], [1], [1]], dtype=float),
+        }
+        data_list = data_list_from_graph_dicts([graph])
+        data = next(iter(DataLoader(data_list, batch_size=1)))
+
+        # forward pass - encoding into embedding
+        result: dict = hyper_net.forward(data)
+        embedding = result['graph_embedding']
+        
+        assert isinstance(embedding, torch.Tensor)
+        assert embedding.shape == (1, dim)
+        
+        # Compute and print the matrix multiplication between node encodings and graph embedding
+        node_encodings = encoder.embeddings
+        graph_embedding = embedding.squeeze(0)  # Remove batch dimension
+        
+        matmul_result = torch.matmul(node_encodings, graph_embedding)
+        print('nodes', matmul_result)
+        assert np.allclose(matmul_result, [2, 1, 1, 0, 0], atol=0.2)
+        
+        edge_encodings = torch.stack([
+            circular_convolution_fft(node_encodings[0], node_encodings[0]),
+            circular_convolution_fft(node_encodings[0], node_encodings[1]),
+            circular_convolution_fft(node_encodings[1], node_encodings[3]),
+        ])
+        matmul_result = torch.matmul(edge_encodings, graph_embedding)
+        print('edges', matmul_result)
+        
+    def test_decode_order_zero(self):
+        
+        # setting up model
+        dim = 10_000
+        encoder = CategoricalIntegerEncoder(dim, 5)
+        hyper_net = HyperNet(
+            hidden_dim=dim,
+            depth=3,
+            node_encoder_map={
+                'x': encoder,
+            },
+            bind_fn=circular_convolution_fft,
+            unbind_fn=circular_correlation_fft,
+        )
+        
+        # setting up simple test graph
+        graph = {
+            'node_indices': np.array([0, 1, 2, 3], dtype=int),
+            'node_attributes': np.array([[0], [0], [1], [2]], dtype=float),
+            'edge_indices': np.array([[0, 1], [1, 2], [2, 3], [3, 0]], dtype=int),
+            'edge_attributes': np.array([[1], [1], [1]], dtype=float),
+        }
+        data_list = data_list_from_graph_dicts([graph])
+        data = next(iter(DataLoader(data_list, batch_size=1)))
+
+        # forward pass - encoding into embedding
+        result: dict = hyper_net.forward(data)
+        embedding = result['graph_embedding']
+        
+        # zero order decoding
+        # This method should return a number of constraints which define the types of nodes that were 
+        # part of the original graph and the number of nodes of each type.
+        
+        constraints = hyper_net.decode_order_zero(embedding)
+        pprint(constraints)
+        assert isinstance(constraints, list)
+        target_constraints = [
+            {'src': {'x': 0}, 'num': 2},
+            {'src': {'x': 1}, 'num': 1},
+            {'src': {'x': 2}, 'num': 1},
+        ]
+        assert constraints == target_constraints
+        
+    def test_decode_order_one(self):
+        
+        # setting up model
+        dim = 10_000
+        encoder = CategoricalIntegerEncoder(dim, 5)
+        hyper_net = HyperNet(
+            hidden_dim=dim,
+            depth=3,
+            node_encoder_map={
+                'x': encoder,
+            },
+            bind_fn=circular_convolution_fft,
+            unbind_fn=circular_correlation_fft,
+        )
+        
+        # setting up simple test graph
+        graph = {
+            'node_indices': np.array([0, 1, 2, 3], dtype=int),
+            'node_attributes': np.array([[0], [0], [1], [2]], dtype=float),
+            'edge_indices': np.array([[0, 1], [1, 2], [2, 3], [3, 0]], dtype=int),
+            'edge_attributes': np.array([[1], [1], [1]], dtype=float),
+        }
+        data_list = data_list_from_graph_dicts([graph])
+        data = next(iter(DataLoader(data_list, batch_size=1)))
+
+        # forward pass - encoding into embedding
+        result: dict = hyper_net.forward(data)
+        embedding = result['graph_embedding']
+        
+        # zero order decoding
+        # This method should return a number of constraints which define the types of nodes that were 
+        # part of the original graph and the number of nodes of each type.
+        constraints_order_zero = hyper_net.decode_order_zero(embedding)
+        
+        # first order decoding
+        # This method should return a number of constraints which define the kinds of edges that were 
+        # part of the original graph and the number of how many of that type of edge exists.
+        constraints_order_one = hyper_net.decode_order_one(
+            embedding=embedding,
+            constraints_order_zero=constraints_order_zero,
+        )
+        pprint(constraints_order_one)
+        assert isinstance(constraints_order_one, list)
+        assert len(constraints_order_one) > 0
+        for constraint in constraints_order_one:
+            assert 'src' in constraint
+            assert 'dst' in constraint
+            assert 'num' in constraint
