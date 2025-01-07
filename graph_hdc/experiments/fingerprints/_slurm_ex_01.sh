@@ -10,6 +10,7 @@ EXPERIMENTS_PATH="${FOLDER_PATH}/graph_hdc/experiments/fingerprints"
 PYTHON_PATH="${FOLDER_PATH}/venv/bin/python"
 
 identifier="a"
+num_test="0.9"
 size="2048"
 depth="3"
 datasets=("aqsoldb")
@@ -27,9 +28,10 @@ sbatch \
     --time=01:00:00 \
     --wrap="${PYTHON_PATH} ${EXPERIMENTS_PATH}/predict_molecules__fp__${d}.py \\
         --__DEBUG__=\"False\" \\
-        --__PREFIX__=\"'ex_01_fp'\" \\
+        --__PREFIX__=\"'ex_01_fp_${identifier}'\" \\
         --SEED=\"${s}\" \\
         --IDENTIFIER=\"'${identifier}'\" \\
+        --NUM_TEST=\"${num_test}\" \\
         --FINGERPRINT_SIZE=\"${size}\" \\
         --FINGERPRINT_RADIUS=\"${depth}\" \\
     "
@@ -48,9 +50,10 @@ sbatch \
     --time=01:00:00 \
     --wrap="${PYTHON_PATH} ${EXPERIMENTS_PATH}/predict_molecules__hdc.py \\
         --__DEBUG__=\"False\" \\
-        --__PREFIX__=\"'ex_01_hdc'\" \\
+        --__PREFIX__=\"'ex_01_hdc_${identifier}'\" \\
         --SEED=\"${s}\" \\
         --IDENTIFIER=\"'${identifier}'\" \\
+        --NUM_TEST=\"${num_test}\" \\
         --EMBEDDING_SIZE=\"${size}\" \\
         --NUM_LAYERS=\"${depth}\" \\
     "

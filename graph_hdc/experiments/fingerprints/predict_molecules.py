@@ -1,7 +1,7 @@
 import os
 import time
 import random
-from typing import Any, List
+from typing import Any, List, Union
 
 import pandas as pd
 import numpy as np
@@ -42,7 +42,7 @@ DATASET_NAME: str = 'clintox'
 DATASET_TYPE: str = 'classification'
 # :param NUM_TEST:
 #       The number of test samples to be used for the evaluation of the models.
-NUM_TEST: int = 100
+NUM_TEST: Union[int, float] = 100
 # :param NUM_VAL:
 #       The number of validation samples to be used for the evaluation of the models during training.
 NUM_VAL: int = 10
@@ -116,10 +116,10 @@ def filter_dataset(e: Experiment,
         if not mol:
             del index_data_map[index]
             
-        if len(mol.GetAtoms()) < 2:
+        elif len(mol.GetAtoms()) < 2:
             del index_data_map[index]
             
-        if len(mol.GetBonds()) < 1:
+        elif len(mol.GetBonds()) < 1:
             del index_data_map[index]
 
 
@@ -129,10 +129,19 @@ def dataset_split(e: Experiment,
                   ) -> tuple[list, list, list]:
     
     random.seed(e.SEED)
-    test_indices = random.sample(indices, k=NUM_TEST)
+    
+    # We accept NUM_TEST here to be either an integer or a float between 0 and 1
+    # in case of an integer we use it as the number of test samples to be used
+    # in case of a float we use it as the fraction of the dataset to be used as test samples.
+    if isinstance(e.NUM_TEST, int):
+        num_test = e.NUM_TEST
+    elif isinstance(e.NUM_TEST, float):
+        num_test = int(e.NUM_TEST * len(indices))
+    
+    test_indices = random.sample(indices, k=num_test)
     indices = list(set(indices) - set(test_indices))
     
-    val_indices = random.sample(indices, k=NUM_VAL)
+    val_indices = random.sample(indices, k=e.NUM_VAL)
     indices = list(set(indices) - set(val_indices))
     
     train_indices = indices
