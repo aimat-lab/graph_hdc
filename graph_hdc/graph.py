@@ -35,6 +35,31 @@ def constraints_order_zero_from_graph_dict(graph: dict,
     constructs a list of *true* zero order constraints (nodes) which can then be used to compare 
     with a predicted list of zero order constraints, for example.
     
+    Example
+    
+    .. code-block:: python
+
+        graph = {
+            'node_indices': [0, 1, 2],
+            'node_attributes': [[0], [1], [0]],
+            'edge_indices': [[0, 1], [1, 2]],
+            'edge_attributes': [[0], [1]],
+        }
+        node_encoder_map = {
+            'label': CategoricalIntegerEncoder(dim=10, num_categories=2),
+        }
+        
+        constraints_order_zero = constraints_order_zero_from_graph_dict(
+            graph=graph,
+            node_encoder_map=node_encoder_map,
+        )
+        
+        # [
+        #     {'src': {'label': 0}},
+        #     {'src': {'label': 1}},
+        #     {'src': {'label': 0}},
+        # ]
+    
     :param graph: A graph dict.
     :param node_encoder_map: A dictionary mapping node attribute names to their respective implementations 
         of the AbstractEncoder interface. The returned zero order constraints will define the node attributes 
@@ -62,8 +87,45 @@ def constraints_order_one_from_graph_dict(graph: dict,
                                           node_encoder_map: Dict[str, AbstractEncoder],
                                           ) -> List[Dict[str, dict]]:
     """
-
+    Given a ``graph`` dict representation and a ``node_encoder_map`` dictionary, this function
+    constructs a list of *true* first order constraints (edges) which can then be used to compare
+    with a predicted list of first order constraints, for example.
+    
+    Example
+    
+    .. code-block:: python
+    
+        graph = {
+            'node_indices': [0, 1, 2],
+            'node_attributes': [[0], [1], [0]],
+            'edge_indices': [[0, 1], [1, 2]],
+            'edge_attributes': [[0], [1]],
+        }
+        
+        node_encoder_map = {
+            'label': CategoricalIntegerEncoder(dim=10, num_categories=2),
+        }
+        
+        constraints_order_one = constraints_order_one_from_graph_dict(
+            graph=graph,
+            node_encoder_map=node_encoder_map,
+        )
+        
+        # [
+        #     {'src': {'label': 0}, 'dst': {'label': 1}},
+        #     {'src': {'label': 1}, 'dst': {'label': 0}},
+        # ]
+        
+    :param graph: A graph dict.
+    :param node_encoder_map: A dictionary mapping node attribute names to their respective implementations
+        of the AbstractEncoder interface. The returned first order constraints will define the node attributes
+        with the same names as the keys of this dict.
+        
+    :returns a list of first order constraints which is a list of dictionaries with string keys and dict values
+        where the dicts contain two keys 'src' and 'dst' and the values are dictionaries of node attribute names
+        and their values. Each element represents an edge in the graph.
     """
+    
     constraints_order_zero = constraints_order_zero_from_graph_dict(
         graph=graph,
         node_encoder_map=node_encoder_map,
@@ -103,7 +165,12 @@ def data_from_graph_dict(graph: dict) -> Data:
     
     for key, value in graph.items():
         if key not in ['node_attributes', 'edge_indices', 'edge_attributes', 'graph_labels', 'edge_weights']:
-            setattr(data, key, torch.tensor(value, dtype=torch.float))
+            try:
+                setattr(data, key, torch.tensor(value, dtype=torch.float))
+            # It can happen that we attach a numpy array full of strings to the graph dict as well in which case 
+            # we want to ignore that property because that is not supported by torch.
+            except TypeError:
+                pass
     
     return data
 

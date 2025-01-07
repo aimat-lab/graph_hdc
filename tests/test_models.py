@@ -71,13 +71,13 @@ class TestCategoricalOneHotEncoder:
         assert isinstance(encoded1, torch.Tensor)
         assert torch.allclose(encoded1, encoder.embeddings[0])
         decoded1 = encoder.decode(encoded1)
-        assert decoded1 == 0
+        assert decoded1 == (1, 0, 0)
         
         encoded2 = encoder.encode(value2)
         assert isinstance(encoded2, torch.Tensor)
         assert torch.allclose(encoded2, encoder.embeddings[2])
         decoded2 = encoder.decode(encoded2)
-        assert decoded2 == 2
+        assert decoded2 == (0, 0, 1)
         
     def test_save_load_basically_works(self):
         """

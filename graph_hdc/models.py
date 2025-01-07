@@ -95,7 +95,7 @@ class AbstractHyperNet(pl.LightningModule):
             the batch.
         """
         # The batch size as calculated from the data object 
-        batch_size = torch.max(data.batch.detach().numpy()) + 1
+        batch_size = torch.max(data.batch).detach().numpy() + 1
         
         # In this list we will store the disentangled results for each of the individual graphs in the batch
         # in the form of a dictionary with the same keys as the batched dict results "graph_results" but 
