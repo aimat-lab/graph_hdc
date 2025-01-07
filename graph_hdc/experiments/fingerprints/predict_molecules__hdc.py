@@ -22,18 +22,36 @@ from graph_hdc.special.molecules import make_molecule_node_encoder_map
 
 DATASET_NAME: str = 'aqsoldb'
 DATASET_TYPE: str = 'regression'
+
+# == EMBEDDING PARAMETERS ==
+
+# :param EMBEDDING_SIZE:
+#       The size of the graph embedding vectors. This will be the number of elements in each of the 
+#       hypervectors that represent the individual molecular graphs.
 EMBEDDING_SIZE: int = 2048
+# :param NUM_LAYERS:
+#       The number of layers in the hypernetwork. This parameter determines the depth of the hypernetwork
+#       which is used to generate the graph embeddings. This means it is the number of message passing 
+#       steps applied in the encoder.
 NUM_LAYERS: int = 2
+# :param BATCH_SIZE:
+#       The size of the batches to be used during training. This parameter determines the number of samples
+#       that are processed in parallel during the training of the model.
 BATCH_SIZE: int = 50
-GLOBAL_POOLING: str = 'sum' # sum_graph_att, conv_graph_att
-DEGREE_SIGNAL_TYPE: str = 'continuous'
-DEGREE_SIGNAL_BANDWIDTH: float = 1.0
-MODEL_VERSION: str = 'v2'
-
-PLOT_UMAP: bool = False
-
+# :param DEVICE:
+#       The device to be used for the training of the model. This parameter can be set to 'cuda:0' to use the
+#       GPU for training, or to 'cpu' to use the CPU.
 #DEVICE: str = "cuda:0" if torch.cuda.is_available() else "cpu"
 DEVICE: str = "cpu"
+
+# == VISUALIZATION PARAMETERS ==
+
+# :param PLOT_UMAP:
+#       A boolean flag that determines whether to plot the UMAP dimensionality reduction of the HDC vectors
+#       for the molecular graphs in the dataset.
+PLOT_UMAP: bool = False
+
+# == EXPERIMENT PARAMETERS ==
 
 experiment = Experiment.extend(
     'predict_molecules.py',

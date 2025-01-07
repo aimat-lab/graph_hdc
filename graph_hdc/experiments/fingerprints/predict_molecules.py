@@ -1,7 +1,7 @@
 import os
 import time
 import random
-from typing import Any
+from typing import Any, List
 
 import pandas as pd
 import numpy as np
@@ -28,6 +28,10 @@ from chem_mat_data._typing import GraphDict
 from chem_mat_data.main import load_graph_dataset, load_dataset_metadata
 from sklearn.preprocessing import StandardScaler
 
+# :param IDENTIFIER:
+#       String identifier that can be used to later on filter the experiment, for example.
+IDENTIFIER: str = '1'
+
 # :param DATASET_NAME:
 #       The name of the dataset to be used for the experiment. This name is used to download the dataset from the
 #       ChemMatData file share.
@@ -51,7 +55,7 @@ SEED: int = 1
 #       listed. The model names are dynamically evaluated as function names with the prefix 'train_model__{name}'.
 #       if such a function exists in the experiment workspace, it is executed to train the model. The model is then
 #       evaluated using the 'evaluate_model' function.
-MODELS: list[str] = [
+MODELS: List[str] = [
     'random_forest',
     'grad_boost',
     'k_neighbors',

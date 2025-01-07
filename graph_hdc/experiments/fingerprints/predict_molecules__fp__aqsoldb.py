@@ -1,8 +1,19 @@
-import numpy as np
-from rdkit import Chem
-from rdkit.Chem import rdFingerprintGenerator
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
+
+# == DATASET PARAMETERS ==
+
+# :param DATASET_NAME:
+#       The name of the dataset to be used for the experiment. This name is used to download the dataset from the
+#       ChemMatData file share.
+DATASET_NAME: str = 'aqsoldb'
+# :param DATASET_TYPE:
+#       The type of the dataset, either 'classification' or 'regression'. This parameter is used to determine the
+#       evaluation metrics and the type of the prediction target.
+DATASET_TYPE: str = 'regression'
+# :param NUM_TEST:
+#       The number of test samples to be used for the evaluation of the models.
+NUM_TEST: int = 100
 
 # == FINGERPRINT PARAMETERS ==
 
@@ -18,28 +29,10 @@ FINGERPRINT_RADIUS: int = 2
 # == EXPERIMENT PARAMETERS ==
 
 experiment = Experiment.extend(
-    'predict_molecules.py',
+    'predict_molecules__fp.py',
     base_path=folder_path(__file__),
     namespace=file_namespace(__file__),
     glob=globals()
 )
-
-@experiment.hook('process_dataset', replace=True, default=False)
-def process_dataset(e: Experiment,
-                    index_data_map: dict
-                    ) -> None:
-    
-    gen = rdFingerprintGenerator.GetMorganGenerator(
-        radius=e.FINGERPRINT_RADIUS, 
-        fpSize=e.FINGERPRINT_SIZE,
-    )
-    
-    for c, (index, graph) in enumerate(index_data_map.items()):
-        smiles: str = graph['graph_repr']
-        fingerprint = gen.GetFingerprint(Chem.MolFromSmiles(smiles))
-        graph['graph_features'] = np.array(fingerprint).astype(float)
-
-        if c % 1000 == 0:
-            e.log(f' * {c} molecules done')
 
 experiment.run_if_main()
