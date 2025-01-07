@@ -17,153 +17,11 @@ import graph_hdc.utils
 import graph_hdc.binding
 from graph_hdc.utils import torch_pairwise_reduce
 from graph_hdc.utils import HypervectorCombinations
+from graph_hdc.utils import AbstractEncoder
+from graph_hdc.utils import CategoricalOneHotEncoder
+from graph_hdc.utils import CategoricalIntegerEncoder
 from graph_hdc.graph import data_list_from_graph_dicts
 from graph_hdc.functions import resolve_function, desolve_function
-
-
-# === BASIC PROPERTY ENCODERS ===
-
-class AbstractEncoder:
-    """
-    Abstract base class for the property encoders. An encoder class is used to encode individual properties 
-    of graph elements (nodes, edges, etc.) into a high-dimensional hypervector representation.
-    
-    Specific subclasses should implement the ``encode`` and ``decode`` methods to encode and decode the 
-    property to and from a high-dimensional hypervector representation.
-    """
-    
-    def __init__(self,
-                 dim: int,
-                 seed: Optional[int] = None,
-                 ):
-        self.dim = dim
-        self.seed = seed
-    
-    # Turns whatever property into a random tensor
-    def encode(self, value: Any) -> torch.Tensor:
-        """
-        This method takes the property ``value`` and encodes it into a high-dimensional hypervector 
-        as a torch.Tensor.
-        This method should be implemented by the specific subclasses.
-        """
-        raise NotImplementedError()
-    
-    # Turns the random tensor back into whatever the original property was
-    def decode(self, hv: torch.Tensor) -> Any:
-        """
-        This method takes the hypervector ``hv`` and decodes it back into the original property.
-        This method should be implemented by the specific subclasses.
-        """
-        raise NotImplementedError()
-    
-    # Returns a dictionary representation of the encoder mapping
-    def get_encoder_hv_dict(self) -> Dict[Any, torch.Tensor]:
-        """
-        This method should return a dictionary representation of the encoder mapping where the keys 
-        are the properties that are being encoded and the values are hypervector representations 
-        that are used to represent the corresponding property values.
-        """
-        raise NotImplementedError()
-    
-    
-    
-class CategoricalOneHotEncoder(AbstractEncoder):
-    """
-    This specific encoder is used to encode categorical properties given as a one-hot encoding vector
-    into a high-dimensional hypervector. This is done by creating random continuous base vectors for 
-    each of the categories and then selecting the corresponding base vector by the index of the one-hot
-    encoding. The decoding is done by calculating the base vector with the smallest distance to the
-    the given hypervector and returning the corresponding category index.
-    
-    :param dim: The dimensionality of the hypervectors.
-    :param num_categories: The number of categories that can be encoded.
-    :param seed: The random seed to use for the generation of the base vectors. Default is None, but 
-        can be set for reproducibility.
-    """
-    
-    def __init__(self,
-                 dim: int,
-                 num_categories: int,
-                 seed: Optional[int] = None,
-                 ):
-        AbstractEncoder.__init__(self, dim, seed)
-        self.num_categories = num_categories
-        
-        random = np.random.default_rng(seed)
-        self.embeddings: torch.Tensor = torch.tensor(random.normal(
-            # This scaling is important to have normalized base vectors
-            loc=0.0,
-            scale=(1.0 / np.sqrt(dim)), 
-            size=(num_categories, dim)
-        ).astype(np.float32))
-    
-    def encode(self, value: Any
-               ) -> torch.Tensor:
-        
-        index = torch.argmax(value)
-        return self.embeddings[index]
-    
-    def decode(self, 
-               hv: torch.Tensor, 
-               distance: str ='euclidean'
-               ) -> Any:
-        
-        if distance == 'euclidean':
-            distances = np.linalg.norm(self.embeddings - hv.numpy(), axis=1)
-            
-        elif distance == 'cosine':
-            similarities = np.dot(self.embeddings, hv.numpy()) / (np.linalg.norm(self.embeddings, axis=1) * np.linalg.norm(hv.numpy()))
-            distances = 1 - similarities
-        
-        else:
-            raise ValueError(f"Unsupported distance metric: {distance}")
-        
-        return np.argmin(distances)
-
-
-class CategoricalIntegerEncoder(AbstractEncoder):
-    
-    def __init__(self,
-                 dim: int,
-                 num_categories: int,
-                 seed: Optional[int] = None,
-                 ):
-        AbstractEncoder.__init__(self, dim, seed)
-        self.num_categories = num_categories
-        
-        random = np.random.default_rng(seed)
-        self.embeddings: torch.Tensor = torch.tensor(random.normal(
-            # This scaling is important to have normalized base vectors
-            loc=0.0,
-            scale=(1.0 / np.sqrt(dim)), 
-            size=(num_categories, dim),
-        ).astype(np.float32))
-    
-    def encode(self, value: Any) -> torch.Tensor:
-        return self.embeddings[int(value)]
-    
-    def decode(self, 
-               hv: torch.Tensor, 
-               distance: str ='euclidean',
-               ) -> Any:
-        
-        if distance == 'euclidean':
-            distances = np.linalg.norm(self.embeddings - hv.numpy(), axis=1)
-            
-        elif distance == 'cosine':
-            similarities = np.dot(self.embeddings, hv.numpy()) / (np.linalg.norm(self.embeddings, axis=1) * np.linalg.norm(hv.numpy()))
-            distances = 1 - similarities
-        
-        else:
-            raise ValueError(f"Unsupported distance metric: {distance}")
-        
-        return np.argmin(distances)
-    
-    def get_encoder_hv_dict(self) -> Dict[Any, torch.Tensor]:
-        return {
-            index: hv
-            for index, hv in enumerate(self.embeddings)
-        }
 
 
 # === HYPERDIMENSIONAL MESSAGE PASSING NETWORKS ===
@@ -339,6 +197,9 @@ class HyperNet(AbstractHyperNet):
             self.node_encoder_hv_dicts,
             bind_fn=self.bind_fn,
         )
+        
+    # -- encoding
+    # These methods handle the encoding of the graph structures into the graph embedding vector
     
     def encode_properties(self, data: Data) -> Data:
         """
@@ -422,29 +283,62 @@ class HyperNet(AbstractHyperNet):
             
         return data
     
-    def forward(self, data: Data) -> dict:
+    def forward(self, 
+                data: Data,
+                bidirectional: bool = True,
+                ) -> dict:
+        """
+        Performs a forward pass on the given PyG ``data`` object which represents a batch of graphs. Primarily 
+        this method will encode the graphs into high-dimensional graph embedding vectors.
         
+        :param data: The PyG Data object that represents the batch of graphs.
+        
+        :returns: A dict with string keys and torch Tensor values. The "graph_embedding" key should contain the
+            high-dimensional graph embedding vectors for the input graphs with shape (batch_size, hidden_dim)
+        """
+        # node_dim: (batch_size * num_nodes)
+        node_dim = data.x.size(0)
+        
+        # ~ mapping node & graph properties as hypervectors
         # The "encoder_properties" method will actually manage the encoding of the node and graph properties of 
         # the graph (as represented by the Data object) into representative 
         # Afterwards, the data object contains the additional properties "data.node_hv" and "data.graph_hv" 
         # which represent the encoded hypervectors for the individual nodes or for the overall graphs respectively.
         data = self.encode_properties(data)
         
+        # ~ handling continuous edge weights
+        # Optionally it is possible for the input graph structures to also define a "edge_weight" property which 
+        # should be a continuous value that represents the weight of the edge. This weight will later be used 
+        # to weight/gate the message passing over the corresponding edge during the message-passing steps.
+        # Specifically, the values in the "edge_weight" property should be the edge weight LOGITS, which will 
+        # later be transformed into a [0, 1] range using the sigmoid function!
+        
         if hasattr(data, 'edge_weight') and data.edge_weight is not None:
             edge_weight = data.edge_weight
         else:
+            # If the given graphs do not define any edge weights we set the default values to 10 for all edges 
+            # because sigmoid(10) ~= 1.0 which will effectively be the same as discrete edges.
             edge_weight = 10 * torch.ones(data.edge_index.shape[1], 1, device=self.device)
             
-        # node_dim: (batch_size * num_nodes)
-        node_dim = data.x.size(0)
+        # ~ handling edge bi-directionality
+        # If the bidirectional flag is given we will duplicate each edge in the input graphs and reverse the 
+        # order of node indices such that each node of each edge is always considered as a source and a target 
+        # for the message passing operation.
+        # Similarly we also duplicate the edge weights such that the same edge weight is used for both edge 
+        # "directions".
+        
+        if bidirectional:
+            edge_index = torch.cat([data.edge_index, data.edge_index[[1, 0]]], dim=1)
+            edge_weight = torch.cat([edge_weight, edge_weight], dim=0)
+        else:
+            edge_index = data.edge_index
+            edge_weight = edge_weight
             
-        edge_index = torch.cat([data.edge_index, data.edge_index[[1, 0]]], dim=1)
-        edge_weight = torch.cat([edge_weight, edge_weight], dim=0)
         # data.edge_index: (2, batch_size * num_edges)
-        # srcs: (batch_size * num_edges)
-        # dsts: (batch_size * num_edges)
         srcs, dsts = edge_index
     
+        # In this data structure we will stack all the intermediate node embeddings for the various message-passing 
+        # depths.
         # node_hv_stack: (num_layers + 1, batch_size * num_nodes, hidden_dim)
         node_hv_stack: torch.Tensor = torch.zeros(
             size=(self.depth + 1, node_dim, self.hidden_dim), 
@@ -452,21 +346,26 @@ class HyperNet(AbstractHyperNet):
         )
         node_hv_stack[0] = data.node_hv
         
+        # ~ message passing
         for layer_index in range(self.depth):
+            # messages are gated with the corresponding edge weights!
             messages = node_hv_stack[layer_index][dsts] * sigmoid(edge_weight)
-            place_holder = scatter(messages, srcs, reduce='sum')
-            #node_hv_stack[layer_index + 1] = self.bind_fn(node_hv_stack[0], place_holder)
-            node_hv_stack[layer_index + 1] = normalize(self.bind_fn(node_hv_stack[0], place_holder))
+            aggregated = scatter(messages, srcs, reduce='sum')
+            node_hv_stack[layer_index + 1] = normalize(self.bind_fn(node_hv_stack[0], aggregated))
         
+        # We calculate the final graph-level embedding as the sum of all the node embeddings over all the various 
+        # message passing depths and as the sum over all the nodes.
         node_hv = node_hv_stack.sum(dim=0)
         readout = scatter(node_hv, data.batch, reduce=self.pooling)
         embedding = readout
         
         return {
+            
             # This the main result of the forward pass which is the individual graph embedding vectors of the 
             # input graphs.
             # graph_embedding: (batch_size, hidden_dim)
             'graph_embedding': embedding,
+            
             # As additional information that might be useful we also pass the stack of the node embeddings across
             # the various convolutional depths.
             # node_hv_stack: (batch_size * num_nodes, num_layers + 1, hidden_dim)
@@ -474,16 +373,53 @@ class HyperNet(AbstractHyperNet):
         }
         
     # -- decoding
+    # These methods handle the inverse operation -> The decoding of the graph embedding vectors back into 
+    # the original graph structure.
         
     def decode_order_zero(self, 
                           embedding: torch.Tensor
                           ) -> List[dict]:
+        """
+        Returns information about the kind and number of nodes (order zero information) that were contained in 
+        the original graph represented by the given ``embedding`` vector.
         
+        **Node Decoding**
+        
+        The aim of this method is to reconstruct the information about what kinds of nodes existed in the original 
+        graph based on the given graph embedding vector ``embedding``. The way in which this works is that for 
+        every possible combination of node properties we know the corresponding base hypervector encoding which 
+        is stored in the self.node_hv_combinations data structure. Multiplying each of these node hypervectors 
+        with the final graph embedding is essentially a projection along that node type's dimension. The magnitude
+        of this projection should be proportional to the number of times that node type was present in the original
+        graph.
+        
+        Therefore, we iterate over all the possible node property combinations and calculate the projection of the
+        graph embedding along the direction of the node hypervector. If the magnitude of this projection is non-zero
+        we can assume that this node type was present in the original graph and we derive the number of times it was
+        present from the magnitude of the projection.
+        
+        :returns: A list of constraints where each constraint is represented by a dictionary with the keys:
+            - src: A dictionary that represents the properties of the node as they were originally encoded 
+              by the node encoders. The keys in this dict are the same as the names of the node encoders 
+              given to the constructor.
+            - num: The integer number of how many of these nodes are present in the graph.
+        """
+        
+        # In this list we'll store the final decoded constraints about which kinds of nodes are present in the 
+        # graph. Each constraints is represented as a dictionary which contains information about which kind of 
+        # node is present (as a combination of node properties) and how many of these nodes are present.
         constraints_order_zero: List[Dict[str, dict]] = []
         for comb_dict, hv in self.node_hv_combinations:
+            
+            # By multiplying the embedding with the specific node hypervector we essentially calculate the
+            # projection of the graph along the direction of the node. This projection should be proportional 
+            # to the number of times that a node of that specific type was included in the original graph.
             value = torch.dot(hv, embedding.squeeze()).detach().item()
             if np.round(value) > 0:
-                result_dict = {'src': comb_dict.copy(), 'num': round(value)}
+                result_dict = {
+                    'src': comb_dict.copy(), 
+                    'num': round(value)
+                }
                 constraints_order_zero.append(result_dict)
                 
         return constraints_order_zero
@@ -498,8 +434,45 @@ class HyperNet(AbstractHyperNet):
                              3: 1.0,
                          }
                          ) -> List[dict]:
+        """
+        Returns information about the kind and number of edges (order one information) that were contained in the
+        original graph represented by the given ``embedding`` vector.
         
+        **Edge Decoding**
+        
+        The aim of this method is to reconstruct the first order information about what kinds of edges existed in 
+        the original graph based on the given graph embedding vector ``embedding``. The way in which this works is
+        that we already get the zero oder constraints (==informations about which nodes are present) passed as an 
+        argument. Based on that we construct all possible combinations of node pairs (==edges) and calculate the 
+        corresponding binding of the hypervector representations. Then we can multiply each of these edge hypervectors
+        with the final graph embedding to get a projection along that edge type's dimension. The magnitude of this
+        projection should be proportional to the number of times that edge type was present in the original graph 
+        (except for a correction factor).
+        
+        Therefore, we iterate over all the possible node pairs and calculate the projection of the graph embedding
+        along the direction of the edge hypervector. If the magnitude of this projection is non-zero we can assume
+        that this edge type was present in the original graph and we derive the number of times it was present from
+        the magnitude of the projection.
+        
+        :param embedding: The high-dimensional graph embedding vector that represents the graph.
+        :param constraints_order_zero: The list of constraints that represent the zero order information about the
+            nodes that were present in the original graph.
+        :param correction_factor_map: A dictionary that contains correction factors for the number of shared core
+            properties between the nodes that constitute the edge. The keys are the number of shared core properties
+            and the values are the correction factors that should be applied to the calculated edge count.
+            
+        :returns: A list of constraints where each constraint is represented by a dictionary with the keys:
+            - src: A dictionary that represents the properties of the source node as they were originally encoded
+                by the node encoders. The keys in this dict are the same as the names of the node encoders given to
+                the constructor.
+            - dst: A dictionary that represents the properties of the destination node as they were originally
+                encoded by the node encoders. The keys in this dict are the same as the names of the node encoders
+                given to the constructor.
+            - num: The integer number of how many of these edges are present in the graph.
+        """
         constraints_order_one: List[Dict[str, dict]] = []
+        # The "product" here will give us all the possible combinations between the zero order constraints
+        # (==nodes) thus giving us all the possible edges that could have existed in the original graph.
         for const_i, const_j in product(constraints_order_zero, repeat=2):
             
             # Here we calculate how many core properties are shared between the two nodes that 
@@ -509,6 +482,8 @@ class HyperNet(AbstractHyperNet):
             # etc.
             num_shared: int = len(set(const_i['src'].keys()) & set(const_j['src'].keys()))
             
+            # We can query the corresponding hypervector representations for the two nodes that
+            # constitute the edge from the node_hv_combinations data structure.
             hv_i = self.node_hv_combinations.get(const_i['src'])
             hv_j = self.node_hv_combinations.get(const_j['src'])
 
@@ -520,23 +495,23 @@ class HyperNet(AbstractHyperNet):
                 result_dict = {
                     'src': const_i['src'].copy(), 
                     'dst': const_j['src'].copy(),
-                    'num': np.round(value)
+                    'num': round(value)
                 }
                 constraints_order_one.append(result_dict)
                 
         return constraints_order_one
     
     # -- saving and loading
-    # methods that 
+    # methods that handle the storage of the HyperNet instance to and from a file.
     
-    def save_to_path(self, path: str):
+    def save_to_path(self, path: str) -> None:
         """
         Saves the current state of the current instance to the given ``path`` using jsonpickle.
         
         :param path: The absolute path to the file where the instance should be saved. Will overwrite
             if the file already exists.
         
-        :returns:
+        :returns: None
         """
         data = {
             'attributes': {
@@ -554,7 +529,7 @@ class HyperNet(AbstractHyperNet):
             content = jsonpickle.dumps(data)
             file.write(content)
     
-    def load_from_path(self, path: str):
+    def load_from_path(self, path: str) -> None:
         """
         Given the absolute string ``path`` to an existing file, this will load the saved state that 
         has been saved using the "save_to_path" method. This will overwrite the values of the 

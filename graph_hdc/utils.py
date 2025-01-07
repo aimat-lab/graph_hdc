@@ -12,6 +12,7 @@ from typing import List, Any, Dict, Tuple, Optional, Callable
 import torch
 import click
 import jinja2 as j2
+import numpy as np
 import networkx as nx
 import jsonpickle
 import jsonpickle.ext.numpy as jsonpickle_numpy
@@ -38,6 +39,159 @@ TEMPLATE_ENV.globals.update(**{
 NULL_LOGGER = logging.Logger('NULL')
 NULL_LOGGER.addHandler(logging.NullHandler())
 
+# == HYPERVECTOR UTILS ==
+
+class AbstractEncoder:
+    """
+    Abstract base class for the property encoders. An encoder class is used to encode individual properties 
+    of graph elements (nodes, edges, etc.) into a high-dimensional hypervector representation.
+    
+    Specific subclasses should implement the ``encode`` and ``decode`` methods to encode and decode the 
+    property to and from a high-dimensional hypervector representation.
+    """
+    
+    def __init__(self,
+                 dim: int,
+                 seed: Optional[int] = None,
+                 ):
+        self.dim = dim
+        self.seed = seed
+    
+    # Turns whatever property into a random tensor
+    def encode(self, value: Any) -> torch.Tensor:
+        """
+        This method takes the property ``value`` and encodes it into a high-dimensional hypervector 
+        as a torch.Tensor.
+        This method should be implemented by the specific subclasses.
+        """
+        raise NotImplementedError()
+    
+    # Turns the random tensor back into whatever the original property was
+    def decode(self, hv: torch.Tensor) -> Any:
+        """
+        This method takes the hypervector ``hv`` and decodes it back into the original property.
+        This method should be implemented by the specific subclasses.
+        """
+        raise NotImplementedError()
+    
+    # Returns a dictionary representation of the encoder mapping
+    def get_encoder_hv_dict(self) -> Dict[Any, torch.Tensor]:
+        """
+        This method should return a dictionary representation of the encoder mapping where the keys 
+        are the properties that are being encoded and the values are hypervector representations 
+        that are used to represent the corresponding property values.
+        
+        Note that the keys of the dict should be values that are returned by the "decode" method and 
+        the values should be valid values returned by the "encode" method.
+        """
+        raise NotImplementedError()
+    
+    
+    
+class CategoricalOneHotEncoder(AbstractEncoder):
+    """
+    This specific encoder is used to encode categorical properties given as a one-hot encoding vector
+    into a high-dimensional hypervector. This is done by creating random continuous base vectors for 
+    each of the categories and then selecting the corresponding base vector by the index of the one-hot
+    encoding. The decoding is done by calculating the base vector with the smallest distance to the
+    the given hypervector and returning the corresponding category index.
+    
+    :param dim: The dimensionality of the hypervectors.
+    :param num_categories: The number of categories that can be encoded.
+    :param seed: The random seed to use for the generation of the base vectors. Default is None, but 
+        can be set for reproducibility.
+    """
+    
+    def __init__(self,
+                 dim: int,
+                 num_categories: int,
+                 seed: Optional[int] = None,
+                 ):
+        AbstractEncoder.__init__(self, dim, seed)
+        self.num_categories = num_categories
+        
+        random = np.random.default_rng(seed)
+        self.embeddings: torch.Tensor = torch.tensor(random.normal(
+            # This scaling is important to have normalized base vectors
+            loc=0.0,
+            scale=(1.0 / np.sqrt(dim)), 
+            size=(num_categories, dim)
+        ).astype(np.float32))
+    
+    def encode(self, value: Any
+               ) -> torch.Tensor:
+        
+        index = torch.argmax(value)
+        return self.embeddings[index]
+    
+    def decode(self, 
+               hv: torch.Tensor, 
+               distance: str ='euclidean'
+               ) -> Any:
+        
+        if distance == 'euclidean':
+            distances = np.linalg.norm(self.embeddings - hv.numpy(), axis=1)
+            
+        elif distance == 'cosine':
+            similarities = np.dot(self.embeddings, hv.numpy()) / (np.linalg.norm(self.embeddings, axis=1) * np.linalg.norm(hv.numpy()))
+            distances = 1 - similarities
+        
+        else:
+            raise ValueError(f"Unsupported distance metric: {distance}")
+        
+        index = np.argmin(distances)
+        result = tuple(1 if i == index else 0 for i in range(self.num_categories))
+        return result
+    
+    def get_encoder_hv_dict(self) -> Dict[Any, torch.Tensor]:
+        return {
+            tuple(1 if i == index else 0 for i in range(self.num_categories)): hv
+            for index, hv in enumerate(self.embeddings)
+        }
+
+class CategoricalIntegerEncoder(AbstractEncoder):
+    
+    def __init__(self,
+                 dim: int,
+                 num_categories: int,
+                 seed: Optional[int] = None,
+                 ):
+        AbstractEncoder.__init__(self, dim, seed)
+        self.num_categories = num_categories
+        
+        random = np.random.default_rng(seed)
+        self.embeddings: torch.Tensor = torch.tensor(random.normal(
+            # This scaling is important to have normalized base vectors
+            loc=0.0,
+            scale=(1.0 / np.sqrt(dim)), 
+            size=(num_categories, dim),
+        ).astype(np.float32))
+    
+    def encode(self, value: Any) -> torch.Tensor:
+        return self.embeddings[int(value)]
+    
+    def decode(self, 
+               hv: torch.Tensor, 
+               distance: str ='euclidean',
+               ) -> Any:
+        
+        if distance == 'euclidean':
+            distances = np.linalg.norm(self.embeddings - hv.numpy(), axis=1)
+            
+        elif distance == 'cosine':
+            similarities = np.dot(self.embeddings, hv.numpy()) / (np.linalg.norm(self.embeddings, axis=1) * np.linalg.norm(hv.numpy()))
+            distances = 1 - similarities
+        
+        else:
+            raise ValueError(f"Unsupported distance metric: {distance}")
+        
+        return int(np.argmin(distances))
+    
+    def get_encoder_hv_dict(self) -> Dict[Any, torch.Tensor]:
+        return {
+            index: hv
+            for index, hv in enumerate(self.embeddings)
+        }
 
 class HypervectorCombinations:
     
@@ -78,6 +232,7 @@ class HypervectorCombinations:
         for comb_key, value in self.combinations.items():
             comb_dict = {name: key for (name, key) in comb_key}
             yield comb_dict, value
+
 
 # == CLI RELATED ==
 

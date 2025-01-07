@@ -36,18 +36,20 @@ class ColorEncoder(AbstractEncoder):
                  seed: Optional[int] = None,
                  ) -> None:
         AbstractEncoder.__init__(self, dim, seed)
+        self.colors: List[Any] = colors
         
-        # Here we compute a list of colors in rgb format as a tuple (r, g, b)
-        self.colors: List[List[int]] = []
+        # The given "colors" list could be any definition of a color such as a string or a tuple of 
+        # rgb values. We convert all colors to rgb tuples to have a consistent format.
+        self.colors_rgb: List[List[int]] = []
         for color in colors:
             if isinstance(color, str):
-                rgb = mcolors.to_rgb(color)
+                color_rgb = mcolors.to_rgb(color)
             elif isinstance(color, tuple) and len(color) == 3:
-                rgb = color
+                color_rgb = color
             else:
                 raise ValueError(f"Unsupported color format: {color}")
             
-            self.colors.append(rgb)
+            self.colors_rgb.append(color_rgb)
         
         self.num_categories = len(self.colors)
         
@@ -57,11 +59,11 @@ class ColorEncoder(AbstractEncoder):
             loc=0.0,
             scale=(1.0 / np.sqrt(dim)), 
             size=(self.num_categories, dim)
-        ))
+        ).astype(np.float32))
         
     def encode(self, value: Any) -> torch.Tensor:
         value_rgb = np.array(value)
-        distances = [np.linalg.norm(np.array(color) - value_rgb) for color in self.colors]
+        distances = [np.linalg.norm(np.array(color_rgb) - value_rgb) for color_rgb in self.colors_rgb]
         closest_color_index = int(np.argmin(distances))
         return self.embeddings[closest_color_index]
     
@@ -69,6 +71,9 @@ class ColorEncoder(AbstractEncoder):
         distances = [torch.norm(hv - embedding) for embedding in self.embeddings]
         closest_embedding_index = int(torch.argmin(torch.tensor(distances)))
         return self.colors[closest_embedding_index]
+    
+    def get_encoder_hv_dict(self):
+        return dict(zip(self.colors, self.embeddings))
 
 
 def graph_dict_from_color_nx(g: nx.Graph,

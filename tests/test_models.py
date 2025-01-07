@@ -148,7 +148,7 @@ class TestHyperNet:
             
             assert os.path.exists(model_path)
             
-            hyper_net_loaded = HyperNet(100, 2, {})
+            hyper_net_loaded = HyperNet(100, 2, {'1': CategoricalOneHotEncoder(100, 2)})
             hyper_net_loaded.load_from_path(model_path)
             
             assert isinstance(hyper_net_loaded, HyperNet)
@@ -280,7 +280,12 @@ class TestHyperNet:
         assert data.edge_weight.grad is not None
         
     def test_recovering_nodes_from_embedding(self):
-        
+        """
+        Does not test any particular method but generally tests the method by which it should be possible 
+        to recover/decode individual nodes from the overall graph embedding. This should work by multiplying 
+        the graph embedding with the node encodings and if the result is close to zero, then the node was 
+        not present, otherwise the result should be proportional to the number of times the node was present.
+        """
         # setting up model
         dim = 10_000
         encoder = CategoricalIntegerEncoder(dim, 5)
@@ -329,7 +334,11 @@ class TestHyperNet:
         print('edges', matmul_result)
         
     def test_decode_order_zero(self):
-        
+        """
+        The decode_order_zero method should return a number of constraints which define the types of nodes that were
+        part of the original graph and also the node properties and the number of times a node of that type was
+        present.
+        """
         # setting up model
         dim = 10_000
         encoder = CategoricalIntegerEncoder(dim, 5)
@@ -372,7 +381,10 @@ class TestHyperNet:
         assert constraints == target_constraints
         
     def test_decode_order_one(self):
-        
+        """
+        The decode_order_one method should return a number of constraints which define the kinds of edges that were
+        part of the original graph and the number of how many of that type of edge exists.
+        """
         # setting up model
         dim = 10_000
         encoder = CategoricalIntegerEncoder(dim, 5)

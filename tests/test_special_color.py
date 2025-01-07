@@ -5,6 +5,7 @@ import torch
 import networkx as nx
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
+from rich.pretty import pprint
 from torch.nn.functional import normalize, sigmoid
 from torch_geometric.utils import scatter
 from torch_geometric.loader import DataLoader
@@ -282,7 +283,44 @@ class TestColorGraphs:
         fig_path = os.path.join(ARTIFACTS_PATH, 'optimized_graph_comparison.png')
         fig.savefig(fig_path)
         
+    def test_decode_color_graph(self):
         
+        # Generate the original graph
+        colors = ['red', 'green', 'blue']
+        g: nx.Graph = generate_random_color_nx(
+            num_nodes=4,
+            num_edges=5,
+            colors=colors,
+            seed=42,
+        )
+        graph = graph_dict_from_color_nx(g)
+        
+        # Setup the encoder hyper net
+        dim = 10_000
+        node_encoder_map = make_color_node_encoder_map(dim, colors=colors)
+        hyper_net = HyperNet(
+            hidden_dim=dim,
+            depth=3,
+            node_encoder_map=node_encoder_map,
+        )
+        
+        # Initial embedding
+        data = next(iter(DataLoader(data_list_from_graph_dicts([graph]), batch_size=1)))
+        result = hyper_net.forward(data)
+        embedding = result['graph_embedding'].detach()
+        
+        # decoding
+        constraints_order_zero = hyper_net.decode_order_zero(
+            embedding=embedding,
+        )
+        constraints_order_one = hyper_net.decode_order_one(
+            embedding=embedding,
+            constraints_order_zero=constraints_order_zero,
+        )
+        print('order zero:')
+        pprint(constraints_order_zero)
+        print('order one:')
+        pprint(constraints_order_one)
         
 
         

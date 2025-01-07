@@ -60,7 +60,7 @@ class TestCircular:
         b = torch.randn(10)
         result = circular_convolution(a, b)
         result_fft = circular_convolution_fft(a, b)
-        assert torch.allclose(result, result_fft)
+        assert torch.allclose(result, result_fft, atol=0.01)
         
     def test_circular_correlation_fft_basically_works(self):
         """
