@@ -13,13 +13,15 @@ from graph_hdc.utils import CategoricalIntegerEncoder
 
 class AtomEncoder(AbstractEncoder):
     
+    periodic_table = GetPeriodicTable()
+    
     def __init__(self,
                  dim: int,
                  atoms: List[Union[str, int]],
                  seed: int = None,
                  ) -> None:
         AbstractEncoder.__init__(self, dim, seed)
-        self.periodic_table = GetPeriodicTable()
+        #self.periodic_table = GetPeriodicTable()
         
         self.dim = dim
         self.atoms: List[int] = [
@@ -30,7 +32,6 @@ class AtomEncoder(AbstractEncoder):
         
         self.atom_index_map = {atom: i for i, atom in enumerate(self.atoms)}
         self.index_atom_map = {i: atom for i, atom in enumerate(self.atoms)}
-        print(self.atom_index_map)
         
         random = np.random.default_rng(seed)
         self.embeddings: torch.Tensor = torch.tensor(random.normal(

@@ -552,3 +552,24 @@ class HyperNet(AbstractHyperNet):
         
         self.bind_fn = resolve_function(data['bind_fn'])
         self.unbind_fn = resolve_function(data['unbind_fn'])
+        
+    @classmethod
+    def load(cls, path: str):
+        """
+        Given the absolute string ``path`` to an existing file, this will load the saved state that 
+        has been saved using the "save_to_path" method. This will overwrite the values of the 
+        current object instance.
+        
+        :param path: The absolute path to the file where a HyperNet instance has previously been 
+            saved to.
+            
+        :returns: A new instance of the HyperNet class with the loaded state.
+        """
+        instance = cls(
+            hidden_dim=100,
+            node_encoder_map={
+                'node': CategoricalOneHotEncoder(dim=100, num_categories=2)
+            }
+        )
+        instance.load_from_path(path)
+        return instance

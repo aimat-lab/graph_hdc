@@ -69,12 +69,17 @@ def process_dataset(e: Experiment,
         dim=e.EMBEDDING_SIZE,
     )
     
+    e.log('creating HyperNet encoder...')
     hyper_net = HyperNet(
         hidden_dim=e.EMBEDDING_SIZE,
         depth=e.NUM_LAYERS,
         device=e.DEVICE,
         node_encoder_map=node_encoder_map,
-    )    
+    )
+    
+    e.log('saving HyperNet encoder to disk...')
+    model_path = os.path.join(e.path, 'hyper_net.pth')
+    hyper_net.save_to_path(model_path)
 
     e.log('encoding molecular graphs as hyperdimensional vectors...')
     graphs: List[dict] = []

@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+from rich.pretty import pprint
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem import rdFingerprintGenerator
@@ -32,6 +33,8 @@ from sklearn.preprocessing import StandardScaler
 #       String identifier that can be used to later on filter the experiment, for example.
 IDENTIFIER: str = '1'
 
+# == DATASET PARAMETERS ==
+
 # :param DATASET_NAME:
 #       The name of the dataset to be used for the experiment. This name is used to download the dataset from the
 #       ChemMatData file share.
@@ -41,8 +44,15 @@ DATASET_NAME: str = 'clintox'
 #       evaluation metrics and the type of the prediction target.
 DATASET_TYPE: str = 'classification'
 # :param NUM_TEST:
-#       The number of test samples to be used for the evaluation of the models.
+#       The number of test samples to be used for the evaluation of the models. This parameter can be either an integer
+#       or a float between 0 and 1. In case of an integer we use it as the number of test samples to be used, in case of
+#       a float we use it as the fraction of the dataset to be used as test samples.
 NUM_TEST: Union[int, float] = 100
+# :param NUM_TRAIN:
+#       The number of training samples to be used for the training of the models. This parameter can be either an integer
+#       or a float between 0 and 1. In case of an integer we use it as the number of training samples to be used, in case
+#       of a float we use it as the fraction of the dataset to be used as training samples.
+NUM_TRAIN: Union[int, float] = 1.0
 # :param NUM_VAL:
 #       The number of validation samples to be used for the evaluation of the models during training.
 NUM_VAL: int = 10
@@ -144,7 +154,17 @@ def dataset_split(e: Experiment,
     val_indices = random.sample(indices, k=e.NUM_VAL)
     indices = list(set(indices) - set(val_indices))
     
-    train_indices = indices
+    # We accept NUM_TRAIN here to be either an integer or a float between 0 and 1
+    # in case of an integer we use it as the number of training samples to be used
+    # in case of a float we use it as the fraction of the dataset to be used as training samples.
+    # We then sub-sample the training indices from the remaining indices.
+    if isinstance(e.NUM_TRAIN, int):
+        num_train = e.NUM_TRAIN
+    elif isinstance(e.NUM_TRAIN, float):
+        num_train = int(e.NUM_TRAIN * len(indices))
+    
+    train_indices = random.sample(indices, k=num_train)
+    
     return train_indices, val_indices, test_indices
     
     
@@ -418,6 +438,16 @@ def train_model__support_vector(e: Experiment,
         model.fit(X_train, y_train)
         return model
 
+@experiment.hook('predict_model', replace=False, default=True)
+def predict_model(e: Experiment,
+                  index_data_map: dict,
+                  model: Any,
+                  indices: list[int],
+                  ) -> np.ndarray:
+    X = np.array([index_data_map[i]['graph_features'] for i in indices])
+    y_pred = model.predict(X)
+    return y_pred
+
     
 @experiment.hook('evaluate_model', replace=False, default=True)
 def evaluate_model(e: Experiment,
@@ -429,10 +459,13 @@ def evaluate_model(e: Experiment,
                    **kwargs,
                    ) -> None:
 
-    X_eval = np.array([index_data_map[i]['graph_features'] for i in indices])
     y_eval = np.array([index_data_map[i]['graph_labels'] for i in indices])
-    
-    y_pred = model.predict(X_eval)
+    y_pred = e.apply_hook(
+        'predict_model',
+        index_data_map=index_data_map,
+        model=model,
+        indices=indices,
+    )
     
     if e.DATASET_TYPE == 'classification':
         
@@ -520,6 +553,10 @@ def experiment(e: Experiment):
     index_data_map, metadata = e.apply_hook(
         'load_dataset',
     )
+    
+    example_graph = next(iter(index_data_map.values()))
+    e.log('example graph:')
+    pprint(example_graph)
     
     e.log('determine the graph labels...')
     for index, graph in index_data_map.items():
