@@ -9,12 +9,13 @@ FOLDER_PATH="/media/ssd/Programming/graph_hdc"
 EXPERIMENTS_PATH="${FOLDER_PATH}/graph_hdc/experiments/fingerprints"
 PYTHON_PATH="${FOLDER_PATH}/venv/bin/python"
 
-identifier="a"
+identifier="z"
 num_test="0.9"
 size="2048"
 depth="3"
-datasets=("aqsoldb")
-seeds=("1" "2")
+datasets=("aqsoldb" "qm9_smiles" "clogp" "bbbp" "bace" "ames")
+#seeds=("1" "2" "3" "4" "5")
+seeds=("1")
 
 # ~ Fingerprints
 # For fingerprints we want to start experiments for all the different datasets and for 
