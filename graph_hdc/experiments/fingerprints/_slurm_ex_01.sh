@@ -28,10 +28,10 @@ for s in "${seeds[@]}"; do
 sbatch \
     --job-name=ex_01_fp \
     --mem=90GB \
-    --time=01:00:00 \
+    --time=03:00:00 \
     --wrap="${PYTHON_PATH} ${EXPERIMENTS_PATH}/predict_molecules__fp__${d}.py \\
         --__DEBUG__=\"False\" \\
-        --__PREFIX__=\"'ex_01_fp_${identifier}'\" \\
+        --__PREFIX__=\"'${identifier}'\" \\
         --SEED=\"${s}\" \\
         --IDENTIFIER=\"'${identifier}'\" \\
         --NUM_TEST=\"${num_test}\" \\
@@ -50,10 +50,10 @@ for s in "${seeds[@]}"; do
 sbatch \
     --job-name=ex_01_hdc \
     --mem=90GB \
-    --time=01:00:00 \
+    --time=03:00:00 \
     --wrap="${PYTHON_PATH} ${EXPERIMENTS_PATH}/predict_molecules__hdc__${d}.py \\
         --__DEBUG__=\"False\" \\
-        --__PREFIX__=\"'ex_01_hdc_${identifier}'\" \\
+        --__PREFIX__=\"'${identifier}'\" \\
         --SEED=\"${s}\" \\
         --IDENTIFIER=\"'${identifier}'\" \\
         --NUM_TEST=\"${num_test}\" \\
@@ -70,12 +70,12 @@ done
 for d in "${datasets[@]}"; do
 for s in "${seeds[@]}"; do
 sbatch \
-    --job-name=ex_01_hdc \
+    --job-name=ex_01_gnn \
     --mem=90GB \
-    --time=01:00:00 \
+    --time=03:00:00 \
     --wrap="${PYTHON_PATH} ${EXPERIMENTS_PATH}/predict_molecules__gnn__${d}.py \\
         --__DEBUG__=\"False\" \\
-        --__PREFIX__=\"'ex_01_hdc_${identifier}'\" \\
+        --__PREFIX__=\"'${identifier}'\" \\
         --SEED=\"${s}\" \\
         --IDENTIFIER=\"'${identifier}'\" \\
         --NUM_TEST=\"${num_test}\" \\

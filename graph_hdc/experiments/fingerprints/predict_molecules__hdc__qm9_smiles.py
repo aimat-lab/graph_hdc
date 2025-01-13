@@ -7,7 +7,7 @@ from pycomex.utils import folder_path, file_namespace
 # :param DATASET_NAME:
 #       The name of the dataset to be used for the experiment. This name is used to download the dataset from the
 #       ChemMatData file share.
-DATASET_NAME: str = 'aqsoldb'
+DATASET_NAME: str = 'qm9_smiles'
 # :param DATASET_TYPE:
 #       The type of the dataset, either 'classification' or 'regression'. This parameter is used to determine the
 #       evaluation metrics and the type of the prediction target.

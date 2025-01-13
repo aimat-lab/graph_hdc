@@ -13,8 +13,7 @@ DATASET_NAME: str = 'aqsoldb'
 DATASET_TYPE: str = 'regression'
 # :param NUM_TEST:
 #       The number of test samples to be used for the evaluation of the models.
-NUM_TEST: int = 1000
-
+NUM_TEST: int = 0.1
 
 # == EXPERIMENT PARAMETERS ==
 

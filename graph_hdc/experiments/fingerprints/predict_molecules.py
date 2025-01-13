@@ -47,7 +47,7 @@ DATASET_TYPE: str = 'classification'
 #       The number of test samples to be used for the evaluation of the models. This parameter can be either an integer
 #       or a float between 0 and 1. In case of an integer we use it as the number of test samples to be used, in case of
 #       a float we use it as the fraction of the dataset to be used as test samples.
-NUM_TEST: Union[int, float] = 100
+NUM_TEST: Union[int, float] = 0.1
 # :param NUM_TRAIN:
 #       The number of training samples to be used for the training of the models. This parameter can be either an integer
 #       or a float between 0 and 1. In case of an integer we use it as the number of training samples to be used, in case
@@ -55,7 +55,7 @@ NUM_TEST: Union[int, float] = 100
 NUM_TRAIN: Union[int, float] = 1.0
 # :param NUM_VAL:
 #       The number of validation samples to be used for the evaluation of the models during training.
-NUM_VAL: int = 10
+NUM_VAL: int = 0.1
 # :param SEED:
 #       The random seed to be used for the experiment.
 SEED: int = 1
@@ -151,7 +151,12 @@ def dataset_split(e: Experiment,
     test_indices = random.sample(indices, k=num_test)
     indices = list(set(indices) - set(test_indices))
     
-    val_indices = random.sample(indices, k=e.NUM_VAL)
+    if isinstance(e.NUM_VAL, int):
+        num_val = e.NUM_VAL
+    elif isinstance(e.NUM_VAL, float):
+        num_val = int(e.NUM_VAL * len(indices))
+        
+    val_indices = random.sample(indices, k=num_val)
     indices = list(set(indices) - set(val_indices))
     
     # We accept NUM_TRAIN here to be either an integer or a float between 0 and 1
@@ -256,17 +261,19 @@ def train_model__random_forest(e: Experiment,
         'random_state': e.SEED,
     }
     
+    time_start = time.time()
     if e.DATASET_TYPE == 'classification':
         model = MultiOutputClassifier(RandomForestClassifier(**kwargs))
         model.fit(X_train, y_train)
-        
-        return model
     
     elif e.DATASET_TYPE == 'regression':
         model = RandomForestRegressor(**kwargs)
         model.fit(X_train, y_train)
-        
-        return model
+    
+    time_end = time.time()
+    e['train_time/random_forest'] = time_end - time_start    
+    
+    return model
     
     
 @experiment.hook('train_model__grad_boost', replace=False, default=True)
@@ -288,13 +295,12 @@ def train_model__grad_boost(e: Experiment,
         'random_state': e.SEED,
     }
     
+    time_start = time.time()
     if e.DATASET_TYPE == 'classification':
         model = ClassifierChain(GradientBoostingClassifier(
             **kwargs,
         ))
         model.fit(X_train, y_train)
-        
-        return model
     
     if e.DATASET_TYPE == 'regression':
         model = GradientBoostingRegressor(
@@ -302,7 +308,10 @@ def train_model__grad_boost(e: Experiment,
         )
         model.fit(X_train, y_train)
         
-        return model
+    time_end = time.time()
+    e['train_time/grad_boost'] = time_end - time_start
+
+    return model
 
     
 @experiment.hook('train_model__k_neighbors', replace=False, default=True)
@@ -319,6 +328,7 @@ def train_model__k_neighbors(e: Experiment,
         'n_neighbors': 7,
     }
     
+    time_start = time.time()
     if e.DATASET_TYPE == 'classification':
         model = MultiOutputClassifier(KNeighborsClassifier(**kwargs))
         model.fit(X_train, y_train)
@@ -331,6 +341,12 @@ def train_model__k_neighbors(e: Experiment,
         
         return model
     
+    time_end = time.time()
+    e['train_time/k_neighbors'] = time_end - time_start
+    
+    return model
+    
+
 @experiment.hook('train_model__gaussian_process', replace=False, default=True)
 def train_model__gaussian_process(e: Experiment,
                                   index_data_map: dict,
@@ -374,17 +390,21 @@ def train_model__neural_net(e: Experiment,
         'alpha': 0.1,
     }
     
+    time_start = time.time()
     if e.DATASET_TYPE == 'classification':
         
         model = MultiOutputClassifier(MLPClassifier(**kwargs))
         model.fit(X_train, y_train)
-        return model
     
     elif e.DATASET_TYPE == 'regression':
         
         model = MLPRegressor(**kwargs)
         model.fit(X_train, y_train)
-        return model
+
+    time_end = time.time()
+    e['train_time/neural_net'] = time_end - time_start
+    
+    return model
     
 
 @experiment.hook('train_model__linear', replace=False, default=True)
@@ -397,17 +417,21 @@ def train_model__linear(e: Experiment,
     X_train = np.array([index_data_map[i]['graph_features'] for i in train_indices])
     y_train = np.array([index_data_map[i]['graph_labels'] for i in train_indices])
     
+    time_start = time.time()
     if e.DATASET_TYPE == 'classification':
         
         model = MultiOutputClassifier(LogisticRegression())
         model.fit(X_train, y_train)
-        return model
     
     elif e.DATASET_TYPE == 'regression':
         
         model = LinearRegression()
         model.fit(X_train, y_train)
-        return model
+
+    time_end = time.time()
+    e['train_time/linear'] = time_end - time_start
+
+    return model
 
 
 @experiment.hook('train_model__support_vector', replace=False, default=True)
@@ -426,17 +450,21 @@ def train_model__support_vector(e: Experiment,
         'max_iter': 250,
     }
     
+    time_start = time.time()
     if e.DATASET_TYPE == 'classification':
         
         model = MultiOutputClassifier(SVC(**kwargs))
         model.fit(X_train, y_train)
-        return model
     
     elif e.DATASET_TYPE == 'regression':
         
         model = SVR(**kwargs)
         model.fit(X_train, y_train)
-        return model
+    
+    time_end = time.time()
+    e['train_time/support_vector'] = time_end - time_start
+    return model
+
 
 @experiment.hook('predict_model', replace=False, default=True)
 def predict_model(e: Experiment,
@@ -473,9 +501,9 @@ def evaluate_model(e: Experiment,
         labels_eval = np.array([np.argmax(y) for y in y_eval])
         
         # ~ simple metrics
-        acc_value = accuracy_score(y_eval, y_pred)
-        f1_value = f1_score(y_eval, y_pred, average='macro')
-        ap_value = average_precision_score(y_eval, y_pred, average='macro')
+        acc_value = accuracy_score(labels_eval, labels_pred)
+        f1_value = f1_score(labels_eval, labels_pred, average='macro')
+        ap_value = average_precision_score(labels_eval, labels_pred, average='macro')
         e[f'metrics/{key}/acc'] = acc_value
         e[f'metrics/{key}/f1'] = f1_value
         e[f'metrics/{key}/ap'] = ap_value

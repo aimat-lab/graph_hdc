@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -15,6 +16,8 @@ from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 from chem_mat_data.processing import MoleculeProcessing, OneHotEncoder
 from rdkit import Chem
+from torchmetrics import R2Score
+from torchmetrics import Accuracy, F1Score
 from torch_geometric.nn import GCNConv, GCN2Conv
 from torch_geometric.nn import GINConv
 from torch_geometric.nn import GATv2Conv
@@ -31,11 +34,11 @@ from chem_mat_data.main import pyg_data_list_from_graphs
 # :param DATASET_NAME:
 #       The name of the dataset to be used for the experiment. This name is used to download the dataset from the
 #       ChemMatData file share.
-DATASET_NAME: str = 'aqsoldb'
+DATASET_NAME: str = 'bace'
 # :param DATASET_TYPE:
 #       The type of the dataset, either 'classification' or 'regression'. This parameter is used to determine the
 #       evaluation metrics and the type of the prediction target.
-DATASET_TYPE: str = 'regression'
+DATASET_TYPE: str = 'classification'
 
 # == MODEL PARAMETERS ==
 
@@ -61,7 +64,7 @@ BATCH_SIZE: int = 32
 # :param EPOCHS:
 #       The number of epochs to be used for the training of the model. This parameter determines the number of
 #       times the model will be trained on the entire dataset.
-EPOCHS: int = 25
+EPOCHS: int = 100
 # :param LEARNING_RATE:
 #       The learning rate to be used for the training of the model. This parameter determines the step size that
 #       is used to update the model parameters during training.
@@ -69,8 +72,8 @@ LEARNING_RATE: float = 1e-3
 # :param DEVICE:
 #       The device to be used for the training of the model. This parameter can be set to 'cuda:0' to use the
 #       GPU for training, or to 'cpu' to use the CPU.
-#DEVICE: str = "cuda:0" if torch.cuda.is_available() else "cpu"
-DEVICE: str = "cpu"
+DEVICE: str = "cuda:0" if torch.cuda.is_available() else "cpu"
+#DEVICE: str = "cpu"
 
 # == VISUALIZATION PARAMETERS ==
 
@@ -81,15 +84,85 @@ PLOT_UMAP: bool = False
 
 # == GNN MODELS ==
 
+class BestModelRestorer(pl.Callback):
+    
+    def __init__(self, monitor: str = "val_loss", mode: str = "min"):
+        """
+        Args:
+            monitor: Metric name to monitor (e.g. 'val_loss').
+            mode: One of {'min', 'max'}. In 'min' mode, training seeks to minimize the monitored quantity,
+                  in 'max' mode it seeks to maximize it.
+        """
+        super().__init__()
+        self.monitor = monitor
+        if mode not in ["min", "max"]:
+            raise ValueError("mode must be 'min' or 'max'.")
+        self.mode = mode
+
+        self.best_score = None
+        self.best_state_dict = None
+        self.best_time = None
+
+    def on_fit_start(self, trainer, pl_module):
+        """Initialize the best score before starting the fit."""
+        if self.mode == "min":
+            self.best_score = float("inf")
+        else:
+            self.best_score = -float("inf")
+        self.best_state_dict = None
+
+    def on_validation_end(self, trainer, pl_module):
+        """
+        Called at the end of the validation loop. We check whether the monitored metric improved
+        and if so, store the model state dict and log the improvement.
+        """
+        metrics = trainer.callback_metrics
+        current_score = metrics.get(self.monitor)
+
+        if current_score is None:
+            # Metric not found, cannot update best score
+            return
+
+        if (
+            (self.mode == "min" and current_score < self.best_score) or
+            (self.mode == "max" and current_score > self.best_score)
+        ):
+            # Update best score and store model weights
+            self.best_score = current_score
+            self.best_state_dict = {
+                k: v.cpu() for k, v in pl_module.state_dict().items()
+            }
+            self.best_time = time.time()
+
+            # Log the new best score (if the logger is available)
+            if trainer.logger is not None:
+                trainer.logger.log_metrics({f"best_{self.monitor}": current_score}, step=trainer.global_step)
+                
+            # You could also print a message if desired:
+            trainer.print(
+                f"New best {self.monitor}={current_score:.4f} at step={trainer.global_step}."
+            )
+
+    def on_train_end(self, trainer, pl_module):
+        """At the end of training, restore the model to the best recorded state."""
+        if self.best_state_dict is not None:
+            pl_module.load_state_dict(self.best_state_dict)
+            trainer.print(
+                f"Restored the best model with {self.monitor}={self.best_score:.4f}."
+            )
+
 
 class GnnModel(pl.LightningModule):
     
     def __init__(self,
                  output_type: Literal['classification', 'regression'],
+                 output_dim: int,
                  learning_rate: float = 1e-4,
                  **kwargs):
+        
         super().__init__(**kwargs)
         self.output_type = output_type
+        self.output_dim = output_dim
         self.learning_rate = learning_rate
         
         self.lay_act = nn.LeakyReLU()
@@ -99,6 +172,15 @@ class GnnModel(pl.LightningModule):
             self.loss = nn.CrossEntropyLoss()
         elif output_type == 'regression':
             self.loss = nn.MSELoss()
+            
+        if self.output_type == 'regression':
+            self.metric = R2Score()
+        elif self.output_type == 'classification':
+            self.metric = Accuracy(
+                task='multiclass', 
+                num_classes=output_dim, 
+                top_k=1
+            )
     
     def training_step(self, data, batch_idx):
         """
@@ -117,6 +199,34 @@ class GnnModel(pl.LightningModule):
         # Log training loss
         self.log('train_loss', loss, prog_bar=True, on_epoch=True)
         return loss
+    
+    def validation_step(self, data, batch_idx):
+        """
+        Validation step for the GIN model.
+
+        :param data: A batch of graph data.
+        :param batch_idx: The index of the batch.
+        :return: The validation loss for the batch.
+        """
+        # Forward pass
+        output = self(data)
+        target = data.y.view(output.shape)
+
+        # Compute loss
+        loss = self.loss(output, data.y.view(output.shape))
+        # Log validation loss
+        self.log('val_loss', loss, prog_bar=True, on_epoch=True)
+        
+        if self.output_type == 'regression':
+            metric = self.metric(output, target)
+        elif self.output_type == 'classification':
+            output = torch.softmax(output, dim=1)
+            labels = torch.argmax(target, dim=1)
+            metric = self.metric(output, labels)
+
+        self.log('val_metric', metric, prog_bar=True, on_epoch=True)
+
+        return loss
 
     def configure_optimizers(self):
         """
@@ -134,12 +244,16 @@ class GnnModel(pl.LightningModule):
         :return: A list of callbacks to be used during training.
         """
         early_stopping = pl.callbacks.EarlyStopping(
-            monitor='train_loss',
-            mode='min',
-            patience=3,
+            monitor='val_metric',
+            mode='max',
+            patience=10,
             verbose=True
         )
-        return [early_stopping]
+        self.model_restorer = BestModelRestorer(
+            monitor='val_metric',
+            mode='max'
+        )
+        return [self.model_restorer]
 
 
 class GcnModel(GnnModel):
@@ -166,7 +280,11 @@ class GcnModel(GnnModel):
         :param conv_units: A list of integers specifying the number of units in each convolutional layer.
         :param dense_units: A list of integers specifying the number of units in each dense (fully connected) layer.
         """
-        super(GcnModel, self).__init__(output_type=output_type, learning_rate=learning_rate)
+        super(GcnModel, self).__init__(
+            output_type=output_type,
+            output_dim=output_dim,
+            learning_rate=learning_rate
+        )
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.conv_units = conv_units
@@ -253,7 +371,11 @@ class GinModel(GnnModel):
         :param conv_units: A list of integers specifying the number of units in each convolutional layer.
         :param dense_units: A list of integers specifying the number of units in each dense (fully connected) layer.
         """
-        super(GinModel, self).__init__(output_type=output_type, learning_rate=learning_rate)
+        super(GinModel, self).__init__(
+            output_type=output_type,
+            output_dim=output_dim,
+            learning_rate=learning_rate
+        )
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.conv_units = conv_units
@@ -267,15 +389,13 @@ class GinModel(GnnModel):
         for units in conv_units:
             lay = GINConv(
                 nn.Sequential(
-                    nn.Linear(prev_units, units),
-                    nn.BatchNorm1d(units),
+                    nn.Linear(prev_units, 2 * units),
+                    nn.BatchNorm1d(2 * units),
                     nn.LeakyReLU(),
-                    nn.Linear(units, units),
-                    nn.BatchNorm1d(units),
-                    nn.LeakyReLU(),
-                    nn.Linear(units, units),
+                    nn.Linear(2 * units, units),
+                    nn.Dropout1d(0.1),
                 ),
-                #train_eps=True,
+                train_eps=True,
             )
             self.conv_layers.append(lay)
             prev_units = units
@@ -346,7 +466,11 @@ class Gatv2Model(GnnModel):
         :param conv_units: A list of integers specifying the number of units in each convolutional layer.
         :param dense_units: A list of integers specifying the number of units in each dense (fully connected) layer.
         """
-        super(Gatv2Model, self).__init__(output_type=output_type, learning_rate=learning_rate)
+        super(Gatv2Model, self).__init__(
+            output_type=output_type,
+            output_dim=output_dim,
+            learning_rate=learning_rate
+        )
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.conv_units = conv_units
@@ -434,14 +558,19 @@ def train_model__gcn(e: Experiment,
     is then returned. 
     """
     # Extract the graphs corresponding to the training indices
-    graphs = [index_data_map[i] for i in train_indices]
-    example_graph = graphs[0]
+    graphs_train = [index_data_map[i] for i in train_indices]
+    example_graph = graphs_train[0]
+    
+    # Extract the graphs corresponding to the validation indices
+    graphs_val = [index_data_map[i] for i in val_indices]
     
     # Convert the list of graphs into a list of PyTorch Geometric Data objects
-    data_list: List[Data] = pyg_data_list_from_graphs(graphs)
+    data_list_train: List[Data] = pyg_data_list_from_graphs(graphs_train)
+    data_list_val: List[Data] = pyg_data_list_from_graphs(graphs_val)
     
     # Create a DataLoader to handle batching of the data during training
-    data_loader = DataLoader(data_list, batch_size=BATCH_SIZE, shuffle=True)
+    data_loader_train = DataLoader(data_list_train, batch_size=BATCH_SIZE, shuffle=True)
+    data_loader_val = DataLoader(data_list_val, batch_size=BATCH_SIZE, shuffle=False)
     
     # Initialize the GCN model with the appropriate input and output dimensions
     model = GcnModel(
@@ -454,8 +583,14 @@ def train_model__gcn(e: Experiment,
     )
     
     # Use PyTorch Lightning's Trainer to handle the training loop
+    time_start = time.time()
     trainer = pl.Trainer(max_epochs=e.EPOCHS)
-    trainer.fit(model, data_loader)
+    trainer.fit(model, data_loader_train, data_loader_val)
+    
+    time_end = model.model_restorer.best_time
+    e['train_time/gcn'] = time_end - time_start
+        
+    model.eval()
         
     # Return the trained model
     return model
@@ -475,14 +610,19 @@ def train_model__gin(e: Experiment,
     is then returned. 
     """
     # Extract the graphs corresponding to the training indices
-    graphs = [index_data_map[i] for i in train_indices]
-    example_graph = graphs[0]
+    graphs_train = [index_data_map[i] for i in train_indices]
+    example_graph = graphs_train[0]
+    
+    # Extract the graphs corresponding to the validation indices
+    graphs_val = [index_data_map[i] for i in val_indices]
     
     # Convert the list of graphs into a list of PyTorch Geometric Data objects
-    data_list: List[Data] = pyg_data_list_from_graphs(graphs)
+    data_list_train: List[Data] = pyg_data_list_from_graphs(graphs_train)
+    data_list_val: List[Data] = pyg_data_list_from_graphs(graphs_val)
     
     # Create a DataLoader to handle batching of the data during training
-    data_loader = DataLoader(data_list, batch_size=BATCH_SIZE, shuffle=True)
+    data_loader_train = DataLoader(data_list_train, batch_size=BATCH_SIZE, shuffle=True)
+    data_loader_val = DataLoader(data_list_val, batch_size=BATCH_SIZE, shuffle=False)
     
     # Initialize the GIN model with the appropriate input and output dimensions
     model = GinModel(
@@ -495,8 +635,14 @@ def train_model__gin(e: Experiment,
     )
     
     # Use PyTorch Lightning's Trainer to handle the training loop
+    time_start = time.time()
     trainer = pl.Trainer(max_epochs=e.EPOCHS)
-    trainer.fit(model, data_loader)
+    trainer.fit(model, data_loader_train, data_loader_val)
+        
+    time_end = model.model_restorer.best_time
+    e['train_time/gin'] = time_end - time_start
+        
+    model.eval()
         
     # Return the trained model
     return model
@@ -516,14 +662,19 @@ def train_model__gatv2(e: Experiment,
     is then returned. 
     """
     # Extract the graphs corresponding to the training indices
-    graphs = [index_data_map[i] for i in train_indices]
-    example_graph = graphs[0]
+    graphs_train = [index_data_map[i] for i in train_indices]
+    example_graph = graphs_train[0]
+    
+    # Extract the graphs corresponding to the validation indices
+    graphs_val = [index_data_map[i] for i in val_indices]
     
     # Convert the list of graphs into a list of PyTorch Geometric Data objects
-    data_list: List[Data] = pyg_data_list_from_graphs(graphs)
+    data_list_train: List[Data] = pyg_data_list_from_graphs(graphs_train)
+    data_list_val: List[Data] = pyg_data_list_from_graphs(graphs_val)
     
     # Create a DataLoader to handle batching of the data during training
-    data_loader = DataLoader(data_list, batch_size=BATCH_SIZE, shuffle=True)
+    data_loader_train = DataLoader(data_list_train, batch_size=BATCH_SIZE, shuffle=True)
+    data_loader_val = DataLoader(data_list_val, batch_size=BATCH_SIZE, shuffle=False)
     
     # Initialize the GATv2 model with the appropriate input and output dimensions
     model = Gatv2Model(
@@ -536,8 +687,14 @@ def train_model__gatv2(e: Experiment,
     )
     
     # Use PyTorch Lightning's Trainer to handle the training loop
+    time_start = time.time()
     trainer = pl.Trainer(max_epochs=e.EPOCHS)
-    trainer.fit(model, data_loader)
+    trainer.fit(model, data_loader_train, data_loader_val)
+        
+    time_end = model.model_restorer.best_time
+    e['train_time/gatv2'] = time_end - time_start
+        
+    model.eval()
         
     # Return the trained model
     return model
@@ -569,26 +726,6 @@ def process_dataset(e: Experiment,
     
     for index, data in index_data_map.items():
         data['graph_features'] = np.zeros((e.CONV_UNITS[-1],))
-        
-        
-@experiment.hook('after_dataset', replace=False, default=False)
-def after_dataset(e: Experiment,
-                  index_data_map: dict[int, dict],
-                  **kwargs,
-                  ) -> None:
-    """
-    This hook is executed after the dataset is loaded. It is used to perform any additional processing
-    on the dataset before the experiment is run.
-    ---
-    In this case, we use the RDKit library to calculate the CLogP values for the molecules in the dataset, 
-    since we are using a dataset which does not contain the labels directly.
-    """
-    e.log('calculating CLogP values and replacing targets...')
-    
-    for _, graph in index_data_map.items():
-        smiles = str(graph['graph_repr'])
-        mol = Chem.MolFromSmiles(smiles)
-        graph['graph_labels'] = np.array([MolLogP(mol)])
         
         
 @experiment.hook('after_dataset', replace=False, default=False)

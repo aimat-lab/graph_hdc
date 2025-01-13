@@ -7,7 +7,7 @@ import tempfile
 import random
 import subprocess
 from itertools import product
-from typing import List, Any, Dict, Tuple, Optional, Callable
+from typing import List, Any, Dict, Tuple, Optional, Callable, Union
 
 import torch
 import click
@@ -341,6 +341,83 @@ def random_string(length: int,
 # == LATEX UTILITY ==
 # These functions are meant to provide a starting point for custom latex rendering. That is rendering latex
 # from python strings, which were (most likely) dynamically generated based on some kind of experiment data
+
+def latex_table_element_mean(values: List[float],
+                             template_name: str = 'table_element_mean.tex.j2',
+                             vertical: bool = True,
+                             raw: bool = False,
+                             ) -> str:
+    if raw:
+        mean, std = values
+    else:
+        mean = np.mean(values)
+        std = np.std(values)
+
+    template = TEMPLATE_ENV.get_template(template_name)
+    return template.render(
+        mean=mean,
+        std=std,
+        vertical=vertical
+    )
+
+
+def latex_table_element_median(values: List[float],
+                               upper_quantile: float = 0.75,
+                               lower_quantile: float = 0.25,
+                               include_variance: bool = True,
+                               template_name: str = 'table_element_median.tex.j2') -> str:
+    median = np.median(values)
+    upper = np.quantile(values, upper_quantile)
+    lower = np.quantile(values, lower_quantile)
+
+    template = TEMPLATE_ENV.get_template(template_name)
+    return template.render(
+        median=median,
+        upper=upper,
+        lower=lower,
+        include_variance=include_variance
+    )
+
+
+def latex_table(column_names: List[str],
+                rows: List[Union[List[float], str]],
+                content_template_name: str = 'table_content.tex.j2',
+                table_template_name: str = 'table.tex.j2',
+                list_element_cb: Callable[[List[float]], str] = latex_table_element_mean,
+                prefix_lines: List[str] = [],
+                caption: str = '',
+                ) -> Tuple[str, str]:
+
+    # ~ Pre Processing the row elements into strings
+    string_rows = []
+    for row_index, row in enumerate(rows):
+        string_row = []
+        for element in row:
+            if isinstance(element, str):
+                string_row.append(element)
+            if isinstance(element, list) or isinstance(element, np.ndarray):
+                string = list_element_cb(element)
+                string_row.append(string)
+
+        string_rows.append(string_row)
+
+    alignment = ''.join(['c' for _ in column_names])
+
+    # ~ Rendering the latex template(s)
+
+    content_template = TEMPLATE_ENV.get_template(content_template_name)
+    content = content_template.render(rows=string_rows)
+
+    table_template = TEMPLATE_ENV.get_template(table_template_name)
+    table = table_template.render(
+        alignment=alignment,
+        column_names=column_names,
+        content=content,
+        header='\n'.join(prefix_lines),
+        caption=caption,
+    )
+
+    return content, table
 
 def render_latex(kwargs: dict,
                  output_path: str,
