@@ -57,6 +57,14 @@ class AbstractEncoder:
         self.dim = dim
         self.seed = seed
     
+    # Turn the input value into a unified data format
+    def normalize(self, value: Any) -> Any: 
+        """
+        This method should be implemented by the specific subclasses and is used to normalize the property 
+        value before it is encoded into a hypervector.
+        """
+        return value
+    
     # Turns whatever property into a random tensor
     def encode(self, value: Any) -> torch.Tensor:
         """
@@ -258,6 +266,33 @@ class CsvString(click.ParamType):
             return value.split(',')
 
 # == NETWORKX UTILS ==
+
+
+def shallow_dict_equal(data_1: dict, data_2: dict) -> bool:
+    """
+    This function is used to compare two dictionaries with shallow values. That is, the values of the
+    dictionaries are not dictionaries themselves but simple values. The function will return True if the
+    two dictionaries ``data_1`` and ``data_2` have the same keys and the values are equal.
+    Otherwise False is returned.
+    
+    :param data_1: The first dictionary
+    :param data_2: The second dictionary
+    
+    :return: True if the two dictionaries are equal, otherwise False
+    """
+    # The most rudimentary condition is that both dictionaries have the same keys. If that is not the 
+    # case they can already not be equal
+    if list(data_1.keys()) != list(data_2.keys()):
+        return False
+    
+    # Now we iterate over all the keys and compare the values. If we find a key where the values are not
+    # equal we can return False immediately
+    for key in data_1.keys():
+        if data_1[key] != data_2[key]:
+            return False
+        
+    return True
+
 
 def nx_random_uniform_edge_weight(g: nx.Graph,
                                   lo: float = 0.0,

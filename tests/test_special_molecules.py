@@ -10,6 +10,11 @@ from graph_hdc.special.molecules import graph_dict_from_mol
 from graph_hdc.special.molecules import AtomEncoder
 from graph_hdc.special.molecules import make_molecule_node_encoder_map
 from graph_hdc.models import HyperNet
+import networkx as nx
+import matplotlib.pyplot as plt
+from torch_geometric.loader import DataLoader
+from graph_hdc.graph import data_list_from_graph_dicts
+from .utils import ARTIFACTS_PATH
 
 
 
@@ -151,4 +156,89 @@ class TestMoleculeEncoding():
             
             hyper_net_loaded = HyperNet.load(file_path)
             assert isinstance(hyper_net_loaded, HyperNet)
+            
+    def test_reconstruct_molecule(self):
+        """
+        Test if a molecule graph can be reconstructed from its hypervector.
+        """
+        # Create molecule and obtain its graph dict representation
+        mol = Chem.MolFromSmiles('CCC(N)CCO')
+        graph_dict = graph_dict_from_mol(mol)
         
+        # Setup HyperNet with molecule-specific node encoder map (using atoms available in the molecule)
+        dim = 50_000
+        node_encoder_map = make_molecule_node_encoder_map(dim=dim, atoms=['C', 'N', 'O'])
+        hyper_net = HyperNet(
+            hidden_dim=dim,
+            depth=3,
+            node_encoder_map=node_encoder_map,
+        )
+        
+        # Convert graph dict to PyG data object and compute the graph embedding
+        data_list = data_list_from_graph_dicts([graph_dict])
+        data = next(iter(DataLoader(data_list, batch_size=1)))
+        result = hyper_net.forward(data)
+        graph_embedding = result['graph_embedding']
+        
+        # Reconstruct graph dict from the graph hypervector
+        rec_dict = hyper_net.reconstruct(
+            graph_embedding, 
+            learning_rate=1.0,
+            num_iterations=25,
+            batch_size=10,
+            low=0.0,
+            high=1.0,
+        )
+        
+        # Convert reconstructed graph dict to a networkx graph
+        rec_g = nx.Graph()
+        for node in rec_dict['node_indices']:
+            # Use reconstructed atom info if available, otherwise use a placeholder
+            atom = rec_dict.get('node_atoms', ['?'] * len(rec_dict['node_indices']))[node]
+            rec_g.add_node(node, atom=atom)
+        for edge in rec_dict['edge_indices']:
+            rec_g.add_edge(int(edge[0]), int(edge[1]))
+        
+        # Convert the original graph dict to a networkx graph for visualization
+        orig_g = nx.Graph()
+        for idx, atom in enumerate(graph_dict.get('node_atoms', ['?'] * len(graph_dict.get('node_atoms', [])))):
+            orig_g.add_node(idx, atom=atom)
+        for edge in graph_dict.get('edge_indices', []):
+            orig_g.add_edge(int(edge[0]), int(edge[1]))
+        
+        # Plot original and reconstructed graphs side by side
+        
+        atom_color_map = {
+            6: 'gray',  # Carbon
+            7: 'blue',  # Nitrogen
+            8: 'red',   # Oxygen
+            17: 'green', # Chlorine
+            16: 'yellow', # Sulfur
+            15: 'orange', # Phosphorus
+        }
+        
+        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+        pos_orig = nx.spring_layout(orig_g, seed=42)
+        nx.draw(
+            orig_g, pos_orig, 
+            ax=axs[0], 
+            with_labels=True, 
+            labels={i: atom for i, atom in enumerate(graph_dict['node_atoms'])},
+            node_color=[atom_color_map.get(atom, 'black') for atom in graph_dict['node_atoms']]
+        )
+        axs[0].set_title('Original Molecule Graph')
+        
+        pos_rec = nx.spring_layout(rec_g, seed=42)
+        nx.draw(
+            rec_g, pos_rec, 
+            ax=axs[1], 
+            with_labels=True, 
+            labels={i: atom for i, atom in enumerate(rec_dict['node_atoms'])},
+            node_color=[atom_color_map.get(atom, 'black') for atom in rec_dict['node_atoms']]
+        )
+        axs[1].set_title('Reconstructed Molecule Graph')
+        plt.tight_layout()
+        # Optionally, save figure to a desired artifact path
+        fig_path = os.path.join(ARTIFACTS_PATH, 'reconstructed_molecule_graph.png')
+        plt.savefig(fig_path)
+        plt.close()

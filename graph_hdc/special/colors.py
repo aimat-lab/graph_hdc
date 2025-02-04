@@ -61,7 +61,16 @@ class ColorEncoder(AbstractEncoder):
             size=(self.num_categories, dim)
         ).astype(np.float32))
         
+    def normalize(self, value: Any) -> np.ndarray:
+        
+        if isinstance(value, str):
+            value_rgb = np.array(mcolors.to_rgb(value))
+            return value_rgb
+        
+        return value
+        
     def encode(self, value: Any) -> torch.Tensor:
+            
         value_rgb = np.array(value)
         distances = [np.linalg.norm(np.array(color_rgb) - value_rgb) for color_rgb in self.colors_rgb]
         closest_color_index = int(np.argmin(distances))
@@ -119,7 +128,7 @@ def make_color_node_encoder_map(dim: int,
                                 ) -> dict:
     return {
         'node_color': ColorEncoder(dim, colors),
-        'node_degree': CategoricalIntegerEncoder(dim, 20),
+        'node_degree': CategoricalIntegerEncoder(dim, 10),
     }
 
 

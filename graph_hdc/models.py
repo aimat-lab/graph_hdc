@@ -2,20 +2,22 @@ import os
 import zipfile
 import tempfile
 from itertools import product
-from typing import Dict, Optional, Callable, Any, List
+from typing import Dict, Optional, Callable, Any, List, Tuple, Set
 
 import jsonpickle
 import numpy as np
 import torch
 import pytorch_lightning as pl
+import torch.optim as optim
 from torch.nn.functional import normalize, sigmoid
-from torch_geometric.data import Data
+from torch_geometric.data import Data, Batch
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import scatter
 
 import graph_hdc.utils
 import graph_hdc.binding
 from graph_hdc.utils import torch_pairwise_reduce
+from graph_hdc.utils import shallow_dict_equal
 from graph_hdc.utils import HypervectorCombinations
 from graph_hdc.utils import AbstractEncoder
 from graph_hdc.utils import CategoricalOneHotEncoder
@@ -262,7 +264,7 @@ class HyperNet(AbstractHyperNet):
             # property_value: (batch_size, num_graph_features)
             property_value = getattr(data, graph_property)
             # property_hv: (batch_size, hidden_dim)
-            #property_hv = torch.vmap(encoder.encode, in_dims=0)(property_value)
+            #property_hv = torch.stack([encoder.encode(tens) for tens in property_value])
             property_hv = torch.stack([encoder.encode(tens) for tens in property_value])
             graph_property_hvs.append(property_hv)
             
@@ -318,7 +320,7 @@ class HyperNet(AbstractHyperNet):
         else:
             # If the given graphs do not define any edge weights we set the default values to 10 for all edges 
             # because sigmoid(10) ~= 1.0 which will effectively be the same as discrete edges.
-            edge_weight = 10 * torch.ones(data.edge_index.shape[1], 1, device=self.device)
+            edge_weight = 100 * torch.ones(data.edge_index.shape[1], 1, device=self.device)
             
         # ~ handling edge bi-directionality
         # If the bidirectional flag is given we will duplicate each edge in the input graphs and reverse the 
@@ -351,7 +353,8 @@ class HyperNet(AbstractHyperNet):
             # messages are gated with the corresponding edge weights!
             messages = node_hv_stack[layer_index][dsts] * sigmoid(edge_weight)
             aggregated = scatter(messages, srcs, reduce='sum')
-            node_hv_stack[layer_index + 1] = normalize(self.bind_fn(node_hv_stack[0], aggregated))
+            #node_hv_stack[layer_index + 1] = normalize(self.bind_fn(node_hv_stack[0], aggregated))
+            node_hv_stack[layer_index + 1] = normalize(self.bind_fn(node_hv_stack[layer_index], aggregated))
         
         # We calculate the final graph-level embedding as the sum of all the node embeddings over all the various 
         # message passing depths and as the sum over all the nodes.
@@ -573,3 +576,175 @@ class HyperNet(AbstractHyperNet):
         )
         instance.load_from_path(path)
         return instance
+    
+    def possible_graph_from_constraints(self,
+                                        zero_order_constraints: List[dict],
+                                        first_order_constraints: List[dict],
+                                        ) -> Tuple[dict, list]:
+        
+        # ~ Build node information from constraints list 
+        # This data structure will contain a unique integer node index as the key and the value will 
+        # be the dictionary which contains the node properties that were originally decoded.
+        index_node_map: Dict[int, dict] = {}
+        index: int = 0
+        for nc in zero_order_constraints:
+            num = nc['num']
+            for _ in range(num):
+                index_node_map[index] = nc['src']
+                index += 1
+        
+        # ~ Build edge information from constraints list
+        edge_indices: Set[Tuple[int, int]] = set()
+        for ec in first_order_constraints:
+            src = ec['src']
+            dst = ec['dst']
+            
+            # Now we need to find all the node indices which match the description of the edge source
+            # and destination. This is done by iterating over the index_node_map and checking if the
+            # node properties match the source and destination properties of the edge.
+            # For each matching pair, we insert an edge into the edge_indices list.
+            for i, node_i in index_node_map.items():
+                if shallow_dict_equal(node_i, src):
+                    for j, node_j in index_node_map.items():
+                        if shallow_dict_equal(node_j, dst) and i != j:
+                            hi = max(i, j)
+                            lo = min(i, j)
+                            edge_indices.add((hi, lo))
+                            
+        return index_node_map, list(edge_indices)
+
+    def reconstruct(self, 
+                    graph_hv: torch.Tensor, 
+                    num_iterations: int = 100, 
+                    learning_rate: float = 0.1,
+                    batch_size: int = 20,
+                    low: float = 0.2,
+                    high: float = 0.8) -> dict:
+        """
+        Reconstructs a graph dict representation from the given graph hypervector by first decoding
+        the order constraints for nodes and edges to build an initial guess and then refining the 
+        structure using gradient descent optimization.
+        
+        Now, instead of optimizing a single candidate, a whole batch of candidates are optimized.
+        The edge weights are randomly initialized between low and high and, after optimization,
+        are discretized. The candidate with the best similarity to graph_hv is selected.
+        """
+        # ~ Decode node and edge constraints
+        node_constraints = self.decode_order_zero(graph_hv)
+        edge_constraints = self.decode_order_one(graph_hv, node_constraints)
+        
+        node_keys = list(node_constraints[0]['src'].keys())
+        
+        # Given the node and edge constraints, this method will assemble a first guess of the graph 
+        # structure by inserting all of the nodes that were defined by the node constraints and inserting 
+        # all possible edges that match any of the given edge constraints.
+        index_node_map, edge_indices = self.possible_graph_from_constraints(
+            node_constraints, 
+            edge_constraints
+        )
+        
+        data = Data()
+        for key in node_keys:
+            tens = torch.tensor([self.node_encoder_map[key].normalize(node[key])
+                                 for node in index_node_map.values()])
+            setattr(data, key, tens)
+        
+        data.edge_index = torch.tensor(list(edge_indices), dtype=torch.long).t()
+        data.batch = torch.tensor([0] * len(index_node_map), dtype=torch.long)
+        data.x = torch.zeros(len(index_node_map), self.hidden_dim)
+        data = self.encode_properties(data)
+        
+        data_list: List[Data] = []
+        for _ in range(batch_size):
+            data = data.clone()
+            data.edge_weight = torch.tensor(np.random.uniform(low=low, high=high, size=(data.edge_index.size(1), 1)))
+            data_list.append(data)
+            
+        batch = Batch.from_data_list(data_list)
+        batch.edge_weight.requires_grad = True
+        
+        num_nodes = batch.edge_index.max().item() + 1
+        
+        optimizer = torch.optim.Adam([batch.edge_weight], lr=learning_rate)
+        #optimizer = torch.optim.LBFGS([batch.edge_weight], lr=learning_rate)
+        
+        # Optimization loop over candidate batch
+        for _ in range(num_iterations):
+            
+            optimizer.zero_grad()
+            result = self.forward(batch)
+            embedding = result['graph_embedding']  # shape (candidate_batch_size, hidden_dim)
+            # Compute mean squared error loss for each candidate (compare each to graph_hv)
+            losses = torch.square((embedding - graph_hv.expand_as(embedding))).mean(dim=1)
+            loss = losses.mean()
+            
+            if 'node_degree' in node_keys or 'node_degrees' in node_keys:
+                
+                true_degree = batch.node_degree if hasattr(batch, 'node_degree') else batch.node_degrees
+                
+                _edge_weight = torch.sigmoid(2 * batch.edge_weight)
+                print(_edge_weight)
+                _edges_src = scatter(torch.ones_like(_edge_weight), batch.edge_index[0], dim_size=num_nodes, reduce='sum')
+                _edges_dst = scatter(torch.ones_like(_edge_weight), batch.edge_index[1], dim_size=num_nodes, reduce='sum')
+                _num_edges = _edges_src + _edges_dst
+                
+                #_edge_weight = torch.where(_edge_weight > 0.5, _edge_weight, _edge_weight * 0.001)
+                #_edge_weight = torch.where(_edge_weight > 0.2, torch.ones_like(_edge_weight), torch.zeros_like(_edge_weight))
+                scatter_src = scatter(_edge_weight, batch.edge_index[0], dim_size=num_nodes, reduce='sum')
+                scatter_dst = scatter(_edge_weight, batch.edge_index[1], dim_size=num_nodes, reduce='sum')
+                # Calculate the actual node degree by summing over the edge weights of all the in and out going edges of a node
+                node_degree = scatter_src + scatter_dst
+                
+                # Calculate the loss between the actual node degree and the expected node degree
+                degree_loss = torch.abs(node_degree - true_degree).mean()
+                
+                # print('node_degree', node_degree)
+                # print('true_degree', true_degree)
+                # print('_edge_weight', _edge_weight)
+                
+                # Add the degree loss to the total loss
+                loss += 1e-2 * degree_loss
+                
+                # Entropy loss to promote edge weights to be either 0 or 1
+                sparsity_loss = torch.abs(_edge_weight).mean()
+                #loss += 1e-2 * sparsity_loss
+                        
+            loss.backward()
+            optimizer.step()
+            
+            print(loss.item())
+            
+        # discretizing the still continuous edge weights and constructing a new "edge_index"
+        # connectivity structure based only on the edges that have a weight > 0.5
+        print(batch.edge_weight)
+        batch.edge_weight = (batch.edge_weight >= 0).float()
+        result = self.forward(batch)
+        embedding = result['graph_embedding']  # shape (candidate_batch_size, hidden_dim)
+        losses = torch.abs((embedding - graph_hv.expand_as(embedding))).mean(dim=1)
+            
+        # We get the index of the best candidate according to the loss of the final epoch
+        losses = losses.detach().cpu().numpy()
+        index_best = np.argmin(losses)
+        data_best = batch.to_data_list()[index_best]
+        print('final edge weight', data_best.edge_weight)
+        num_nodes = data_best.edge_index.max().item() + 1
+        scatter_src = scatter(data_best.edge_weight, data_best.edge_index[0], dim_size=num_nodes, reduce='sum')
+        scatter_dst = scatter(data_best.edge_weight, data_best.edge_index[1], dim_size=num_nodes, reduce='sum')
+        print('final degrees', scatter_src + scatter_dst)
+        
+        # select the edges that have a weight > 0.5
+        edge_weight = data_best.edge_weight
+        edge_index = data_best.edge_index[:, edge_weight.flatten() > 0.5]
+        print('edge index', edge_index.detach().cpu().numpy().T)
+        
+        # Prepare final graph dict representation using best candidate's discrete edge weights
+        graph_dict = {
+            'node_indices': np.array(list(index_node_map.keys()), dtype=int),
+            'node_attributes': data_best.x.detach().cpu().numpy(),  # placeholder attributes
+            'edge_indices': edge_index.detach().cpu().numpy().T,
+            'edge_attributes': edge_weight,
+        }
+        for key in node_keys:
+            graph_dict[key] = [node[key] for node in index_node_map.values()]
+        
+        return graph_dict
