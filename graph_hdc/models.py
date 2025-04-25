@@ -615,11 +615,12 @@ class HyperNet(AbstractHyperNet):
 
     def reconstruct(self, 
                     graph_hv: torch.Tensor, 
-                    num_iterations: int = 100, 
-                    learning_rate: float = 0.1,
-                    batch_size: int = 20,
-                    low: float = 0.2,
-                    high: float = 0.8) -> dict:
+                    num_iterations: int = 25, 
+                    learning_rate: float = 1.0,
+                    batch_size: int = 10,
+                    low: float = 0.0,
+                    high: float = 1.0
+                    ) -> dict:
         """
         Reconstructs a graph dict representation from the given graph hypervector by first decoding
         the order constraints for nodes and edges to build an initial guess and then refining the 
@@ -631,7 +632,9 @@ class HyperNet(AbstractHyperNet):
         """
         # ~ Decode node and edge constraints
         node_constraints = self.decode_order_zero(graph_hv)
+        print('node constraints', len(node_constraints))
         edge_constraints = self.decode_order_one(graph_hv, node_constraints)
+        print('edge constraints', len(edge_constraints))
         
         node_keys = list(node_constraints[0]['src'].keys())
         
@@ -645,8 +648,10 @@ class HyperNet(AbstractHyperNet):
         
         data = Data()
         for key in node_keys:
-            tens = torch.tensor([self.node_encoder_map[key].normalize(node[key])
-                                 for node in index_node_map.values()])
+            tens = torch.tensor([
+                self.node_encoder_map[key].normalize(node[key])
+                for node in index_node_map.values()
+            ])
             setattr(data, key, tens)
         
         data.edge_index = torch.tensor(list(edge_indices), dtype=torch.long).t()
@@ -657,7 +662,11 @@ class HyperNet(AbstractHyperNet):
         data_list: List[Data] = []
         for _ in range(batch_size):
             data = data.clone()
-            data.edge_weight = torch.tensor(np.random.uniform(low=low, high=high, size=(data.edge_index.size(1), 1)))
+            data.edge_weight = torch.tensor(np.random.uniform(
+                low=low, 
+                high=high, 
+                size=(data.edge_index.size(1), 1)
+            ))
             data_list.append(data)
             
         batch = Batch.from_data_list(data_list)
@@ -666,7 +675,6 @@ class HyperNet(AbstractHyperNet):
         num_nodes = batch.edge_index.max().item() + 1
         
         optimizer = torch.optim.Adam([batch.edge_weight], lr=learning_rate)
-        #optimizer = torch.optim.LBFGS([batch.edge_weight], lr=learning_rate)
         
         # Optimization loop over candidate batch
         for _ in range(num_iterations):
@@ -683,7 +691,6 @@ class HyperNet(AbstractHyperNet):
                 true_degree = batch.node_degree if hasattr(batch, 'node_degree') else batch.node_degrees
                 
                 _edge_weight = torch.sigmoid(2 * batch.edge_weight)
-                print(_edge_weight)
                 _edges_src = scatter(torch.ones_like(_edge_weight), batch.edge_index[0], dim_size=num_nodes, reduce='sum')
                 _edges_dst = scatter(torch.ones_like(_edge_weight), batch.edge_index[1], dim_size=num_nodes, reduce='sum')
                 _num_edges = _edges_src + _edges_dst
@@ -694,20 +701,6 @@ class HyperNet(AbstractHyperNet):
                 scatter_dst = scatter(_edge_weight, batch.edge_index[1], dim_size=num_nodes, reduce='sum')
                 # Calculate the actual node degree by summing over the edge weights of all the in and out going edges of a node
                 node_degree = scatter_src + scatter_dst
-                
-                # Calculate the loss between the actual node degree and the expected node degree
-                degree_loss = torch.abs(node_degree - true_degree).mean()
-                
-                # print('node_degree', node_degree)
-                # print('true_degree', true_degree)
-                # print('_edge_weight', _edge_weight)
-                
-                # Add the degree loss to the total loss
-                loss += 1e-2 * degree_loss
-                
-                # Entropy loss to promote edge weights to be either 0 or 1
-                sparsity_loss = torch.abs(_edge_weight).mean()
-                #loss += 1e-2 * sparsity_loss
                         
             loss.backward()
             optimizer.step()
@@ -720,11 +713,12 @@ class HyperNet(AbstractHyperNet):
         batch.edge_weight = (batch.edge_weight >= 0).float()
         result = self.forward(batch)
         embedding = result['graph_embedding']  # shape (candidate_batch_size, hidden_dim)
-        losses = torch.abs((embedding - graph_hv.expand_as(embedding))).mean(dim=1)
+        losses = torch.square((embedding - graph_hv.expand_as(embedding))).mean(dim=1)
             
         # We get the index of the best candidate according to the loss of the final epoch
         losses = losses.detach().cpu().numpy()
         index_best = np.argmin(losses)
+        print(losses, losses[index_best])
         data_best = batch.to_data_list()[index_best]
         print('final edge weight', data_best.edge_weight)
         num_nodes = data_best.edge_index.max().item() + 1

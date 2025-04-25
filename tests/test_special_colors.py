@@ -300,7 +300,7 @@ class TestColorGraphs:
         node_encoder_map = make_color_node_encoder_map(dim, colors=colors)
         hyper_net = HyperNet(
             hidden_dim=dim,
-            depth=3,
+            depth=2,
             node_encoder_map=node_encoder_map,
         )
         
@@ -334,11 +334,11 @@ class TestColorGraphs:
         graph_dict = graph_dict_from_color_nx(g_original)
 
         # Setup HyperNet with a color-specific node encoder map
-        dim = 50_000
+        dim = 10_000
         node_encoder_map = make_color_node_encoder_map(colors=['red', 'green', 'blue'], dim=dim)
         hyper_net = HyperNet(
             hidden_dim=dim,
-            depth=3,
+            depth=2,
             node_encoder_map=node_encoder_map,
             seed=42,
         )
@@ -350,13 +350,13 @@ class TestColorGraphs:
         graph_embedding = result['graph_embedding']
 
         # Reconstruct graph dict from the graph hypervector
-        rec_dict = hyper_net.reconstruct(
+        rec_dict: dict = hyper_net.reconstruct(
             graph_embedding, 
             learning_rate=1.0,
-            num_iterations=10,
-            batch_size=10,
-            low=0.0,
-            high=1.0,
+            num_iterations=25,
+            batch_size=5,
+            low=-1.0,
+            high=3.0,
         )
 
         # Convert reconstructed graph dict to a networkx graph
@@ -370,14 +370,18 @@ class TestColorGraphs:
         fig, axs = plt.subplots(1, 2, figsize=(12, 6))
         pos_orig = nx.spring_layout(g_original, seed=42)
         nx.draw(g_original, pos_orig, ax=axs[0], with_labels=True, node_color=graph_dict['node_color'], edge_color='gray')
+        # Add node degree labels slightly offset from node positions
+        degree_labels = {node: f'deg: {graph_dict["node_degree"][i]}' for i, node in enumerate(g_original.nodes())}
+        pos_labels = {node: (pos[0] + 0.05, pos[1] + 0.05) for node, pos in pos_orig.items()}
+        nx.draw_networkx_labels(g_original, pos_labels, labels=degree_labels, font_color='black', font_size=8, ax=axs[0])
         axs[0].set_title('Original Graph')
         
         pos_rec = nx.spring_layout(rec_g, seed=42)
         nx.draw(rec_g, pos_rec, ax=axs[1], with_labels=True, node_color=rec_dict['node_color'], edge_color='gray')
         # Add labels with true degree and actual degree, offset from node positions
-        labels = {node: f"({graph_dict['node_degree'][i]}/{rec_g.degree(node)})" for i, node in enumerate(rec_g.nodes)}
+        labels = {node: f"deg: ({rec_g.degree(node)}/{rec_dict['node_degree'][i]})" for i, node in enumerate(rec_g.nodes)}
         label_pos = {node: (pos_rec[node][0] + 0.05, pos_rec[node][1] + 0.05) for node in rec_g.nodes}
-        nx.draw_networkx_labels(rec_g, label_pos, labels, ax=axs[1])
+        nx.draw_networkx_labels(rec_g, label_pos, labels, ax=axs[1], font_color='black', font_size=8)
         axs[1].set_title('Reconstructed Graph')
         plt.tight_layout()
         plot_path = os.path.join(ARTIFACTS_PATH, "reconstructed_color_graph_reconstruct_method.png")
