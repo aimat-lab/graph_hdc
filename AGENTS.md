@@ -1,3 +1,5 @@
+# Guide for AI Agents
+
 ## Overview
 
 This project implements *hyperdimensional computing* for graph structures using the *message passing* 
@@ -76,3 +78,16 @@ def experiment(e: Experiment):
 
 experiment.run_if_main()
 ```
+
+## Testing
+
+Unittests use `pytest` in the `/tests` folder with this command
+
+```bash
+pytest -q -m "not localonly"
+```
+
+## Pull Requests / Contributing
+
+Pull Requests should always start with a small summary of the changes and a list of the changed files.
+Additionally a PR should contain a small summary of the tests results.
