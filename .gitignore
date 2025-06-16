@@ -6,3 +6,4 @@ tests/artifacts/*
 lightning_logs/
 .identity.json
 **/results/*
+**/.cache/*
