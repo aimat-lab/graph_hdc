@@ -46,7 +46,8 @@ A computational experiment can be defined according to the following example:
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 
-# Upper case parameters define global experiment parameters
+# :param PARAM1:
+#       Description for the parameter...
 PARAM1: int = 100
 
 __DEBUG__ = True # enables/disables debug mode
@@ -56,6 +57,10 @@ experiment = Experiment(
     namespace=file_namespace(__file__),
     glob=globals()
 )
+
+@experiment.hook('util_function')
+def util_function(e: Experiment, param: int):
+    return param ** 2
 
 @experiment
 def experiment(e: Experiment):
@@ -75,8 +80,27 @@ def experiment(e: Experiment):
     fig: plt.Figure = ...
     e.commit_fig(fig, 'figure1.png')
 
+    # using hooks instead of plain functions
+    result = e.apply_hook(
+        'util_function',
+        param=20,
+    )
+
 
 experiment.run_if_main()
+```
+
+## Code Convention
+
+1. functions with many parameters should be split like this:
+
+```python
+def function(arg1: List[int],
+             arg2: List[float],
+             **kwargs
+             ) -> float:
+    # ...
+
 ```
 
 ## Testing
