@@ -2,147 +2,85 @@
 
 .. |made-with-python| image:: https://img.shields.io/badge/Made%20with-Python-1f425f.svg
    :target: https://www.python.org/
-
 .. |python-version| image:: https://img.shields.io/badge/Python-3.8.0-green.svg
    :target: https://www.python.org/
-
 .. |version| image:: https://img.shields.io/badge/version-0.1.0-orange.svg
    :target: https://www.python.org/
 
-=================
-⭐ Project Title
-=================
+=============================
+Graph Hyperdimensional Coding
+=============================
 
-.. important::
+``graph_hdc`` implements **hyperdimensional computing** for graph structures.
+Graphs are encoded using a message passing network that produces high dimensional
+hypervectors which can be decoded again to recover structural information.  The
+package comes with utilities for working with PyTorch Geometric ``Data``
+objects, specialised encoders for node attributes and a small experiment suite
+based on PyComex.
 
-    Write a short project description or use the abstract of your publication !
-
-=========================
-📦 Installation by Source
-=========================
-
-.. code-block:: console
-
-    git clone https://github.com/the16thpythonist/graph_hdc
-
-Install using ``pip``:
+-----------------------
+Installation from source
+-----------------------
 
 .. code-block:: console
 
-    cd graph_hdc
-    python3 -m pip install .
+   git clone https://github.com/the16thpythonist/graph_hdc
+   cd graph_hdc
+   python3 -m pip install .
 
-**Check the installation.** Afterwards, you can check the install by invoking the CLI:
+After installation the command line interface exposes the package version and
+the available experiments::
 
-.. code-block:: console
+   python3 -m graph_hdc.cli --version
+   python3 -m graph_hdc.cli exp list
 
-    python3 -m graph_hdc.cli --version
-    python3 -m graph_hdc.cli --help
+---------
+Quickstart
+---------
 
-
-=========================
-📦 Installation by Source
-=========================
-
-.. important:: 
-
-    delete this section if your code is not to be published as a python package
-
-Install the latest stable release using ``pip``
-
-.. code-block::
-
-    pip3 install graph_hdc
-
-============
-🚀 Quckstart
-============
-
-.. important:: 
-
-    Use this section to create a minimal example of how to use the code in this repository. If your repository is mainly based on a number 
-    of scripts, you could show how the most important scripts can be executed and what the most important parameters are. If your code is rather 
-    used as a library you can write a simple code block that shows how to use the features of that library.
+The ``HyperNet`` encoder maps graphs to hypervectors.  The example below encodes
+and decodes a small colour graph.
 
 .. code-block:: python
 
-    # The following code is just an example and not executable
-    from graph_hdc.dataset import Dataset
-    from graph_hdc.compute import Computation
+   from graph_hdc.special.colors import generate_random_color_nx
+   from graph_hdc.special.colors import graph_dict_from_color_nx, make_color_node_encoder_map
+   from graph_hdc.models import HyperNet
+   from graph_hdc.graph import data_list_from_graph_dicts
 
-    dataset = Dataest('name')
-    computation = Computation(dataset)
-    result = computation.compute()
-    print(result)
+   # create a toy graph and convert it to the internal dict format
+   g = generate_random_color_nx(num_nodes=4, num_edges=5)
+   graph = graph_dict_from_color_nx(g)
 
+   # build the encoder and obtain the embedding
+   dim = 1000
+   net = HyperNet(hidden_dim=dim, depth=2,
+                  node_encoder_map=make_color_node_encoder_map(dim))
+   result = net.forward_graphs([graph])[0]
+   embedding = result['graph_embedding']
+   print(embedding.shape)
 
-============================
-🧪 Computational Experiments
-============================
+   # decode which node types were present
+   constraints = net.decode_order_zero(embedding)
+   print(constraints)
 
-This project makes use of the PyComex_ microframework for the implementation and management of computational experiments. 
+-----------------------
+Computational experiments
+-----------------------
 
-All the computational experiments defined in this pacakge are accessible through a command line interface. To access the 
-experimentation CLI, use the ``exp`` command like this:
+Experiments implemented with PyComex can be listed and executed via the CLI::
 
-.. code-block:: console
+   python3 -m graph_hdc.cli exp list
+   python3 -m graph_hdc.cli exp run predict_molecules__hdc
 
-    python3 -m graph_hdc.cli exp --help
+The ``experiments`` folder contains setups for comparing HDC encodings with
+traditional molecular fingerprints and for first steps in graph generation.
 
-**List of all experiments. ** To show a list of all available experiments, use the ``list`` command.
+-------
+Credits
+-------
 
-.. code-block:: console
-
-    python3 -m graph_hdc.cli exp list
-
-**Experiment information. ** To show more information for a specific experiment, use the ``info`` command with 
-one of the names from the list. This command will list additional information such as the full experiment description
-and a list of parameters.
-
-.. code-block:: console
-
-    python3 -m graph_hdc.cli exp info [experiment_name]
-
-**Run an experiment. ** You can start the execution of an experiment with the ``run`` command. However, 
-be aware that the execution of any experiment will most likely take a lot of time.
-
-.. code-block:: console
-
-    python3 -m graph_hdc.cli exp run [experiment_name]
-
-Each experiment will create a new archive folder, which will contain all the artifacts (such as visual
-examples and the raw data) created during the runtime. The location of this archive folder can be found
-from the output generated by the experiment execution.
-
-==============
-📖 Referencing
-==============
-
-.. note:: 
-
-    delete this section if there is no publication to be cited yet
-
-If you use, extend or otherwise reference our work, please cite the corresponding paper as follows:
-
-.. code-block:: bibtex
-
-    @article{
-        title={Your Publication title},
-        author={Mustermann, Max and Doe, John},
-        journal={arxiv},
-        year={2023},
-    }
-
-
-==========
-🤝 Credits
-==========
-
-We thank the following packages, institutions and individuals for their significant impact on this package.
-
-* PyComex_ is a micro framework which simplifies the setup, processing and management of computational
-  experiments. It is also used to auto-generate the command line interface that can be used to interact
-  with these experiments.
+The project depends heavily on `PyComex`_ for experiment management and
+``torch_geometric`` for graph operations.
 
 .. _PyComex: https://github.com/the16thpythonist/pycomex.git
-.. _Cookiecutter: https://github.com/cookiecutter/cookiecutter
