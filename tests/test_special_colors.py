@@ -353,7 +353,7 @@ class TestColorGraphs:
         rec_dict: dict = hyper_net.reconstruct(
             graph_embedding, 
             learning_rate=1.0,
-            num_iterations=25,
+            num_iterations=50,
             batch_size=5,
             low=-1.0,
             high=3.0,
