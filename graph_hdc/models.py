@@ -298,6 +298,7 @@ class HyperNet(AbstractHyperNet):
         :returns: A dict with string keys and torch Tensor values. The "graph_embedding" key should contain the
             high-dimensional graph embedding vectors for the input graphs with shape (batch_size, hidden_dim)
         """
+        
         # node_dim: (batch_size * num_nodes)
         node_dim = data.x.size(0)
         
@@ -335,6 +336,11 @@ class HyperNet(AbstractHyperNet):
         else:
             edge_index = data.edge_index
             edge_weight = edge_weight
+            
+        # ~ pushing to device
+        data = data.to(self.device)
+        edge_weight = edge_weight.to(self.device)
+        edge_index = edge_index.to(self.device)
             
         # data.edge_index: (2, batch_size * num_edges)
         srcs, dsts = edge_index

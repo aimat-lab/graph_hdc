@@ -22,19 +22,19 @@ GraphDict = Dict[str, Any]
 # :param DATASET_NAME:
 #       The name of the dataset to use. This will be used to download the dataset from the ChemMatData file share.
 DATASET_NAME: str = 'clintox'
-
 # :param VECTOR_SIZE:
 #       The dimensionality of the resulting hypervectors / fingerprints.
 VECTOR_SIZE: int = 2048
-
 # :param DEPTH:
 #       The number of message passing steps of the HyperNet encoder and at the same time 
 #       the radius of the Morgan fingerprint.
 DEPTH: int = 2
-
 # :param USE_BATCHING:
 #       Whether to use the batching feature of the HyperNet encoder or not.
 USE_BATCHING: bool = True
+# :param DEVICE:
+#       The device to use for the HyperNet encoder.
+DEVICE: str = 'cpu'
 
 __DEBUG__ = True
 
@@ -58,7 +58,13 @@ def load_dataset(e: Experiment) -> dict[int, GraphDict]:
     return index_data_map
 
 
-def encode_hdc(smiles_list: List[str], dim: int, depth: int, use_batching: bool = True) -> Tuple[List[np.ndarray], float, List[float]]:
+def encode_hdc(smiles_list: List[str], 
+               dim: int, 
+               depth: int, 
+               use_batching: bool = True,
+               device: str = 'cpu',
+               batch_size: int = 8,
+               ) -> Tuple[List[np.ndarray], float, List[float]]:
     """Encode molecules using the HyperNet encoder.
 
     :param smiles_list: A list of SMILES strings representing the molecules.
@@ -74,19 +80,27 @@ def encode_hdc(smiles_list: List[str], dim: int, depth: int, use_batching: bool 
         hidden_dim=dim,
         depth=depth,
         node_encoder_map=node_encoder_map,
+        device=device,
     )
 
     graphs = [graph_dict_from_mol(Chem.MolFromSmiles(smi)) for smi in smiles_list]
     hvs = []
     times = []
     if use_batching:
-        start = time.perf_counter()
-        results = hyper_net.forward_graphs(graphs, batch_size=256)
-        end = time.perf_counter()
-        hvs = [res['graph_embedding'] for res in results]
-        total_time = end - start
-        # Estimate per-molecule times as total_time / n (since batching is used)
-        times = [total_time / len(graphs)] * len(graphs)
+        total_time = 0.0
+        times = []
+        hvs = []
+        _bs = 128
+        for i in range(0, len(graphs), _bs):
+            batch_graphs = graphs[i:i + _bs]
+            start = time.perf_counter()
+            results = hyper_net.forward_graphs(batch_graphs, batch_size=batch_size)
+            end = time.perf_counter()
+            batch_time = end - start
+            total_time += batch_time
+            # Assign the same batch_time / batch_size to each molecule in the batch
+            times.extend([batch_time / len(batch_graphs)] * len(batch_graphs))
+            hvs.extend([res['graph_embedding'] for res in results])
     else:
         for graph in graphs:
             start = time.perf_counter()
@@ -141,7 +155,11 @@ def experiment(e: Experiment) -> None:
     # ~ Encoding the molecules ~
     e.log('encoding with HyperNet...')
     hdc_vectors, hdc_time, hdc_times = encode_hdc(
-        smiles_list, dim=e.VECTOR_SIZE, depth=e.DEPTH, use_batching=e.USE_BATCHING
+        smiles_list, 
+        dim=e.VECTOR_SIZE, 
+        depth=e.DEPTH, 
+        use_batching=e.USE_BATCHING, 
+        device=e.DEVICE
     )
     e['runtime/hdc/total'] = hdc_time
     e['runtime/hdc/avg'] = hdc_time / len(hdc_vectors)
@@ -203,7 +221,7 @@ def experiment(e: Experiment) -> None:
         'method': ['hdc'] * len(hdc_times) + ['fingerprint'] * len(fp_times)
     })
     fig2, ax2 = plt.subplots(figsize=(6, 4))
-    sns.violinplot(data=violin_df, x='method', y='time', ax=ax2, bw_method='silverman', cut=0, inner=None)
+    sns.violinplot(data=violin_df, x='method', y='time', ax=ax2, bw_method='silverman', color='#9cffcf',)
     ax2.set_ylabel('Encoding Time per Molecule [s]')
     ax2.set_xlabel('Method')
     ax2.set_title('Encoding Time Distribution')
