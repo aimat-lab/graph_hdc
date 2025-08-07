@@ -7,3 +7,9 @@ lightning_logs/
 .identity.json
 **/results/*
 **/.cache/*
+**/checkpoints/*
+
+.rdkit
+**/.aslurm/*
+
+**/_*

@@ -196,22 +196,42 @@ def experiment(e: Experiment) -> None:
         'avg_time': [e['runtime/hdc/avg'], e['runtime/fp/avg']],
     })
 
-    fig, ax = plt.subplots(figsize=(6, 4))
-    bar = sns.barplot(data=df, x='method', y='avg_time', ax=ax, ci=None, color='#9cffcf')
-    # Add percentile-based error bars manually
+    fig, ax = plt.subplots(figsize=(6, 5))
+    # Draw barplot with no edgecolor, then add gray outlines manually
+    bar = sns.barplot(
+        data=df, 
+        x='method', 
+        y='avg_time', 
+        ax=ax, 
+        ci=None, 
+        color='#9cffcf', 
+        edgecolor=None
+    )
+    # Add percentile-based error bars manually in gray
     ax.errorbar(
         x=[0, 1],
         y=df['avg_time'],
         yerr=yerr,
         fmt='none',
-        c='black',
+        c='slategray',
         capsize=5,
         linewidth=2,
+        zorder=3,
     )
+    # Add gray outline to each bar
+    for patch in bar.patches:
+        patch.set_edgecolor('slategray')
+        patch.set_linewidth(2)
+    # Format y-axis to scientific notation with 2 decimals
+    from matplotlib.ticker import FuncFormatter
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.2e}'))
     ax.set_ylabel('Average Encoding Time [s]')
     ax.set_xlabel('Method')
     ax.set_title(f'Encoding Runtime Comparison\n'
-                 f'HyperNet: {e["runtime/hdc/avg"]:.3f}s - Fingerprint: {e["runtime/fp/avg"]:.3f}s')
+                 f'HyperNet: {e["runtime/hdc/avg"]:.4f}s - Fingerprint: {e["runtime/fp/avg"]:.4f}s\n'
+                 f'(x{speedup:.1f} factor)')
+    ax.tick_params(axis='y', labelsize=10)
+    plt.tight_layout()
     e.commit_fig('encoding_times.pdf', fig)
 
     # Add violin plot for per-molecule times, suppressing outliers
@@ -222,9 +242,13 @@ def experiment(e: Experiment) -> None:
     })
     fig2, ax2 = plt.subplots(figsize=(6, 4))
     sns.violinplot(data=violin_df, x='method', y='time', ax=ax2, bw_method='silverman', color='#9cffcf',)
+    # Format y-axis to scientific notation with 2 decimals
+    ax2.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.2e}'))
     ax2.set_ylabel('Encoding Time per Molecule [s]')
     ax2.set_xlabel('Method')
     ax2.set_title('Encoding Time Distribution')
+    ax2.tick_params(axis='y', labelsize=10)
+    plt.tight_layout()
     e.commit_fig('encoding_times_violin.pdf', fig2)
 
     e.commit_json('encoding_times.json', df.to_dict())

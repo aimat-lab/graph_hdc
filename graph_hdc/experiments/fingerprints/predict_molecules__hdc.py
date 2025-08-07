@@ -19,8 +19,15 @@ from rdkit.Chem import rdFingerprintGenerator
 from graph_hdc.models import HyperNet
 from graph_hdc.special.molecules import graph_dict_from_mol
 from graph_hdc.special.molecules import make_molecule_node_encoder_map
+import pandas as pd
 
 DATASET_NAME: str = 'aqsoldb'
+# :param DATASET_NAME_ID:
+#       The name of the dataset to be used later on for the identification of the dataset. This name will NOT be used 
+#       for the downloading of the dataset but only later on for identification. In most cases these will be the same 
+#       but in cases for example one dataset is used as the basis of some deterministic calculation of the target values 
+#       and in this case the name should identify it as such.
+DATASET_NAME_ID: str = DATASET_NAME
 DATASET_TYPE: str = 'regression'
 
 # == EMBEDDING PARAMETERS ==
@@ -37,7 +44,7 @@ NUM_LAYERS: int = 2
 # :param BATCH_SIZE:
 #       The size of the batches to be used during training. This parameter determines the number of samples
 #       that are processed in parallel during the training of the model.
-BATCH_SIZE: int = 50
+BATCH_SIZE: int = 8
 # :param DEVICE:
 #       The device to be used for the training of the model. This parameter can be set to 'cuda:0' to use the
 #       GPU for training, or to 'cpu' to use the CPU.
@@ -70,6 +77,9 @@ def process_dataset(e: Experiment,
     )
     
     e.log('creating HyperNet encoder...')
+    e.log(f' * DEVICE: {e.DEVICE}')
+    e.log(f' * EMBEDDING_SIZE: {e.EMBEDDING_SIZE}')
+    e.log(f' * NUM_LAYERS: {e.NUM_LAYERS}')
     hyper_net = HyperNet(
         hidden_dim=e.EMBEDDING_SIZE,
         depth=e.NUM_LAYERS,
@@ -81,9 +91,10 @@ def process_dataset(e: Experiment,
     model_path = os.path.join(e.path, 'hyper_net.pth')
     hyper_net.save_to_path(model_path)
 
-    e.log('encoding molecular graphs as hyperdimensional vectors...')
+    e.log('processing molecules into graphs...')
     graphs: List[dict] = []
     for c, (index, data) in enumerate(index_data_map.items()):
+        
         smiles: str = data['graph_repr']
         mol: Chem.Mol = Chem.MolFromSmiles(smiles)
         
@@ -93,11 +104,15 @@ def process_dataset(e: Experiment,
         
         graphs.append(graph)
         
-    results = hyper_net.forward_graphs(graphs)
+        if c % 1000 == 0:
+            e.log(f' * {c} molecules done')
+        
+    e.log('doing the model forward pass on all the graphs...')
+    results = hyper_net.forward_graphs(graphs, batch_size=600)
     for (index, graph), result in zip(index_data_map.items(), results):
         index_data_map[index]['graph_features'] = result['graph_embedding']
-        
-        
+
+
 @experiment.hook('after_dataset', replace=False, default=False)
 def after_dataset(e: Experiment,
                   index_data_map: dict,

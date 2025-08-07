@@ -1,6 +1,8 @@
 from typing import Dict, List, Tuple
 
+import copy
 import torch
+import numpy as np
 from torch_geometric.data import Data
 
 from graph_hdc.utils import AbstractEncoder
@@ -151,6 +153,11 @@ def data_from_graph_dict(graph: dict) -> Data:
     
     :returns: A Data object.
     """
+    
+    graph = copy.deepcopy(graph)
+    if isinstance(graph['edge_indices'], list):
+        graph['edge_indices'] = np.array(graph['edge_indices'], dtype=int)
+    
     data = Data(
         x=torch.tensor(graph['node_attributes'], dtype=torch.float),
         edge_index=torch.tensor(graph['edge_indices'].T, dtype=torch.long),

@@ -1,5 +1,6 @@
 from typing import List, Any, Union
 
+import math
 import torch
 import numpy as np
 import networkx as nx
@@ -9,6 +10,8 @@ from rdkit.Chem import GetPeriodicTable
 from chem_mat_data.processing import MoleculeProcessing
 from graph_hdc.utils import AbstractEncoder
 from graph_hdc.utils import CategoricalIntegerEncoder
+
+pt = Chem.GetPeriodicTable()
 
 
 class AtomEncoder(AbstractEncoder):
@@ -126,6 +129,7 @@ def graph_dict_from_mol(mol: Chem.Mol,
 
 def make_molecule_node_encoder_map(dim: int, 
                                    atoms: List[str] = ['C', 'O', 'N', 'S', 'P', 'F', 'Cl', 'Br', 'I', 'Si', 'Ge', 'Be', 'Sn', 'B', 'As', 'Se', 'Na', 'Mg', 'Ca', 'Fe', 'Al', 'Cu', 'Zn', 'K', 'Zr', 'Hg'],
+                                   #atoms: List[str] = ['C', 'O', 'N', 'S', 'P', 'F', 'Cl', 'Br', 'I']
                                    ) -> dict:
     """
     This function returns a dictionary that will act as a "node_encoder_map" that can be supplied to a HyperNet encoder
@@ -149,3 +153,48 @@ def make_molecule_node_encoder_map(dim: int,
         'node_degrees': CategoricalIntegerEncoder(dim=dim, num_categories=10),
         'node_valences': CategoricalIntegerEncoder(dim=dim, num_categories=6),
     }
+    
+    
+def mol_from_graph_dict(graph: dict) -> Chem.Mol:
+    
+    mol = Chem.RWMol()
+    atom_idx_map = {}
+
+    # Add atoms
+    for index in graph['node_indices']:
+        
+        atomic_number: int = int(graph['node_atoms'][index])
+        atom = Chem.Atom(atomic_number)
+    
+        idx = mol.AddAtom(atom)
+        atom_idx_map[int(index)] = idx
+
+    # Add bonds
+    for i, j in graph['edge_indices']:
+        
+        valence_i = 8 - pt.GetNOuterElecs(int(graph['node_atoms'][int(i)]))
+        valence_j = 8 - pt.GetNOuterElecs(int(graph['node_atoms'][int(j)]))
+        # print()
+        # print(graph['node_atoms'][int(i)], valence_i)
+        # print(graph['node_atoms'][int(j)], valence_j)
+        
+        num_hs_i = graph['node_valences'][int(i)]
+        num_hs_j = graph['node_valences'][int(j)]
+        
+        num_bonds_i = sum(int(i in edge and j not in edge) for edge in graph['edge_indices'])
+        num_bonds_j = sum(int(j in edge and i not in edge) for edge in graph['edge_indices'])
+        
+        bond_order = math.floor(((valence_i + valence_j) - (num_bonds_i + num_bonds_j) - (num_hs_i + num_hs_j)) / 2)
+        
+        # Add bond with correct bond order if possible
+        if bond_order == 3:
+            mol.AddBond(atom_idx_map[int(i)], atom_idx_map[int(j)], Chem.BondType.TRIPLE)
+        elif bond_order == 2:
+            mol.AddBond(atom_idx_map[int(i)], atom_idx_map[int(j)], Chem.BondType.DOUBLE)
+        else:
+            mol.AddBond(atom_idx_map[int(i)], atom_idx_map[int(j)], Chem.BondType.SINGLE)
+
+    # Sanitize molecule to update valence and bond orders
+    #Chem.SanitizeMol(mol)
+
+    return mol

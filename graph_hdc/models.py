@@ -35,7 +35,7 @@ class AbstractHyperNet(pl.LightningModule):
         
     def forward_graphs(self, 
                        graphs: List[dict],
-                       batch_size: int = 128,
+                       batch_size: int = 600,
                        ) -> List[Dict[str, np.ndarray]]:
         """
         Given a list of ``graphs`` this method will run the hypernet "forward" pass on all of the graphs 
@@ -200,6 +200,14 @@ class HyperNet(AbstractHyperNet):
             bind_fn=self.bind_fn,
         )
         
+        self.node_hv_combination_keys: list[dict] = []
+        self.node_hv_combination_stack: torch.Tensor = []
+        for key, hv in self.node_hv_combinations:
+            self.node_hv_combination_keys.append(key)
+            self.node_hv_combination_stack.append(hv)
+            
+        self.node_hv_combination_stack = torch.stack(self.node_hv_combination_stack, dim=0)
+        
     # -- encoding
     # These methods handle the encoding of the graph structures into the graph embedding vector
     
@@ -359,7 +367,6 @@ class HyperNet(AbstractHyperNet):
             # messages are gated with the corresponding edge weights!
             messages = node_hv_stack[layer_index][dsts] * sigmoid(edge_weight)
             aggregated = scatter(messages, srcs, reduce='sum')
-            #node_hv_stack[layer_index + 1] = normalize(self.bind_fn(node_hv_stack[0], aggregated))
             node_hv_stack[layer_index + 1] = normalize(self.bind_fn(node_hv_stack[layer_index], aggregated))
         
         # We calculate the final graph-level embedding as the sum of all the node embeddings over all the various 
@@ -367,6 +374,25 @@ class HyperNet(AbstractHyperNet):
         node_hv = node_hv_stack.sum(dim=0)
         readout = scatter(node_hv, data.batch, reduce=self.pooling)
         embedding = readout
+        
+        # Graph hv stack is supposed to contain the graph hypervectors for each of the graphs in the 
+        # batch at the different message passing depths. Whcih means that the different layers 
+        # will have to be aggregated with scatter individually.
+        # graph_hv_stack: (batch_size, num_layers +1, hidden_dim)
+        graph_hv_stack = torch.zeros(
+            size=(torch.max(data.batch) + 1, self.depth + 1, self.hidden_dim), 
+            device=self.device
+        )
+        
+        for layer_index in range(self.depth + 1):
+            # We aggregate the node hypervectors for each graph in the batch at the current message passing 
+            # depth and store them in the graph_hv_stack.
+            graph_hv_stack[:, layer_index] = scatter(
+                node_hv_stack[layer_index], 
+                data.batch, 
+                reduce=self.pooling
+            )
+        
         
         return {
             
@@ -378,7 +404,13 @@ class HyperNet(AbstractHyperNet):
             # As additional information that might be useful we also pass the stack of the node embeddings across
             # the various convolutional depths.
             # node_hv_stack: (batch_size * num_nodes, num_layers + 1, hidden_dim)
-            'node_hv_stack': node_hv_stack.transpose(0, 1),
+            #'node_hv_stack': node_hv_stack.transpose(0, 1),
+            
+            # graph hv stack is supposed to contain the graph hypervectors for each of the graphs in the 
+            # batch at the different message passing depths. Whcih means that the different layers 
+            # will have to be aggregated with scatter individually.
+            # graph_hv_stack: (batch_size, num_layers +1, hidden_dim)
+            'graph_hv_stack': graph_hv_stack,
         }
         
     # -- decoding
@@ -386,7 +418,8 @@ class HyperNet(AbstractHyperNet):
     # the original graph structure.
         
     def decode_order_zero(self, 
-                          embedding: torch.Tensor
+                          embedding: torch.Tensor,
+                          iterations: int = 1,
                           ) -> List[dict]:
         """
         Returns information about the kind and number of nodes (order zero information) that were contained in 
@@ -414,20 +447,32 @@ class HyperNet(AbstractHyperNet):
             - num: The integer number of how many of these nodes are present in the graph.
         """
         
+        # If the embedding is not just a vector but instead a 2D tensor we assume that it actually is a stack 
+        # of the graph embeddings at the different message passing depths. In this case it most beneficial to 
+        # decode the nodes from the zero-layer embedding which is the first in the stack.
+        if embedding.dim() == 2:
+            embedding = embedding[0, :]
+        
         # In this list we'll store the final decoded constraints about which kinds of nodes are present in the 
         # graph. Each constraints is represented as a dictionary which contains information about which kind of 
         # node is present (as a combination of node properties) and how many of these nodes are present.
         constraints_order_zero: List[Dict[str, dict]] = []
-        for comb_dict, hv in self.node_hv_combinations:
+    
+        # self.node_hv_combination_stack is a tensor of shape (num_combinations, hidden_dim)
+        # embedding is a tensor of shape (hidden_dim,)
+        # dot_products should be a tensor of shape (num_combinations,)
+        dot_products = torch.matmul(self.node_hv_combination_stack, embedding.squeeze())
+        for comb_dict, value in zip(self.node_hv_combination_keys, dot_products):
             
             # By multiplying the embedding with the specific node hypervector we essentially calculate the
             # projection of the graph along the direction of the node. This projection should be proportional 
             # to the number of times that a node of that specific type was included in the original graph.
-            value = torch.dot(hv, embedding.squeeze()).detach().item()
+            #value = torch.dot(hv, embedding.squeeze()).detach().item()
             if np.round(value) > 0:
+                num = int(np.round(value))
                 result_dict = {
-                    'src': comb_dict.copy(), 
-                    'num': round(value)
+                    'src': comb_dict.copy(),
+                    'num': num,
                 }
                 constraints_order_zero.append(result_dict)
                 
@@ -748,3 +793,17 @@ class HyperNet(AbstractHyperNet):
             graph_dict[key] = [node[key] for node in index_node_map.values()]
         
         return graph_dict
+    
+    
+class HyperNetEnsemble(AbstractHyperNet):
+    
+    def __init__(self, hyper_nets: list[HyperNet]):
+        pass
+    
+    def forward(self, data: Data, bidirectional: bool = True) -> dict:
+        pass
+    
+    def decode_order_zero(self, embedding: torch.Tensor, iterations: int = 1) -> List[dict]:
+        pass
+    
+    

@@ -10,6 +10,7 @@ import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
+from scipy.special import softmax
 from rdkit.Chem.Crippen import MolLogP
 from rich.pretty import pprint
 from pycomex.functional.experiment import Experiment
@@ -31,6 +32,8 @@ from graph_hdc.special.molecules import graph_dict_from_mol
 from graph_hdc.special.molecules import make_molecule_node_encoder_map
 from chem_mat_data.main import pyg_data_list_from_graphs
 
+# == DATASET PARAMETERS ==
+
 # :param DATASET_NAME:
 #       The name of the dataset to be used for the experiment. This name is used to download the dataset from the
 #       ChemMatData file share.
@@ -39,6 +42,9 @@ DATASET_NAME: str = 'bace'
 #       The type of the dataset, either 'classification' or 'regression'. This parameter is used to determine the
 #       evaluation metrics and the type of the prediction target.
 DATASET_TYPE: str = 'classification'
+# :param NUM_VAL:
+#       The number of validation samples to be used for the evaluation of the models during training.
+NUM_VAL: int = 0.1
 
 # == MODEL PARAMETERS ==
 
@@ -584,7 +590,7 @@ def train_model__gcn(e: Experiment,
     
     # Use PyTorch Lightning's Trainer to handle the training loop
     time_start = time.time()
-    trainer = pl.Trainer(max_epochs=e.EPOCHS)
+    trainer = pl.Trainer(max_epochs=e.EPOCHS, logger=False)
     trainer.fit(model, data_loader_train, data_loader_val)
     
     time_end = model.model_restorer.best_time
@@ -636,7 +642,7 @@ def train_model__gin(e: Experiment,
     
     # Use PyTorch Lightning's Trainer to handle the training loop
     time_start = time.time()
-    trainer = pl.Trainer(max_epochs=e.EPOCHS)
+    trainer = pl.Trainer(max_epochs=e.EPOCHS, logger=False)
     trainer.fit(model, data_loader_train, data_loader_val)
         
     time_end = model.model_restorer.best_time
@@ -688,7 +694,7 @@ def train_model__gatv2(e: Experiment,
     
     # Use PyTorch Lightning's Trainer to handle the training loop
     time_start = time.time()
-    trainer = pl.Trainer(max_epochs=e.EPOCHS)
+    trainer = pl.Trainer(max_epochs=e.EPOCHS, logger=False)
     trainer.fit(model, data_loader_train, data_loader_val)
         
     time_end = model.model_restorer.best_time
@@ -717,6 +723,18 @@ def predict_model(e: Experiment,
         
     y_pred = np.array(y_pred)
     return y_pred
+
+
+@experiment.hook('predict_model_proba', replace=True, default=False)
+def predict_model_proba(e: Experiment,
+                        index_data_map: dict,
+                        model: Any,
+                        indices: list[int],
+                        y_pred: np.ndarray,
+                        ) -> np.ndarray:
+    
+    y_proba = softmax(y_pred, axis=1)
+    return y_proba
 
 
 @experiment.hook('process_dataset', replace=True, default=False)
