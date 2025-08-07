@@ -192,6 +192,7 @@ def get_graph_labels(e: Experiment,
                      index: int,
                      graph: dict
                      ) -> np.ndarray:
+    
     return graph['graph_labels']
 
 

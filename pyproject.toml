@@ -31,11 +31,11 @@ matplotlib = ">=3.5.3"
 numpy = ">=1.23.2"
 python-decouple = ">=3.6"
 poetry-bumpversion = ">=0.3.0"
-rich-click = ">=1.7.0,<=1.8.0"
 jsonpickle = ">=4.0.1,<=5.0.0"
 torch = ">=2.5.0,<3.0"
 torch_geometric = ">=2.6.1,<3.0"
 pytorch_lightning = ">=2.4.0,<3.0"
+rich_click = ">=1.8.9,<=1.9.0"
 chem_mat_database = { git = "https://github.com/the16thpythonist/chem_mat_data.git" }
 
 [tool.poetry.dev-dependencies]
