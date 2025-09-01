@@ -10,6 +10,12 @@ from pycomex.utils import folder_path, file_namespace
 #       The name of the dataset to be used for the experiment. This name is used to download the dataset from the
 #       ChemMatData file share.
 DATASET_NAME: str = 'aqsoldb'
+# :param DATASET_NAME_ID:
+#       The name of the dataset to be used later on for the identification of the dataset. This name will NOT be used 
+#       for the downloading of the dataset but only later on for identification. In most cases these will be the same 
+#       but in cases for example one dataset is used as the basis of some deterministic calculation of the target values 
+#       and in this case the name should identify it as such.
+DATASET_NAME_ID: str = 'conjugated'
 # :param DATASET_TYPE:
 #       The type of the dataset, either 'classification' or 'regression'. This parameter is used to determine the
 #       evaluation metrics and the type of the prediction target.
@@ -17,6 +23,8 @@ DATASET_TYPE: str = 'classification'
 # :param NUM_TEST:
 #       The number of test samples to be used for the evaluation of the models.
 NUM_TEST: int = 0.1
+
+MODELS = ['gin']
 
 
 # == EXPERIMENT PARAMETERS ==
@@ -66,31 +74,20 @@ def find_conjungated_systems(mol: Chem.Mol) -> list:
     return conjugated_systems
 
 
-@experiment.hook('after_dataset', replace=False, default=False)
-def after_dataset(e: Experiment,
-                  index_data_map: dict[int, dict],
-                  **kwargs,
-                  ) -> None:
-    """
-    This hook is executed after the dataset is loaded. It is used to perform any additional processing
-    on the dataset before the experiment is run.
-    ---
-    In this case, we use the RDKit library to calculate the CLogP values for the molecules in the dataset, 
-    since we are using a dataset which does not contain the labels directly.
-    """
-    e.log('calculating CLogP values and replacing targets...')
+@experiment.hook('get_graph_labels', replace=True, default=False)
+def get_graph_labels(e: Experiment,
+                     index: int,
+                     graph: dict
+                     ) -> np.ndarray:
+    smiles = str(graph['graph_repr'])
+    mol = Chem.MolFromSmiles(smiles)
     
-    for _, graph in index_data_map.items():
-        smiles = str(graph['graph_repr'])
-        mol = Chem.MolFromSmiles(smiles)
-        
-        conjugated_systems = find_conjungated_systems(mol)
-        #pprint(conjugated_systems)
-        atom_count = sum(len(system) for system in conjugated_systems)
-        is_conjugated = int(atom_count == mol.GetNumAtoms())
-        
-        #graph['graph_labels'] = np.array([MolLogP(mol)])
-        graph['graph_labels'] = np.array([1 - is_conjugated, is_conjugated]).astype(float)
+    conjugated_systems = find_conjungated_systems(mol)
+    atom_count = sum(len(system) for system in conjugated_systems)
+    is_conjugated = int(atom_count == mol.GetNumAtoms())
+    
+    graph['graph_labels'] = np.array([1 - is_conjugated, is_conjugated]).astype(float)
+    return graph['graph_labels']
 
 
 experiment.run_if_main()

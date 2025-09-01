@@ -1,6 +1,4 @@
 import numpy as np
-import rdkit.Chem as Chem
-from rdkit.Chem.Crippen import MolLogP
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 
@@ -9,13 +7,13 @@ from pycomex.utils import folder_path, file_namespace
 # :param DATASET_NAME:
 #       The name of the dataset to be used for the experiment. This name is used to download the dataset from the
 #       ChemMatData file share.
-DATASET_NAME: str = 'aqsoldb'
+DATASET_NAME: str = 'zinc250'
 # :param DATASET_NAME_ID:
 #       The name of the dataset to be used later on for the identification of the dataset. This name will NOT be used 
 #       for the downloading of the dataset but only later on for identification. In most cases these will be the same 
 #       but in cases for example one dataset is used as the basis of some deterministic calculation of the target values 
 #       and in this case the name should identify it as such.
-DATASET_NAME_ID: str = 'clogp'
+DATASET_NAME_ID: str = DATASET_NAME
 # :param DATASET_TYPE:
 #       The type of the dataset, either 'classification' or 'regression'. This parameter is used to determine the
 #       evaluation metrics and the type of the prediction target.
@@ -23,13 +21,22 @@ DATASET_TYPE: str = 'regression'
 # :param NUM_TEST:
 #       The number of test samples to be used for the evaluation of the models.
 NUM_TEST: int = 1000
+# :param TARGET_INDEX:
+#       The index of the target in the graph labels. This parameter is used to determine the target of the
+#       prediction task.
+TARGET_INDEX: int = 1 # QED
+# :param NUM_DATA:
+#       The number of samples to be used for the experiment. This parameter can be either an integer or a float between 0 and 1.
+#       In case of an integer we use it as the number of samples to be used, in case of a float we use it as the fraction
+#       of the dataset to be used. This parameter is used to limit the size of the dataset for the experiment.
+NUM_DATA: float = 1.0
 
 # == FINGERPRINT PARAMETERS ==
 
 # :param FINGERPRINT_SIZE:
 #       The size of the fingerprint to be generated. This will be the number of elements in the 
 #       fingerprint vector representation of each molecule.
-FINGERPRINT_SIZE: int = 2048
+FINGERPRINT_SIZE: int = 8
 # :param FINGERPRINT_RADIUS:
 #       The radius of the fingerprint to be generated. This parameter determines the number of
 #       bonds to be considered when generating the fingerprint.
@@ -44,23 +51,12 @@ experiment = Experiment.extend(
     glob=globals()
 )
 
-@experiment.hook('after_dataset', replace=False, default=False)
-def after_dataset(e: Experiment,
-                  index_data_map: dict[int, dict],
-                  **kwargs,
-                  ) -> None:
-    """
-    This hook is executed after the dataset is loaded. It is used to perform any additional processing
-    on the dataset before the experiment is run.
-    ---
-    In this case, we use the RDKit library to calculate the CLogP values for the molecules in the dataset, 
-    since we are using a dataset which does not contain the labels directly.
-    """
-    e.log('calculating CLogP values and replacing targets...')
-    
-    for _, graph in index_data_map.items():
-        smiles = str(graph['graph_repr'])
-        mol = Chem.MolFromSmiles(smiles)
-        graph['graph_labels'] = np.array([MolLogP(mol)])
+@experiment.hook('get_graph_labels', replace=True, default=False)
+def get_graph_labels(e: Experiment,
+                     index: int,
+                     graph: dict,
+                     **kwargs,
+                     ) -> np.ndarray:
+    return graph['graph_labels'][e.TARGET_INDEX:e.TARGET_INDEX+1]
 
 experiment.run_if_main()

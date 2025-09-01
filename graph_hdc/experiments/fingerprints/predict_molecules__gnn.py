@@ -1,10 +1,12 @@
 import os
 import time
-import torch
-import torch.nn as nn
+import copy
+import random
 from torch import Tensor
 from typing import List, Any, Literal
 
+import torch
+import torch.nn as nn
 import umap
 import numpy as np
 import networkx as nx
@@ -17,7 +19,7 @@ from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 from chem_mat_data.processing import MoleculeProcessing, OneHotEncoder
 from rdkit import Chem
-from torchmetrics import R2Score
+from torchmetrics import R2Score, MeanAbsoluteError
 from torchmetrics import Accuracy, F1Score
 from torch_geometric.nn import GCNConv, GCN2Conv
 from torch_geometric.nn import GINConv
@@ -59,10 +61,10 @@ MODELS: List[str] = [
 
 # :param CONV_UNITS:
 #       A list of integers specifying the number of units in each convolutional layer of the GNN models.
-CONV_UNITS: List[int] = [256, 256, 256]
+CONV_UNITS: List[int] = [128, 128, 128]
 # :param DENSE_UNITS:
 #       A list of integers specifying the number of units in each dense (fully connected) layer of the GNN models.
-DENSE_UNITS: List[int] = [128, 64]
+DENSE_UNITS: List[int] = [128, 64, 32]
 # :param BATCH_SIZE:
 #       The size of the batches to be used during training. This parameter determines the number of samples
 #       that are processed in parallel during the training of the model.
@@ -70,11 +72,11 @@ BATCH_SIZE: int = 32
 # :param EPOCHS:
 #       The number of epochs to be used for the training of the model. This parameter determines the number of
 #       times the model will be trained on the entire dataset.
-EPOCHS: int = 100
+EPOCHS: int = 200
 # :param LEARNING_RATE:
 #       The learning rate to be used for the training of the model. This parameter determines the step size that
 #       is used to update the model parameters during training.
-LEARNING_RATE: float = 1e-3
+LEARNING_RATE: float = 1e-4
 # :param DEVICE:
 #       The device to be used for the training of the model. This parameter can be set to 'cuda:0' to use the
 #       GPU for training, or to 'cpu' to use the CPU.
@@ -91,26 +93,36 @@ PLOT_UMAP: bool = False
 # == GNN MODELS ==
 
 class BestModelRestorer(pl.Callback):
+    """
+    This class implements a PyTorch Lightning callback which will restore the model weights to 
+    that state which achieved the best validation loss observed during the training process.
     
-    def __init__(self, monitor: str = "val_loss", mode: str = "min"):
-        """
-        Args:
-            monitor: Metric name to monitor (e.g. 'val_loss').
-            mode: One of {'min', 'max'}. In 'min' mode, training seeks to minimize the monitored quantity,
-                  in 'max' mode it seeks to maximize it.
-        """
+    This is done by monitoring a specific metric (e.g. 'val_loss') and saving the model state
+    whenever the monitored metric improves. Using a hook at the very end of the training, the 
+    model weights are reset to that best state.
+    """
+    
+    def __init__(self, 
+                 monitor: str = "val_loss", 
+                 mode: str = "min"
+                 ) -> None:
         super().__init__()
         self.monitor = monitor
         if mode not in ["min", "max"]:
             raise ValueError("mode must be 'min' or 'max'.")
         self.mode = mode
 
-        self.best_score = None
+        # This will variable will store the best score observed during the training.
+        self.best_score: float = None
+        # This will store the best model state dict associated with the best score.
         self.best_state_dict = None
+        # This will store the time when the best score was achieved.
         self.best_time = None
 
     def on_fit_start(self, trainer, pl_module):
-        """Initialize the best score before starting the fit."""
+        """
+        Initialize the best score before starting the fit.
+        """
         if self.mode == "min":
             self.best_score = float("inf")
         else:
@@ -119,8 +131,8 @@ class BestModelRestorer(pl.Callback):
 
     def on_validation_end(self, trainer, pl_module):
         """
-        Called at the end of the validation loop. We check whether the monitored metric improved
-        and if so, store the model state dict and log the improvement.
+        Called at the end of the validation loop. We check whether the monitored metric i
+        mproved and if so, store the model state dict and log the improvement.
         """
         metrics = trainer.callback_metrics
         current_score = metrics.get(self.monitor)
@@ -136,7 +148,8 @@ class BestModelRestorer(pl.Callback):
             # Update best score and store model weights
             self.best_score = current_score
             self.best_state_dict = {
-                k: v.cpu() for k, v in pl_module.state_dict().items()
+                k: copy.deepcopy(v.detach().cpu().clone())
+                for k, v in pl_module.state_dict().items()
             }
             self.best_time = time.time()
 
@@ -150,8 +163,11 @@ class BestModelRestorer(pl.Callback):
             )
 
     def on_train_end(self, trainer, pl_module):
-        """At the end of training, restore the model to the best recorded state."""
+        """
+        At the end of training, restore the model to the best recorded state.
+        """
         if self.best_state_dict is not None:
+            current_state_dict = pl_module.state_dict()
             pl_module.load_state_dict(self.best_state_dict)
             trainer.print(
                 f"Restored the best model with {self.monitor}={self.best_score:.4f}."
@@ -163,7 +179,7 @@ class GnnModel(pl.LightningModule):
     def __init__(self,
                  output_type: Literal['classification', 'regression'],
                  output_dim: int,
-                 learning_rate: float = 1e-4,
+                 learning_rate: float = 1e-3,
                  **kwargs):
         
         super().__init__(**kwargs)
@@ -180,13 +196,9 @@ class GnnModel(pl.LightningModule):
             self.loss = nn.MSELoss()
             
         if self.output_type == 'regression':
-            self.metric = R2Score()
+            self.metric = MeanAbsoluteError(num_outputs=output_dim)
         elif self.output_type == 'classification':
-            self.metric = Accuracy(
-                task='multiclass', 
-                num_classes=output_dim, 
-                top_k=1
-            )
+            self.metric = nn.CrossEntropyLoss()
     
     def training_step(self, data, batch_idx):
         """
@@ -249,15 +261,9 @@ class GnnModel(pl.LightningModule):
 
         :return: A list of callbacks to be used during training.
         """
-        early_stopping = pl.callbacks.EarlyStopping(
-            monitor='val_metric',
-            mode='max',
-            patience=10,
-            verbose=True
-        )
         self.model_restorer = BestModelRestorer(
             monitor='val_metric',
-            mode='max'
+            mode='min'
         )
         return [self.model_restorer]
 
@@ -317,7 +323,10 @@ class GcnModel(GnnModel):
         # Create dense layers
         self.dense_layers = nn.ModuleList()
         for units in dense_units:
-            lay = nn.Linear(prev_units, units)
+            lay = nn.Sequential(
+                nn.Linear(prev_units, units),
+                nn.BatchNorm1d(units),
+            )
             self.dense_layers.append(lay)
             prev_units = units
 
@@ -399,7 +408,7 @@ class GinModel(GnnModel):
                     nn.BatchNorm1d(2 * units),
                     nn.LeakyReLU(),
                     nn.Linear(2 * units, units),
-                    nn.Dropout1d(0.1),
+                    #nn.Dropout1d(0.1),
                 ),
                 train_eps=True,
             )
@@ -412,7 +421,10 @@ class GinModel(GnnModel):
         # Create dense layers
         self.dense_layers = nn.ModuleList()
         for units in dense_units:
-            lay = nn.Linear(prev_units, units)
+            lay = nn.Sequential(
+                nn.Linear(prev_units, units),
+                nn.BatchNorm1d(units),
+            )
             self.dense_layers.append(lay)
             prev_units = units
 
@@ -491,7 +503,7 @@ class Gatv2Model(GnnModel):
             lay = GATv2Conv(
                 in_channels=prev_units, 
                 out_channels=units,
-                heads=3,
+                heads=5,
                 concat=False,
                 dropout=0.0,
                 add_self_loops=True,
@@ -505,7 +517,11 @@ class Gatv2Model(GnnModel):
         # Create dense layers
         self.dense_layers = nn.ModuleList()
         for units in dense_units:
-            lay = nn.Linear(prev_units, units)
+            #lay = nn.Linear(prev_units, units)
+            lay = nn.Sequential(
+                nn.Linear(prev_units, units),
+                nn.BatchNorm1d(units),
+            )
             self.dense_layers.append(lay)
             prev_units = units
 
@@ -563,20 +579,24 @@ def train_model__gcn(e: Experiment,
     used to train a Graph Convolutional Network (GCN) model for the given number of EPOCHS. The trained model 
     is then returned. 
     """
+    num_val = max(2, int(0.05 * len(train_indices)))
+    val_indices_ = random.sample(train_indices, k=num_val)
+    train_indices = list(set(train_indices) - set(val_indices_))
+    
     # Extract the graphs corresponding to the training indices
     graphs_train = [index_data_map[i] for i in train_indices]
     example_graph = graphs_train[0]
     
     # Extract the graphs corresponding to the validation indices
-    graphs_val = [index_data_map[i] for i in val_indices]
+    graphs_val = [index_data_map[i] for i in val_indices_]
     
     # Convert the list of graphs into a list of PyTorch Geometric Data objects
     data_list_train: List[Data] = pyg_data_list_from_graphs(graphs_train)
     data_list_val: List[Data] = pyg_data_list_from_graphs(graphs_val)
     
     # Create a DataLoader to handle batching of the data during training
-    data_loader_train = DataLoader(data_list_train, batch_size=BATCH_SIZE, shuffle=True)
-    data_loader_val = DataLoader(data_list_val, batch_size=BATCH_SIZE, shuffle=False)
+    data_loader_train = DataLoader(data_list_train, batch_size=e.BATCH_SIZE, shuffle=True)
+    data_loader_val = DataLoader(data_list_val, batch_size=e.BATCH_SIZE, shuffle=False)
     
     # Initialize the GCN model with the appropriate input and output dimensions
     model = GcnModel(
@@ -615,20 +635,24 @@ def train_model__gin(e: Experiment,
     used to train a Graph Isomorphism Network (GIN) model for the given number of EPOCHS. The trained model 
     is then returned. 
     """
+    num_val = max(2, int(0.05 * len(train_indices)))
+    val_indices_ = random.sample(train_indices, k=num_val)
+    train_indices = list(set(train_indices) - set(val_indices_))
+    
     # Extract the graphs corresponding to the training indices
     graphs_train = [index_data_map[i] for i in train_indices]
     example_graph = graphs_train[0]
     
     # Extract the graphs corresponding to the validation indices
-    graphs_val = [index_data_map[i] for i in val_indices]
+    graphs_val = [index_data_map[i] for i in val_indices_]
     
     # Convert the list of graphs into a list of PyTorch Geometric Data objects
     data_list_train: List[Data] = pyg_data_list_from_graphs(graphs_train)
     data_list_val: List[Data] = pyg_data_list_from_graphs(graphs_val)
     
     # Create a DataLoader to handle batching of the data during training
-    data_loader_train = DataLoader(data_list_train, batch_size=BATCH_SIZE, shuffle=True)
-    data_loader_val = DataLoader(data_list_val, batch_size=BATCH_SIZE, shuffle=False)
+    data_loader_train = DataLoader(data_list_train, batch_size=e.BATCH_SIZE, shuffle=True)
+    data_loader_val = DataLoader(data_list_val, batch_size=e.BATCH_SIZE, shuffle=False)
     
     # Initialize the GIN model with the appropriate input and output dimensions
     model = GinModel(
@@ -667,20 +691,24 @@ def train_model__gatv2(e: Experiment,
     used to train a Graph Attention Network v2 (GATv2) model for the given number of EPOCHS. The trained model 
     is then returned. 
     """
+    num_val = max(2, int(0.05 * len(train_indices)))
+    val_indices_ = random.sample(train_indices, k=num_val)
+    train_indices = list(set(train_indices) - set(val_indices_))
+    
     # Extract the graphs corresponding to the training indices
     graphs_train = [index_data_map[i] for i in train_indices]
     example_graph = graphs_train[0]
     
     # Extract the graphs corresponding to the validation indices
-    graphs_val = [index_data_map[i] for i in val_indices]
+    graphs_val = [index_data_map[i] for i in val_indices_]
     
     # Convert the list of graphs into a list of PyTorch Geometric Data objects
     data_list_train: List[Data] = pyg_data_list_from_graphs(graphs_train)
     data_list_val: List[Data] = pyg_data_list_from_graphs(graphs_val)
     
     # Create a DataLoader to handle batching of the data during training
-    data_loader_train = DataLoader(data_list_train, batch_size=BATCH_SIZE, shuffle=True)
-    data_loader_val = DataLoader(data_list_val, batch_size=BATCH_SIZE, shuffle=False)
+    data_loader_train = DataLoader(data_list_train, batch_size=e.BATCH_SIZE, shuffle=True)
+    data_loader_val = DataLoader(data_list_val, batch_size=e.BATCH_SIZE, shuffle=False)
     
     # Initialize the GATv2 model with the appropriate input and output dimensions
     model = Gatv2Model(
@@ -715,7 +743,7 @@ def predict_model(e: Experiment,
     
     graphs = [index_data_map[i] for i in indices]
     data_list: List[Data] = pyg_data_list_from_graphs(graphs)
-    data_loader = DataLoader(data_list, batch_size=BATCH_SIZE, shuffle=False)
+    data_loader = DataLoader(data_list, batch_size=e.BATCH_SIZE, shuffle=False)
     y_pred = []
     for data in data_loader:
         out = model(data).detach().cpu().numpy()

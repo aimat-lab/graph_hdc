@@ -6,7 +6,7 @@ from pycomex.utils import folder_path, file_namespace
 # :param DATASET_NAME:
 #       The name of the dataset to be used for the experiment. This name is used to download the dataset from the
 #       ChemMatData file share.
-DATASET_NAME: str = 'bbbp'
+DATASET_NAME: str = 'MCF_7'
 # :param DATASET_NAME_ID:
 #       The name of the dataset to be used later on for the identification of the dataset. This name will NOT be used 
 #       for the downloading of the dataset but only later on for identification. In most cases these will be the same 
@@ -21,24 +21,21 @@ DATASET_TYPE: str = 'binary'
 #       The number of test samples to be used for the evaluation of the models.
 NUM_TEST: int = 0.1
 
-# == EMBEDDING PARAMETERS ==
+# == FINGERPRINT PARAMETERS ==
 
-# == EMBEDDING PARAMETERS ==
-
-# :param EMBEDDING_SIZE:
-#       The size of the graph embedding vectors. This will be the number of elements in each of the 
-#       hypervectors that represent the individual molecular graphs.
-EMBEDDING_SIZE: int = 2048 * 4
-# :param NUM_LAYERS:
-#       The number of layers in the hypernetwork. This parameter determines the depth of the hypernetwork
-#       which is used to generate the graph embeddings. This means it is the number of message passing 
-#       steps applied in the encoder.
-NUM_LAYERS: int = 3
+# :param FINGERPRINT_SIZE:
+#       The size of the fingerprint to be generated. This will be the number of elements in the 
+#       fingerprint vector representation of each molecule.
+FINGERPRINT_SIZE: int = 2048
+# :param FINGERPRINT_RADIUS:
+#       The radius of the fingerprint to be generated. This parameter determines the number of
+#       bonds to be considered when generating the fingerprint.
+FINGERPRINT_RADIUS: int = 2
 
 # == EXPERIMENT PARAMETERS ==
 
 experiment = Experiment.extend(
-    'predict_molecules__hdc.py',
+    'predict_molecules__fp.py',
     base_path=folder_path(__file__),
     namespace=file_namespace(__file__),
     glob=globals()

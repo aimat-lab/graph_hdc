@@ -165,6 +165,7 @@ class HyperNet(AbstractHyperNet):
                  bind_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = 'circular_convolution_fft',
                  unbind_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = 'circular_correlation_fft',
                  pooling: str = 'sum',
+                 normalize_all: bool = False,
                  seed: Optional[int] = None,
                  device: str = 'cpu',
                  ):
@@ -176,6 +177,7 @@ class HyperNet(AbstractHyperNet):
         self.bind_fn = resolve_function(bind_fn)
         self.unbind_fn = resolve_function(unbind_fn)
         self.pooling = pooling
+        self.normalize_all = normalize_all
         self.seed = seed
         
         # ~ computed attributes
@@ -372,7 +374,13 @@ class HyperNet(AbstractHyperNet):
         # We calculate the final graph-level embedding as the sum of all the node embeddings over all the various 
         # message passing depths and as the sum over all the nodes.
         node_hv = node_hv_stack.sum(dim=0)
+        if self.normalize_all:
+            node_hv = normalize(node_hv, dim=1)
+        
         readout = scatter(node_hv, data.batch, reduce=self.pooling)
+        if self.normalize_all:
+            readout = normalize(readout, dim=1)
+        
         embedding = readout
         
         # Graph hv stack is supposed to contain the graph hypervectors for each of the graphs in the 

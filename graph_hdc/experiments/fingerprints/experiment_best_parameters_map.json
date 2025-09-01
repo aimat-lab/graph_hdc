@@ -1,0 +1,1082 @@
+[
+    [
+        [
+            "hdc",
+            "clogp",
+            "neural_net2"
+        ],
+        {
+            "EMBEDDING_SIZE": 8192,
+            "NUM_LAYERS": 1,
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.0001
+        }
+    ],
+    [
+        [
+            "hdc",
+            "clogp",
+            "grad_boost"
+        ],
+        {
+            "EMBEDDING_SIZE": 8192,
+            "NUM_LAYERS": 1,
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "hdc",
+            "clogp",
+            "k_neighbors"
+        ],
+        {
+            "EMBEDDING_SIZE": 2048,
+            "NUM_LAYERS": 1,
+            "KN_NUM_NEIGHBORS": 3,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "hdc",
+            "clogp",
+            "random_forest"
+        ],
+        {
+            "EMBEDDING_SIZE": 4096,
+            "NUM_LAYERS": 1,
+            "RF_NUM_ESTIMATORS": 500,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "hdc",
+            "clogp",
+            "neural_net"
+        ],
+        {
+            "EMBEDDING_SIZE": 8192,
+            "NUM_LAYERS": 3,
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.0001
+        }
+    ],
+    [
+        [
+            "hdc",
+            "qm9_gap",
+            "neural_net"
+        ],
+        {
+            "EMBEDDING_SIZE": 2048,
+            "NUM_LAYERS": 2,
+            "NN_HIDDEN_LAYER_SIZES": [
+                50,
+                50
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.0001
+        }
+    ],
+    [
+        [
+            "hdc",
+            "qm9_energy",
+            "k_neighbors"
+        ],
+        {
+            "EMBEDDING_SIZE": 4096,
+            "NUM_LAYERS": 1,
+            "KN_NUM_NEIGHBORS": 10,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "hdc",
+            "qm9_gap",
+            "neural_net2"
+        ],
+        {
+            "EMBEDDING_SIZE": 8192,
+            "NUM_LAYERS": 2,
+            "NN_HIDDEN_LAYER_SIZES": [
+                10,
+                10
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "hdc",
+            "qm9_energy",
+            "random_forest"
+        ],
+        {
+            "EMBEDDING_SIZE": 8192,
+            "NUM_LAYERS": 1,
+            "RF_NUM_ESTIMATORS": 100,
+            "RF_MAX_DEPTH": 20,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "hdc",
+            "qm9_energy",
+            "neural_net"
+        ],
+        {
+            "EMBEDDING_SIZE": 8192,
+            "NUM_LAYERS": 2,
+            "NN_HIDDEN_LAYER_SIZES": [
+                50,
+                50
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.0001
+        }
+    ],
+    [
+        [
+            "hdc",
+            "qm9_gap",
+            "k_neighbors"
+        ],
+        {
+            "EMBEDDING_SIZE": 2048,
+            "NUM_LAYERS": 1,
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "hdc",
+            "qm9_gap",
+            "random_forest"
+        ],
+        {
+            "EMBEDDING_SIZE": 8192,
+            "NUM_LAYERS": 1,
+            "RF_NUM_ESTIMATORS": 100,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "hdc",
+            "qm9_energy",
+            "neural_net2"
+        ],
+        {
+            "EMBEDDING_SIZE": 8192,
+            "NUM_LAYERS": 2,
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "hdc",
+            "qm9_gap",
+            "grad_boost"
+        ],
+        {
+            "EMBEDDING_SIZE": 8192,
+            "NUM_LAYERS": 1,
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "hdc",
+            "qm9_energy",
+            "grad_boost"
+        ],
+        {
+            "EMBEDDING_SIZE": 8192,
+            "NUM_LAYERS": 1,
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "hdc",
+            "aqsoldb",
+            "random_forest"
+        ],
+        {
+            "EMBEDDING_SIZE": 8192,
+            "NUM_LAYERS": 1,
+            "RF_NUM_ESTIMATORS": 500,
+            "RF_MAX_DEPTH": 20,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "hdc",
+            "aqsoldb",
+            "k_neighbors"
+        ],
+        {
+            "EMBEDDING_SIZE": 4096,
+            "NUM_LAYERS": 1,
+            "KN_NUM_NEIGHBORS": 10,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "hdc",
+            "aqsoldb",
+            "neural_net2"
+        ],
+        {
+            "EMBEDDING_SIZE": 4096,
+            "NUM_LAYERS": 3,
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "hdc",
+            "aqsoldb",
+            "grad_boost"
+        ],
+        {
+            "EMBEDDING_SIZE": 4096,
+            "NUM_LAYERS": 1,
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "hdc",
+            "aqsoldb",
+            "neural_net"
+        ],
+        {
+            "EMBEDDING_SIZE": 8192,
+            "NUM_LAYERS": 2,
+            "NN_HIDDEN_LAYER_SIZES": [
+                50,
+                50
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.01
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "aqsoldb",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 10,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "morgan",
+            "aqsoldb",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 500,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "morgan",
+            "aqsoldb",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "aqsoldb",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "aqsoldb",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 500,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": "sqrt"
+        }
+    ],
+    [
+        [
+            "atom",
+            "aqsoldb",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 500,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "aqsoldb",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.0001
+        }
+    ],
+    [
+        [
+            "atom",
+            "aqsoldb",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                50,
+                50
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "morgan",
+            "aqsoldb",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "morgan",
+            "aqsoldb",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "aqsoldb",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "aqsoldb",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "atom",
+            "aqsoldb",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "atom",
+            "aqsoldb",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.0001
+        }
+    ],
+    [
+        [
+            "atom",
+            "aqsoldb",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "clogp",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 100,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "clogp",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                50,
+                50
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "atom",
+            "clogp",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "clogp",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 500,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "morgan",
+            "clogp",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "clogp",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                10,
+                10
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "clogp",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                50,
+                50
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.01
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "clogp",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "clogp",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "atom",
+            "clogp",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 500,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "clogp",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "atom",
+            "clogp",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "morgan",
+            "clogp",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "atom",
+            "clogp",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                50,
+                50
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "atom",
+            "clogp",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.0001
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "qm9_energy",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "atom",
+            "qm9_gap",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "qm9_energy",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 100,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "qm9_gap",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "morgan",
+            "qm9_gap",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "atom",
+            "qm9_energy",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "atom",
+            "qm9_energy",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "qm9_gap",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "qm9_gap",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 500,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "qm9_energy",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "qm9_gap",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 100,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "qm9_gap",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "qm9_gap",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "qm9_energy",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 500,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "morgan",
+            "qm9_energy",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "qm9_gap",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "morgan",
+            "qm9_gap",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "qm9_energy",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.0001
+        }
+    ],
+    [
+        [
+            "atom",
+            "qm9_energy",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "morgan",
+            "qm9_energy",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "qm9_energy",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                50,
+                50
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "atom",
+            "qm9_energy",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 500,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "morgan",
+            "qm9_energy",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "atom",
+            "qm9_gap",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "qm9_energy",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "atom",
+            "qm9_gap",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "morgan",
+            "qm9_gap",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "atom",
+            "qm9_gap",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 500,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "atom",
+            "qm9_energy",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.001,
+            "NN_LEARNING_RATE_INIT": 0.01
+        }
+    ],
+    [
+        [
+            "atom",
+            "qm9_gap",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ]
+]

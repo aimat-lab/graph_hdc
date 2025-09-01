@@ -26,14 +26,16 @@ determine the optimal set of hyperparameters for each method and dataset combina
   was a grid search over all the hyperparameters (encoding method + model parameters) for each 
   combination of encoding (gnn, fp, hdc), the machine learning method (neural net, random forest etc)
   and the 6 core datasets (qm9 gap, aqsoldb, clogp, conjugated, bace, bbbp).
+- ``ex_00_c``: hopt only for the 4 regression datasets (qm9 gap, aqsoldb, clogp, qm9 u0) but also for the rdkit fingerprints in addition and now also using larger embedding size for the sweep to be more fair towards the fingerprints hopefully.
 
 ## Experiment 1
 
 Experiment 1 is the main experiment which compares the different encoding methods and different machine learning methods on the 6 core datasets. The results are summarized in a table and a figure.
 
-- ``ex_01_a``: Results using the results of the full hyperparameter optimization from ``ex_00_b``.
+- ``ex_01_o``: Results using the results of the full hyperparameter optimization from ``ex_00_b``.
   The table contains the results of the different encoding methods (gnn, fp, hdc) and the different machine learning methods (neural net, random forest, support vector machines etc.) on the 6 core datasets (qm9 gap, aqsoldb, clogp, conjugated, bace, bbbp).
   The table also contains the average rank across all datasets for each method.
+- ``ex_01_p``: Results using the results of the hyperparameter optimization from ``ex_00_c``. Except that the optimized hyperparameters are only used for the fingerprint methods but not for the HDC and GNN methods - these use the standard parameters. And also only results for the 4 regression datasets (qm9 gap, aqsoldb, clogp, qm9 u0) are included.
 
 ## Experiment 2
 
@@ -46,7 +48,9 @@ Experiment 2 chooses a smaller number of machine learning methods but a larger n
 Experiment 3 performs an ablation study on the size and depth of the vector representations of both the HDC vectors and the molecular fingerprints for a selected dataset and a selection of machine learning methods.
 
 - ``ex_03_a``: On the AqSolDB dataset using the solubility as the target property. Comparison between GNN as the baseline, fingerprint and HDC (neural_net and random_forest each). Sweep over different embedding sizes and depths. Max training size.
-  - Results show that smaller depth is better always (kind of). Results also show that the HDC performs much better at smaller embedding sizes than the fingerprints but towards larger embedding sizes, the fignerprints converge towards almost the same performance.
+  - Results show that smaller depth is better always (kind of). Results also show that the HDC performs much better at smaller embedding sizes than the fingerprints but towards larger embedding sizes, the fingerprints converge towards almost the same performance.
+- ``ex_03_aa``: On the AqSolDB dataset using the solubility as the target property. Comparisong between GNN as the baseline, morgan fingerprints and HDC vectors on neural net and random forest. Sweep over different embedding sizes and depths. Max training size.
+  
 
 ## Experiment 4
 

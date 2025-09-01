@@ -14,6 +14,10 @@ FINGERPRINT_SIZE: int = 2048
 #       The radius of the fingerprint to be generated. This parameter determines the number of
 #       bonds to be considered when generating the fingerprint.
 FINGERPRINT_RADIUS: int = 2
+# :param FINGERPRINT_TYPE:
+#       The type of fingerprint to be generated. This can be 'morgan' for Morgan fingerprints 
+#       or 'rdkit' for RDKit fingerprints. The default is 'morgan'.
+FINGERPRINT_TYPE: str = 'morgan' # rdkit, atom, torsion
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -29,10 +33,27 @@ def process_dataset(e: Experiment,
                     index_data_map: dict
                     ) -> None:
     
-    gen = rdFingerprintGenerator.GetMorganGenerator(
-        radius=e.FINGERPRINT_RADIUS, 
-        fpSize=e.FINGERPRINT_SIZE,
-    )
+    if e.FINGERPRINT_TYPE == 'morgan':
+        gen = rdFingerprintGenerator.GetMorganGenerator(
+            radius=e.FINGERPRINT_RADIUS, 
+            fpSize=e.FINGERPRINT_SIZE,
+        )
+        
+    elif e.FINGERPRINT_TYPE == 'rdkit':
+        gen = rdFingerprintGenerator.GetRDKitFPGenerator(
+            fpSize=e.FINGERPRINT_SIZE,
+            maxPath=2*e.FINGERPRINT_RADIUS,
+        )
+        
+    elif e.FINGERPRINT_TYPE == 'atom':
+        gen = rdFingerprintGenerator.GetAtomPairGenerator(
+            fpSize=e.FINGERPRINT_SIZE,
+        )
+        
+    elif e.FINGERPRINT_TYPE == 'torsion':
+        gen = rdFingerprintGenerator.GetTopologicalTorsionGenerator(
+            fpSize=e.FINGERPRINT_SIZE,
+        )
     
     for c, (index, graph) in enumerate(index_data_map.items()):
         smiles: str = graph['graph_repr']

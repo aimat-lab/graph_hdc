@@ -8,6 +8,12 @@ from pycomex.utils import folder_path, file_namespace
 #       The name of the dataset to be used for the experiment. This name is used to download the dataset from the
 #       ChemMatData file share.
 DATASET_NAME: str = 'qm9_smiles'
+# :param DATASET_NAME_ID:
+#       The name of the dataset to be used later on for the identification of the dataset. This name will NOT be used 
+#       for the downloading of the dataset but only later on for identification. In most cases these will be the same 
+#       but in cases for example one dataset is used as the basis of some deterministic calculation of the target values 
+#       and in this case the name should identify it as such.
+DATASET_NAME_ID: str = DATASET_NAME
 # :param DATASET_TYPE:
 #       The type of the dataset, either 'classification' or 'regression'. This parameter is used to determine the
 #       evaluation metrics and the type of the prediction target.
@@ -19,6 +25,11 @@ NUM_TEST: int = 1000
 #       The index of the target in the graph labels. This parameter is used to determine the target of the
 #       prediction task.
 TARGET_INDEX: int = 7 # GAP
+# :param NUM_DATA:
+#       The number of samples to be used for the experiment. This parameter can be either an integer or a float between 0 and 1.
+#       In case of an integer we use it as the number of samples to be used, in case of a float we use it as the fraction
+#       of the dataset to be used. This parameter is used to limit the size of the dataset for the experiment.
+NUM_DATA: float = 1.0
 
 
 # == EXPERIMENT PARAMETERS ==
@@ -37,6 +48,6 @@ def get_graph_labels(e: Experiment,
                      **kwargs,
                      ) -> np.ndarray:
     # GAP
-    return graph['graph_labels'][TARGET_INDEX:TARGET_INDEX+1]
+    return graph['graph_labels'][e.TARGET_INDEX:e.TARGET_INDEX+1]
 
 experiment.run_if_main()

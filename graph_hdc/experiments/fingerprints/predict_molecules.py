@@ -1,14 +1,20 @@
 import os
 import time
+import copy
 import random
 from typing import Any, List, Union, Tuple
 
 import joblib
-import json
+import torch
+import torch.nn as nn
+import pytorch_lightning as pl
 import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+from torchmetrics import R2Score
+from torchmetrics import Accuracy
+from torchmetrics import MeanAbsoluteError
 from rich.pretty import pprint
 from rdkit import Chem
 from rdkit.Chem import AllChem
@@ -34,6 +40,7 @@ from chem_mat_data._typing import GraphDict
 from chem_mat_data.main import load_graph_dataset, load_dataset_metadata
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score
+
 
 # :param IDENTIFIER:
 #       String identifier that can be used to later on filter the experiment, for example.
@@ -79,7 +86,7 @@ DATASET_NOISE: float = 0.0
 NUM_VAL: int = 10
 # :param SEED:
 #       The random seed to be used for the experiment.
-SEED: int = 1
+SEED: int = 2
 # :param USE_SMOTE:
 #       Whether to use the SMOTE algorithm to oversample the minority class in the dataset. This is only used for
 #       classification datasets. If set to True, the SMOTE algorithm will be applied to the training dataset after
@@ -105,7 +112,7 @@ MODELS: List[str] = [
 # :param SAVE_DATASET:
 #       This flag determines whether the dataset should be saved to disk as a NPZ file
 #       after being processed
-SAVE_DATASET: bool = True
+SAVE_DATASET: bool = False
 
 # == MODEL SPECIFIC PARAMETERS ==
 # The following parameters are used to configure the individual models. They need to be 
@@ -146,6 +153,205 @@ experiment = Experiment(
     glob=globals()
 )
 
+# == UTILS ==
+
+
+class BestModelRestorer(pl.Callback):
+    """
+    This class implements a PyTorch Lightning callback which will restore the model weights to 
+    that state which achieved the best validation loss observed during the training process.
+    
+    This is done by monitoring a specific metric (e.g. 'val_loss') and saving the model state
+    whenever the monitored metric improves. Using a hook at the very end of the training, the 
+    model weights are reset to that best state.
+    """
+    
+    def __init__(self, 
+                 monitor: str = "val_loss", 
+                 mode: str = "min"
+                 ) -> None:
+        super().__init__()
+        self.monitor = monitor
+        if mode not in ["min", "max"]:
+            raise ValueError("mode must be 'min' or 'max'.")
+        self.mode = mode
+
+        # This will variable will store the best score observed during the training.
+        self.best_score: float = None
+        # This will store the best model state dict associated with the best score.
+        self.best_state_dict = None
+        # This will store the time when the best score was achieved.
+        self.best_time = None
+
+    def on_fit_start(self, trainer, pl_module):
+        """
+        Initialize the best score before starting the fit.
+        """
+        if self.mode == "min":
+            self.best_score = float("inf")
+        else:
+            self.best_score = -float("inf")
+        self.best_state_dict = None
+
+    def on_validation_end(self, trainer, pl_module):
+        """
+        Called at the end of the validation loop. We check whether the monitored metric i
+        mproved and if so, store the model state dict and log the improvement.
+        """
+        metrics = trainer.callback_metrics
+        current_score = metrics.get(self.monitor)
+
+        if current_score is None:
+            # Metric not found, cannot update best score
+            return
+
+        if (
+            (self.mode == "min" and current_score < self.best_score) or
+            (self.mode == "max" and current_score > self.best_score)
+        ):
+            # Update best score and store model weights
+            self.best_score = current_score
+            self.best_state_dict = {
+                k: copy.deepcopy(v.detach().cpu().clone())
+                for k, v in pl_module.state_dict().items()
+            }
+            self.best_time = time.time()
+
+            # Log the new best score (if the logger is available)
+            if trainer.logger is not None:
+                trainer.logger.log_metrics({f"best_{self.monitor}": current_score}, step=trainer.global_step)
+                
+            # You could also print a message if desired:
+            trainer.print(
+                f"New best {self.monitor}={current_score:.4f} at step={trainer.global_step}."
+            )
+
+    def on_fit_end(self, trainer, pl_module):
+        """
+        At the end of training, restore the model to the best recorded state.
+        """
+        if self.best_state_dict is not None:
+            current_state_dict = pl_module.state_dict()
+            pl_module.load_state_dict(self.best_state_dict)
+            trainer.print(
+                f"Restored the best model with {self.monitor}={self.best_score:.4f}."
+            )
+
+
+class NeuralNet(pl.LightningModule):
+    """
+    A simple multi-layer neural network for regression or classification tasks based 
+    on tabular input of fixed size.
+    """
+    
+    def __init__(self, 
+                 input_dim: int, 
+                 output_dim: int,
+                 hidden_units: list[int] = [100, 100, 100],
+                 learning_rate: float = 1e-5,
+                 loss_function: str = 'mse', # or 'bce'
+                 ) -> None:
+        super().__init__()
+        
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.hidden_units = hidden_units
+        self.learning_rate = learning_rate
+        self.loss_function = loss_function
+        
+        self.layers = nn.ModuleList()
+        prev_units = self.input_dim
+        for units in self.hidden_units:
+            self.layers.append(nn.Sequential(
+                nn.Linear(prev_units, units),
+                nn.BatchNorm1d(units),
+                nn.ReLU(),
+            ))
+            prev_units = units
+            
+        self.layers.append(nn.Linear(prev_units, self.output_dim))
+
+        if self.loss_function == 'mse':
+            self.criterion = nn.MSELoss()
+            self.metric = MeanAbsoluteError(num_outputs=self.output_dim,)
+            
+        elif self.loss_function == 'bce':
+            self.criterion = nn.BCEWithLogitsLoss()
+            self.metric = Accuracy(num_classes=self.output_dim, average='macro')
+            
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        
+        for layer in self.layers:
+            x = layer(x)
+            
+        return x
+
+    def training_step(self, 
+                      batch: Tuple[torch.Tensor, torch.Tensor], 
+                      batch_idx: int
+                      ) -> torch.Tensor:
+        x, y = batch
+        y_hat = self.forward(x)
+        y_hat
+        
+        loss = self.criterion(y_hat, y)
+        return loss
+    
+    def validation_step(self,
+                        batch: Tuple[torch.Tensor, torch.Tensor],
+                        batch_idx: int
+                        ) -> torch.Tensor:
+        x, y = batch
+        
+        y_hat = self.forward(x)
+        value = self.metric(y_hat, y)
+        self.log(
+            'val_loss', value, 
+            on_step=False, 
+            on_epoch=True, 
+            prog_bar=True, 
+            logger=True
+        )
+        return value
+        
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        optimizer = torch.optim.Adam(
+            self.parameters(), 
+            lr=self.learning_rate,
+            weight_decay=1e-5,
+        )
+        return optimizer
+    
+    # --- implement sklearn interface ---
+    
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        
+        x_tensor = torch.Tensor(X)
+        loader = torch.utils.data.DataLoader(
+            x_tensor, 
+            batch_size=64, 
+            shuffle=False
+        )
+        
+        outputs: list[np.ndarray] = []
+        with torch.no_grad():
+            for data in loader:
+                y_hat = self.forward(data)
+                outputs.append(y_hat.cpu().numpy())
+                
+        return np.concatenate(outputs, axis=0)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        
+        y = self.predict(X)
+        if self.loss_function == 'bce':
+            y = torch.sigmoid(torch.Tensor(y))
+        elif self.loss_function == 'mse':
+            raise ValueError('Cannot use predict_proba with MSE loss function.')
+    
+        return y.cpu().numpy()
+
+# == EXPERIMENT IMPLEMENTATION ==
 
 @experiment.hook('load_dataset', replace=False, default=True)
 def load_dataset(e: Experiment) -> dict[int, GraphDict]:
@@ -572,6 +778,106 @@ def train_model__neural_net(e: Experiment,
 
     time_end = time.time()
     e['train_time/neural_net'] = time_end - time_start
+    
+    return model
+
+
+@experiment.hook('train_model__neural_net2', replace=False, default=True)
+def train_model__neural_net2(e: Experiment,
+                             index_data_map: dict,
+                             train_indices: list[int],
+                             val_indices: list[int]
+                             ) -> Any:
+    """
+    This hook trains a PytorchLightning neural network model.
+    """
+    
+    num_val = max(2, int(0.05 * len(train_indices)))
+    val_indices_ = random.sample(train_indices, k=num_val)
+    train_indices = list(set(train_indices) - set(val_indices_))
+    e.log(f'internally using {len(train_indices)} training samples '
+          f'and {len(val_indices_)} validation samples.')
+    
+    ## --- converting data to torch dataset ---
+    # To train a Lightning model, the dataset first needs to be converted into 
+    # the format of a pytorch dataset consisting of pytorch tensors.
+    X_train = np.array([index_data_map[i]['graph_features'] for i in train_indices])
+    y_train = np.array([index_data_map[i]['graph_labels'] for i in train_indices])
+    
+    X_train = torch.tensor(X_train, dtype=torch.float32)
+    y_train = torch.tensor(y_train, dtype=torch.float32)
+    
+    # Create a PyTorch dataset
+    train_dataset = torch.utils.data.TensorDataset(X_train, y_train)
+    # Create a DataLoader for the training dataset. This will be the object that 
+    # is later given to the trainer and which will manage the batching and the shuffling 
+    # of the data during training.
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, 
+        batch_size=64, 
+        shuffle=True,
+        drop_last=True,
+    )
+    
+    X_val = np.array([index_data_map[i]['graph_features'] for i in val_indices_])
+    y_val = np.array([index_data_map[i]['graph_labels'] for i in val_indices_])
+    
+    X_val = torch.tensor(X_val, dtype=torch.float32)
+    y_val = torch.tensor(y_val, dtype=torch.float32)
+    
+    # Create a PyTorch dataset for validation
+    val_dataset = torch.utils.data.TensorDataset(X_val, y_val)
+    # Create a DataLoader for the validation dataset
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=64,
+        shuffle=False,
+    )
+    
+    ## --- creating the neural network model ---
+    
+    # input output dimensions
+    input_dim = X_train.shape[1]
+    output_dim = y_train.shape[1] if len(y_train.shape) > 1 else 1
+    
+    # The model itself
+    model = NeuralNet(
+        input_dim=input_dim,
+        output_dim=output_dim,
+        hidden_units=e.NN_HIDDEN_LAYER_SIZES,
+        learning_rate=e.NN_LEARNING_RATE_INIT,
+        loss_function='mse' if e.DATASET_TYPE == 'regression' else 'bce',
+    )
+    
+    # This callback will monitor the validation loss and restore the model weights 
+    # to the state which achieved the best validation loss during any epoch of the 
+    # training process.
+    callback = BestModelRestorer(
+        monitor='val_loss',
+        mode='min',
+    )
+    trainer = pl.Trainer(
+        max_epochs=200,
+        accelerator='auto',
+        devices=1,
+        logger=False,
+        callbacks=[callback],
+        enable_progress_bar=e.__DEBUG__,
+    )
+    
+    ## --- training the model ---
+    # This method will perform the actual fitting of the model to the data.
+    trainer.fit(
+        model, 
+        train_dataloaders=train_loader,
+        val_dataloaders=val_loader,
+    )
+    # important: After the training is done, we need to put the model into evaluation 
+    # mode to ensure it uses the running statistics for the batch norm.
+    model.eval()
+    
+    y_val_pred = model.predict(X_val)
+    print(r2_score(y_val.numpy(), y_val_pred))
     
     return model
     
