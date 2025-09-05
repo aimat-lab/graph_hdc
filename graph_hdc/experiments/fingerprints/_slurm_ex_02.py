@@ -29,29 +29,37 @@ PREFIX: str = 'ex_02_a'
 # combinations individually.
 ENCODING_METHOD_TUPLES: list[tuple[str, str]] = [
     ('gnn', 'gatv2'),
-    ('hdc', 'neural_net'),
+    ('hdc', 'neural_net2'),
     #('hdc', 'random_forest'),
-    ('fp', 'neural_net'),
+    ('fp', 'neural_net2'),
     #('fp', 'random_forest'),
+]
+ENCODING_PARAM_TUPLES: list[tuple[str, dict]] = [
+    ('gnn', {'MODELS': ['gatv2']}),
+    ('hdc', {'MODELS': ['neural_net2']}),
+    ('morgan', {'MODELS': ['neural_net2'], 'FINGERPRINT_TYPE': 'morgan'}),
+    ('rdkit', {'MODELS': ['neural_net2'], 'FINGERPRINT_TYPE': 'rdkit'}),
+    ('atom', {'MODELS': ['neural_net2'], 'FINGERPRINT_TYPE': 'atom'}),
+    ('torsion', {'MODELS': ['neural_net2'], 'FINGERPRINT_TYPE': 'torsion'}),
 ]
 
 DATASET_PARAM_TUPLES: dict[str, dict] = [
-    ('clogp', {'NOTE': 'ClogP'}),
-    ('aqsoldb', {'NOTE': 'logS'}),
-    ('lipophilicity', {}),
-    ('qm9_smiles', {'TARGET_INDEX': 3, 'NOTE': 'Dipole Moment'}),
-    ('qm9_smiles', {'TARGET_INDEX': 4, 'NOTE': 'Polarizability'}),
-    ('qm9_smiles', {'TARGET_INDEX': 7, 'NOTE': 'GAP'}),
-    ('qm9_smiles', {'TARGET_INDEX': 10, 'NOTE': 'U0'}),
-    ('compas', {'TARGET_INDEX': 0, 'NOTE': 'GAP'}),
-    ('compas', {'TARGET_INDEX': 1, 'NOTE': 'rel. Energy'}),
-    ('zinc250', {'TARGET_INDEX': 0, 'NOTE': 'ClogP'}), 
-    ('zinc250', {'TARGET_INDEX': 1, 'NOTE': 'QED'}),
-    ('zinc250', {'TARGET_INDEX': 2, 'NOTE': 'SAS'}),
+    ('aqsoldb', {'NOTE': 'aqsoldb_logs'}),
+    ('lipop', {'NOTE': 'lipop_logd'}),
+    ('zinc250', {'TARGET_INDEX': 0, 'NOTE': 'zinc_clogp'}), 
+    ('zinc250', {'TARGET_INDEX': 1, 'NOTE': 'zinc_qed'}),
+    ('zinc250', {'TARGET_INDEX': 2, 'NOTE': 'zinc_sas'}),
+    ('qm9_smiles', {'TARGET_INDEX': 3, 'NOTE': 'qm9_dipole'}),
+    ('qm9_smiles', {'TARGET_INDEX': 4, 'NOTE': 'qm9_alpha'}),
+    ('qm9_smiles', {'TARGET_INDEX': 7, 'NOTE': 'qm9_gap'}),
+    ('qm9_smiles', {'TARGET_INDEX': 10, 'NOTE': 'qm9_energy'}),
+    ('compas', {'TARGET_INDEX': 3, 'NOTE': 'compas_dipole'}),
+    ('compas', {'TARGET_INDEX': 2, 'NOTE': 'compas_gap'}),
+    ('compas', {'TARGET_INDEX': 4, 'NOTE': 'compas_energy'}),
+    ('tadf', {'TARGET_INDEX': 0, 'NOTE': 'tadf_rate'}), 
+    ('tadf', {'TARGET_INDEX': 1, 'NOTE': 'tadf_splitting'}),
+    ('tadf', {'TARGET_INDEX': 2, 'NOTE': 'tadf_oscillator'}),
 ]
-
-# This data structure determines the embedding depths to be used for the ablation study.
-EMBEDDING_DEPTH_SWEEP: list[int] = [1, 3]
 
 ENCDODING_SIZE_PARAMETER_MAP: dict[str, str] = {
     'fp': 'FINGERPRINT_SIZE',
@@ -89,19 +97,28 @@ ENCODING_PARAMETERS_MAP: dict[str, dict] = {
     },
 }
 
-EMBEDDING_SIZE = 2048
+EMBEDDING_SIZE = 8192
 EMBEDDING_DEPTH = 2
 
 num_experiments = (
-    len(ENCODING_METHOD_TUPLES) * 
+    len(ENCODING_PARAM_TUPLES) * 
     len(DATASET_PARAM_TUPLES) * 
     len(SEEDS)
 )
 print(f'Preparing to schedule {num_experiments} experiments for the ablation study.')
 
+# --- creating SLURM submitter ---
+    submitter = ASlurmSubmitter(
+        config_name=AUTOSLURM_CONFIG,
+        batch_size=1,
+        dry_run=False,
+        randomize=True,
+    )
+
+    # --- submitting experiments ---
 with tqdm(total=num_experiments, desc="Scheduling experiments") as pbar:
     
-    for (encoding, model) in ENCODING_METHOD_TUPLES:
+    for (encoding, encoding_param_dict) in ENCODING_METHOD_TUPLES:
         
         for (dataset_name, dataset_param_dict) in DATASET_PARAM_TUPLES:
             
@@ -125,7 +142,6 @@ with tqdm(total=num_experiments, desc="Scheduling experiments") as pbar:
                         f'--__DEBUG__=False ',
                         f'--__PREFIX__="{repr(PREFIX)}" ',
                         f'--SEED="{seed}" ',
-                        f'--MODELS="{repr([model])}" ',
                         f'--NUM_TEST="{repr(0.1)}" ',
                         f'--NUM_TRAIN="{repr(1.0)}" ',
                         f'--{embedding_size_parameter}="{repr(EMBEDDING_SIZE)}" ',
@@ -134,25 +150,17 @@ with tqdm(total=num_experiments, desc="Scheduling experiments") as pbar:
                     
                     # The parameters to be used for this specific encoding method.
                     param_dict = ENCODING_PARAMETERS_MAP[encoding]
+                    
+                    param_dict.update(encoding_param_dict)
+                    param_dict.update(dataset_param_dict)
+                    
                     for key, value in param_dict.items():
                         python_command_list.append(f'--{key}="{repr(value)}"')
                         
-                    for key, value in dataset_param_dict.items():
-                        python_command_list.append(f'--{key}="{repr(value)}"')
-                        
                     python_command_string = ' '.join(python_command_list)
-                    
-                    ## --- Assemble ASLURM Command ---
-                    # Finally, on the top level we need to call the ASLURMX command to schedule the job.
-                    aslurm_command = [
-                        'aslurmx',
-                        '-cn', AUTOSLURM_CONFIG,
-                        #'--dry-run',
-                        'cmd',
-                        python_command_string
-                    ]
-                    result = subprocess.run(aslurm_command, cwd=PATH, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    if result.returncode != 0:
-                        print(f"Warning: aslurmx command failed!")
                         
+                    submitter.add_command(python_command_string)
                     pbar.update(1)
+                        
+    print(f'Submitting {submitter.count_jobs()} jobs to SLURM...')
+    submitter.submit()

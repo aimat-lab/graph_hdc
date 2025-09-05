@@ -19,11 +19,13 @@ AUTOSLURM_CONFIG = 'euler_2'
 
 # These are the different seeds to be used as the independent repetitions for the 
 # the various computational experiments.
-SEEDS: list[int] = [0, 1, 2, 3, 4]
+#SEEDS: list[int] = [0, 1, 2, 3, 4]
+SEEDS: list[int] = [5, 6, 7, 8, 9]
+
 
 # The prefix for the experiment archives so that they can be easily identified later 
 # on again.
-PREFIX: str = 'ex_01_p'
+PREFIX: str = 'ex_01_aa'
 
 # This is the path to the JSON file which contains all the hyperparameters that were 
 # determined in the hyperparameter optimization.
@@ -70,14 +72,14 @@ ENCODING_PARAMETER_MAP = {
 # in the experiment files, the second value is a dictionary of parameters that are applied to 
 # the experiment for that specific dataset.
 DATASET_PARAMETER_TUPLES: list[tuple[str, dict]] = [
-    # (
-    #     'qm9_smiles', 
-    #     {
-    #         'NUM_DATA': 0.1,
-    #         'NOTE': 'qm9_gap',
-    #         'TARGET_INDEX': 7,  # GAP
-    #     },
-    # ),
+    (
+        'qm9_smiles', 
+        {
+            'NUM_DATA': 0.1,
+            'NOTE': 'qm9_gap',
+            'TARGET_INDEX': 7,  # GAP
+        },
+    ),
     (
         'qm9_smiles', 
         {
@@ -86,18 +88,18 @@ DATASET_PARAMETER_TUPLES: list[tuple[str, dict]] = [
             'TARGET_INDEX': 10,  # U0
         },
     ),
-    # (
-    #     'clogp', 
-    #     {
-    #         'NOTE': 'clogp',
-    #     },
-    # ),
-    # (
-    #     'aqsoldb', 
-    #     {
-    #         'NOTE': 'aqsoldb',
-    #     },
-    # ),
+    (
+        'clogp', 
+        {
+            'NOTE': 'clogp',
+        },
+    ),
+    (
+        'aqsoldb', 
+        {
+            'NOTE': 'aqsoldb',
+        },
+    ),
 ]
 
 
@@ -131,7 +133,8 @@ if __name__ == "__main__":
     submitter = ASlurmSubmitter(
         config_name=AUTOSLURM_CONFIG,
         batch_size=1,
-        dry_run=True,
+        dry_run=False,
+        randomize=True,
     )
 
     # --- submitting experiments ---

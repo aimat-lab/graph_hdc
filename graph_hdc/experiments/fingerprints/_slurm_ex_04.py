@@ -10,6 +10,8 @@ from itertools import product
 from rich.pretty import pprint
 import subprocess
 from tqdm import tqdm
+from auto_slurm.aslurmx import ASlurmSubmitter
+
 
 PATH = pathlib.Path(__file__).parent.absolute()
 
@@ -20,11 +22,11 @@ AUTOSLURM_CONFIG = 'euler_2'
 # dataset splitting! Will be the same for all expeirments.
 SEED: int = 0
 
-SEEDS: list[int] = [0, 1, 2,]
+SEEDS: list[int] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 # The prefix for the experiment archives so that they can be easily identified later 
 # on again.
-PREFIX: str = 'ex_04_e'
+PREFIX: str = 'ex_04_aa'
 
 # This determines the dataset that is used for the ablation study.
 DATASET_NAME: str = 'qm9_smiles'
@@ -59,7 +61,7 @@ ENCODING_PARAMETERS_MAP: dict[str, dict] = {
         'NN_HIDDEN_LAYER_SIZES': (100, 100),
         'NN_ALPHA': 0.001,
         'NN_LEARNING_RATE_INIT': 0.001,
-        'EMBEDDING_SIZE': 2048,
+        'EMBEDDING_SIZE': 8192,
         'NUM_LAYERS': 2,
         'TARGET_INDEX': 10,
     },
@@ -71,8 +73,9 @@ ENCODING_PARAMETERS_MAP: dict[str, dict] = {
         'NN_HIDDEN_LAYER_SIZES': (100, 100),
         'NN_ALPHA': 0.001,
         'NN_LEARNING_RATE_INIT': 0.001,
-        'FINGERPRINT_SIZE': 2048,
+        'FINGERPRINT_SIZE': 8192,
         'FINGERPRINT_RADIUS': 2, 
+        'FINGERPRINT_TYPE': 'morgan',
         'TARGET_INDEX': 10,   
     },
 }
@@ -96,6 +99,14 @@ NUM_TRAIN_SWEEP: list[int | float] = [
 num_experiments = len(ENCODING_METHOD_TUPLES) * len(NUM_TRAIN_SWEEP) * len(SEEDS)
 print(f'Preparing to schedule {num_experiments} experiments for the ablation study.')
 
+# --- creating SLURM submitter ---
+submitter = ASlurmSubmitter(
+    config_name=AUTOSLURM_CONFIG,
+    batch_size=1,
+    randomize=True,
+)
+
+# --- submitting experiments ---
 with tqdm(total=num_experiments, desc="Scheduling experiments") as pbar:
     
     for (encoding, model) in ENCODING_METHOD_TUPLES:
@@ -129,17 +140,9 @@ with tqdm(total=num_experiments, desc="Scheduling experiments") as pbar:
                     
                 python_command_string = ' '.join(python_command_list)
                 
-                ## --- Assemble ASLURM Command ---
-                # Finally, on the top level we need to call the ASLURMX command to schedule the job.
-                aslurm_command = [
-                    'aslurmx',
-                    '-cn', AUTOSLURM_CONFIG,
-                    #'--dry-run',
-                    'cmd',
-                    python_command_string
-                ]
-                result = subprocess.run(aslurm_command, cwd=PATH, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if result.returncode != 0:
-                    print(f"Warning: aslurmx command failed!")
-                    
+                submitter.add_command(python_command_string)
+                        
                 pbar.update(1)
+                    
+    print(f'Submitting {submitter.count_jobs()} jobs to SLURM...')
+    submitter.submit() 

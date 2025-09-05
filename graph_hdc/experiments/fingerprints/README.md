@@ -50,7 +50,7 @@ Experiment 3 performs an ablation study on the size and depth of the vector repr
 - ``ex_03_a``: On the AqSolDB dataset using the solubility as the target property. Comparison between GNN as the baseline, fingerprint and HDC (neural_net and random_forest each). Sweep over different embedding sizes and depths. Max training size.
   - Results show that smaller depth is better always (kind of). Results also show that the HDC performs much better at smaller embedding sizes than the fingerprints but towards larger embedding sizes, the fingerprints converge towards almost the same performance.
 - ``ex_03_aa``: On the AqSolDB dataset using the solubility as the target property. Comparisong between GNN as the baseline, morgan fingerprints and HDC vectors on neural net and random forest. Sweep over different embedding sizes and depths. Max training size.
-  
+- ``ex_03_ab``: On the QM9 dataset using U0 as the target property. Comparison between morgan fingerprints and HDC vectors on neural net and random forest. Sweep over different embedding sizes and depths. Max training size.
 
 ## Experiment 4
 
@@ -65,6 +65,8 @@ of dataset size vs. error residuals).
   - result shows GNN performs best across the board. HDC performs better for all dataset sizes. Interestingly, even though this is a noisy dataset, the performance plateaus only at the very end even for the HDC. Neural net approaches much better than random forest.
 - ``ex_04_d``: On the Zinc250k dataset using the QED as the target property. Comparison between GNN as the baseline, fingerpring and HDC (neural_net and random_forest each). Sweep over different training dataset sizes. Fixex configuration for embedding depth 2 and embedding size 2048.
   - Here, fingerprints and HDC perform about the same, while GNN clearly performs better.
+
+- ex ``ex_04_aa``: Doing the thing
 
 ## Experiment 5
 
