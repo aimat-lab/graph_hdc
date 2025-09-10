@@ -10,11 +10,13 @@ from itertools import product
 from rich.pretty import pprint
 import subprocess
 from tqdm import tqdm
+from auto_slurm.aslurmx import ASlurmSubmitter
+
 
 PATH = pathlib.Path(__file__).parent.absolute()
 
 # The autoslurm config file to be use for the creation of the SLURM jobs.
-AUTOSLURM_CONFIG = 'euler_2'
+AUTOSLURM_CONFIG = 'haicore_1gpu'
 
 # The seed to be used for the random number generator and more importantly for the 
 # dataset splitting! Will be the same for all expeirments.
@@ -36,11 +38,11 @@ ENCODING_METHOD_TUPLES: list[tuple[str, str]] = [
 ]
 ENCODING_PARAM_TUPLES: list[tuple[str, dict]] = [
     ('gnn', {'MODELS': ['gatv2']}),
-    ('hdc', {'MODELS': ['neural_net2']}),
-    ('morgan', {'MODELS': ['neural_net2'], 'FINGERPRINT_TYPE': 'morgan'}),
-    ('rdkit', {'MODELS': ['neural_net2'], 'FINGERPRINT_TYPE': 'rdkit'}),
-    ('atom', {'MODELS': ['neural_net2'], 'FINGERPRINT_TYPE': 'atom'}),
-    ('torsion', {'MODELS': ['neural_net2'], 'FINGERPRINT_TYPE': 'torsion'}),
+    ('hdc', {'MODELS': ['neural_net2'], 'EMBEDDING_SIZE': 8192, 'NUM_LAYERS': 2}),
+    ('fp', {'MODELS': ['neural_net2'], 'FINGERPRINT_TYPE': 'morgan', 'FINGERPRINT_SIZE': 8192, 'FINGERPRINT_RADIUS': 2}),
+    ('fp', {'MODELS': ['neural_net2'], 'FINGERPRINT_TYPE': 'rdkit', 'FINGERPRINT_SIZE': 8192, 'FINGERPRINT_RADIUS': 2}),
+    ('fp', {'MODELS': ['neural_net2'], 'FINGERPRINT_TYPE': 'atom', 'FINGERPRINT_SIZE': 8192, 'FINGERPRINT_RADIUS': 2}),
+    ('fp', {'MODELS': ['neural_net2'], 'FINGERPRINT_TYPE': 'torsion', 'FINGERPRINT_SIZE': 8192, 'FINGERPRINT_RADIUS': 2}),
 ]
 
 DATASET_PARAM_TUPLES: dict[str, dict] = [
@@ -60,15 +62,6 @@ DATASET_PARAM_TUPLES: dict[str, dict] = [
     ('tadf', {'TARGET_INDEX': 1, 'NOTE': 'tadf_splitting'}),
     ('tadf', {'TARGET_INDEX': 2, 'NOTE': 'tadf_oscillator'}),
 ]
-
-ENCDODING_SIZE_PARAMETER_MAP: dict[str, str] = {
-    'fp': 'FINGERPRINT_SIZE',
-    'hdc': 'EMBEDDING_SIZE',   
-}
-ENCODING_DEPTH_PARAMETER_MAP: dict[str, str] = {
-    'fp': 'FINGERPRINT_RADIUS',
-    'hdc': 'NUM_LAYERS',
-}
 
 # This maps from the encoding method to a dictionary of parameters that are specific to 
 # that encoding method.
@@ -97,8 +90,6 @@ ENCODING_PARAMETERS_MAP: dict[str, dict] = {
     },
 }
 
-EMBEDDING_SIZE = 8192
-EMBEDDING_DEPTH = 2
 
 num_experiments = (
     len(ENCODING_PARAM_TUPLES) * 
@@ -108,59 +99,56 @@ num_experiments = (
 print(f'Preparing to schedule {num_experiments} experiments for the ablation study.')
 
 # --- creating SLURM submitter ---
-    submitter = ASlurmSubmitter(
-        config_name=AUTOSLURM_CONFIG,
-        batch_size=1,
-        dry_run=False,
-        randomize=True,
-    )
+submitter = ASlurmSubmitter(
+    config_name=AUTOSLURM_CONFIG,
+    batch_size=10,
+    randomize=True,
+    overwrite_fillers={
+        'time': '12:00:00', # 12 hours should be enough
+        'venv': '/home/iti/tm4030/Programming/graph_hdc/.venv',
+        'partition': 'normal',
+    },
+)
 
-    # --- submitting experiments ---
+# --- submitting experiments ---
 with tqdm(total=num_experiments, desc="Scheduling experiments") as pbar:
     
-    for (encoding, encoding_param_dict) in ENCODING_METHOD_TUPLES:
+    for (encoding, encoding_param_dict) in ENCODING_PARAM_TUPLES:
         
         for (dataset_name, dataset_param_dict) in DATASET_PARAM_TUPLES:
             
-            for embedding_depth in EMBEDDING_DEPTH_SWEEP:
+            for seed in SEEDS:
             
-                for seed in SEEDS:
+                ## --- Assemble Python Command ---
+                # At first we need to assemble the python command that will be executed within each 
+                # SLURM job. For this we need to call the correct experiment module with the correct 
+                # parameters.
+                experiment_module = f'predict_molecules__{encoding}__{dataset_name}.py'
+                experiment_path = os.path.join(PATH, experiment_module)
                 
-                    ## --- Assemble Python Command ---
-                    # At first we need to assemble the python command that will be executed within each 
-                    # SLURM job. For this we need to call the correct experiment module with the correct 
-                    # parameters.
-                    experiment_module = f'predict_molecules__{encoding}__{dataset_name}.py'
-                    experiment_path = os.path.join(PATH, experiment_module)
+                python_command_list = [
+                    'python',
+                    experiment_path,
+                    f'--__DEBUG__=False ',
+                    f'--__PREFIX__="{repr(PREFIX)}" ',
+                    f'--SEED="{seed}" ',
+                    f'--NUM_TEST="{repr(0.1)}" ',
+                    f'--NUM_TRAIN="{repr(1.0)}" ',
+                ]
+                
+                # The parameters to be used for this specific encoding method.
+                param_dict = ENCODING_PARAMETERS_MAP[encoding]
+                
+                param_dict.update(encoding_param_dict)
+                param_dict.update(dataset_param_dict)
+                
+                for key, value in param_dict.items():
+                    python_command_list.append(f'--{key}="{repr(value)}"')
                     
-                    embedding_size_parameter = ENCDODING_SIZE_PARAMETER_MAP[encoding]
-                    embedding_depth_parameter = ENCODING_DEPTH_PARAMETER_MAP[encoding]
+                python_command_string = ' '.join(python_command_list)
                     
-                    python_command_list = [
-                        'python',
-                        experiment_path,
-                        f'--__DEBUG__=False ',
-                        f'--__PREFIX__="{repr(PREFIX)}" ',
-                        f'--SEED="{seed}" ',
-                        f'--NUM_TEST="{repr(0.1)}" ',
-                        f'--NUM_TRAIN="{repr(1.0)}" ',
-                        f'--{embedding_size_parameter}="{repr(EMBEDDING_SIZE)}" ',
-                        f'--{embedding_depth_parameter}="{repr(EMBEDDING_DEPTH)}" '
-                    ]
-                    
-                    # The parameters to be used for this specific encoding method.
-                    param_dict = ENCODING_PARAMETERS_MAP[encoding]
-                    
-                    param_dict.update(encoding_param_dict)
-                    param_dict.update(dataset_param_dict)
-                    
-                    for key, value in param_dict.items():
-                        python_command_list.append(f'--{key}="{repr(value)}"')
-                        
-                    python_command_string = ' '.join(python_command_list)
-                        
-                    submitter.add_command(python_command_string)
-                    pbar.update(1)
+                submitter.add_command(python_command_string)
+                pbar.update(1)
                         
     print(f'Submitting {submitter.count_jobs()} jobs to SLURM...')
     submitter.submit()
