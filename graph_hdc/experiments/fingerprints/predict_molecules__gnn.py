@@ -34,6 +34,7 @@ from graph_hdc.special.molecules import graph_dict_from_mol
 from graph_hdc.special.molecules import make_molecule_node_encoder_map
 from chem_mat_data.main import pyg_data_list_from_graphs
 
+
 # == DATASET PARAMETERS ==
 
 # :param DATASET_NAME:
@@ -89,6 +90,27 @@ DEVICE: str = "cuda:0" if torch.cuda.is_available() else "cpu"
 #       A boolean flag that determines whether to plot the UMAP dimensionality reduction of the HDC vectors
 #       for the molecular graphs in the dataset.
 PLOT_UMAP: bool = False
+
+# == DATASET UTILITIES ==
+
+class LazyGraphDataset(torch.utils.data.Dataset):
+    """
+    Memory-efficient PyG dataset that creates Data objects on-the-fly
+    instead of pre-loading all graphs into memory.
+    """
+    def __init__(self, indices, data_map):
+        self.indices = indices
+        self.data_map = data_map
+        
+    def __len__(self):
+        return len(self.indices)
+        
+    def __getitem__(self, idx):
+        data_idx = self.indices[idx]
+        graph = self.data_map[data_idx]
+        # Convert single graph to PyG Data object on-the-fly
+        data_list = pyg_data_list_from_graphs([graph])
+        return data_list[0]
 
 # == GNN MODELS ==
 
@@ -583,20 +605,30 @@ def train_model__gcn(e: Experiment,
     val_indices_ = random.sample(train_indices, k=num_val)
     train_indices = list(set(train_indices) - set(val_indices_))
     
-    # Extract the graphs corresponding to the training indices
-    graphs_train = [index_data_map[i] for i in train_indices]
-    example_graph = graphs_train[0]
+    # Get example graph for model initialization
+    example_graph = index_data_map[train_indices[0]]
     
-    # Extract the graphs corresponding to the validation indices
-    graphs_val = [index_data_map[i] for i in val_indices_]
+    # Create memory-efficient datasets
+    train_dataset = LazyGraphDataset(train_indices, index_data_map)
+    val_dataset = LazyGraphDataset(val_indices_, index_data_map)
     
-    # Convert the list of graphs into a list of PyTorch Geometric Data objects
-    data_list_train: List[Data] = pyg_data_list_from_graphs(graphs_train)
-    data_list_val: List[Data] = pyg_data_list_from_graphs(graphs_val)
-    
-    # Create a DataLoader to handle batching of the data during training
-    data_loader_train = DataLoader(data_list_train, batch_size=e.BATCH_SIZE, shuffle=True)
-    data_loader_val = DataLoader(data_list_val, batch_size=e.BATCH_SIZE, shuffle=False)
+    # Create DataLoaders with optimized settings
+    data_loader_train = DataLoader(
+        train_dataset, 
+        batch_size=e.BATCH_SIZE, 
+        shuffle=True,
+        num_workers=4,
+        prefetch_factor=2,
+        pin_memory=True
+    )
+    data_loader_val = DataLoader(
+        val_dataset, 
+        batch_size=e.BATCH_SIZE, 
+        shuffle=False,
+        num_workers=4,
+        prefetch_factor=2,
+        pin_memory=True
+    )
     
     # Initialize the GCN model with the appropriate input and output dimensions
     model = GcnModel(
@@ -639,20 +671,30 @@ def train_model__gin(e: Experiment,
     val_indices_ = random.sample(train_indices, k=num_val)
     train_indices = list(set(train_indices) - set(val_indices_))
     
-    # Extract the graphs corresponding to the training indices
-    graphs_train = [index_data_map[i] for i in train_indices]
-    example_graph = graphs_train[0]
+    # Get example graph for model initialization
+    example_graph = index_data_map[train_indices[0]]
     
-    # Extract the graphs corresponding to the validation indices
-    graphs_val = [index_data_map[i] for i in val_indices_]
+    # Create memory-efficient datasets
+    train_dataset = LazyGraphDataset(train_indices, index_data_map)
+    val_dataset = LazyGraphDataset(val_indices_, index_data_map)
     
-    # Convert the list of graphs into a list of PyTorch Geometric Data objects
-    data_list_train: List[Data] = pyg_data_list_from_graphs(graphs_train)
-    data_list_val: List[Data] = pyg_data_list_from_graphs(graphs_val)
-    
-    # Create a DataLoader to handle batching of the data during training
-    data_loader_train = DataLoader(data_list_train, batch_size=e.BATCH_SIZE, shuffle=True)
-    data_loader_val = DataLoader(data_list_val, batch_size=e.BATCH_SIZE, shuffle=False)
+    # Create DataLoaders with optimized settings
+    data_loader_train = DataLoader(
+        train_dataset, 
+        batch_size=e.BATCH_SIZE, 
+        shuffle=True,
+        num_workers=4,
+        prefetch_factor=2,
+        pin_memory=True
+    )
+    data_loader_val = DataLoader(
+        val_dataset, 
+        batch_size=e.BATCH_SIZE, 
+        shuffle=False,
+        num_workers=4,
+        prefetch_factor=2,
+        pin_memory=True
+    )
     
     # Initialize the GIN model with the appropriate input and output dimensions
     model = GinModel(
@@ -695,20 +737,30 @@ def train_model__gatv2(e: Experiment,
     val_indices_ = random.sample(train_indices, k=num_val)
     train_indices = list(set(train_indices) - set(val_indices_))
     
-    # Extract the graphs corresponding to the training indices
-    graphs_train = [index_data_map[i] for i in train_indices]
-    example_graph = graphs_train[0]
+    # Get example graph for model initialization
+    example_graph = index_data_map[train_indices[0]]
     
-    # Extract the graphs corresponding to the validation indices
-    graphs_val = [index_data_map[i] for i in val_indices_]
+    # Create memory-efficient datasets
+    train_dataset = LazyGraphDataset(train_indices, index_data_map)
+    val_dataset = LazyGraphDataset(val_indices_, index_data_map)
     
-    # Convert the list of graphs into a list of PyTorch Geometric Data objects
-    data_list_train: List[Data] = pyg_data_list_from_graphs(graphs_train)
-    data_list_val: List[Data] = pyg_data_list_from_graphs(graphs_val)
-    
-    # Create a DataLoader to handle batching of the data during training
-    data_loader_train = DataLoader(data_list_train, batch_size=e.BATCH_SIZE, shuffle=True)
-    data_loader_val = DataLoader(data_list_val, batch_size=e.BATCH_SIZE, shuffle=False)
+    # Create DataLoaders with optimized settings
+    data_loader_train = DataLoader(
+        train_dataset, 
+        batch_size=e.BATCH_SIZE, 
+        shuffle=True,
+        num_workers=4,
+        prefetch_factor=2,
+        pin_memory=False
+    )
+    data_loader_val = DataLoader(
+        val_dataset, 
+        batch_size=e.BATCH_SIZE, 
+        shuffle=False,
+        num_workers=4,
+        prefetch_factor=2,
+        pin_memory=False
+    )
     
     # Initialize the GATv2 model with the appropriate input and output dimensions
     model = Gatv2Model(
@@ -741,9 +793,16 @@ def predict_model(e: Experiment,
                   indices: list[int],
                   ) -> np.ndarray:
     
-    graphs = [index_data_map[i] for i in indices]
-    data_list: List[Data] = pyg_data_list_from_graphs(graphs)
-    data_loader = DataLoader(data_list, batch_size=e.BATCH_SIZE, shuffle=False)
+    # Use memory-efficient dataset for prediction
+    pred_dataset = LazyGraphDataset(indices, index_data_map)
+    data_loader = DataLoader(
+        pred_dataset, 
+        batch_size=e.BATCH_SIZE, 
+        shuffle=False,
+        num_workers=4,
+        prefetch_factor=2,
+        pin_memory=True
+    )
     y_pred = []
     for data in data_loader:
         out = model(data).detach().cpu().numpy()

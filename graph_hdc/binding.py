@@ -37,21 +37,29 @@ def circular_convolution(tens1: torch.Tensor,
     return circulant_matrix(tens1) @ tens2
 
 
+def _circular_convolution_fft(tens: torch.Tensor) -> torch.Tensor:
+    # Original implementation for 1D tensors
+    ffts = torch.vmap(torch.fft.fft)(tens)
+    ffts = ffts.prod(0)
+    return torch.fft.ifft(ffts).real
+
+
 @register_function('circular_convolution_fft', 'bind')
-def circular_convolution_fft(tens1: torch.Tensor, 
+def circular_convolution_fft(tens1: torch.Tensor,
                              tens2: torch.Tensor
                              ) -> torch.Tensor:
     """
-    Performs a circular convolution between the given tensors ``tens1`` and ``tens2``. 
-    
-    Note that this function will peform the convolution in the frequency domain using the fast 
+    Performs a circular convolution between the given tensors ``tens1`` and ``tens2``.
+
+    Note that this function will peform the convolution in the frequency domain using the fast
     fourier transform (FFT) algorithm for to computational efficiency.
-    
+
     :param tens1: The first tensor to be convolved
     :param tens2: The second tensor to be convolved
-    
+
     :return: The circular convolution of the two tensors
     """
+    # Original implementation for 1D tensors
     ffts = torch.vmap(torch.fft.fft)(torch.stack([tens1, tens2]))
     ffts = ffts.prod(0)
     return torch.fft.ifft(ffts).real

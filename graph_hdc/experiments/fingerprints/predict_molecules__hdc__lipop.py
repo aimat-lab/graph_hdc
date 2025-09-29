@@ -26,14 +26,14 @@ NUM_TEST: int = 0.1
 # :param EMBEDDING_SIZE:
 #       The size of the graph embedding vectors. This will be the number of elements in each of the 
 #       hypervectors that represent the individual molecular graphs.
-EMBEDDING_SIZE: int = 1024
+EMBEDDING_SIZE: int = 2048
 # :param NUM_LAYERS:
 #       The number of layers in the hypernetwork. This parameter determines the depth of the hypernetwork
 #       which is used to generate the graph embeddings. This means it is the number of message passing 
 #       steps applied in the encoder.
 NUM_LAYERS: int = 2
 
-MODELS = ['neural_net2']
+MODELS = ['neural_net']
 
 # == EXPERIMENT PARAMETERS ==
 

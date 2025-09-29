@@ -55,6 +55,8 @@ def process_dataset(e: Experiment,
             fpSize=e.FINGERPRINT_SIZE,
         )
     
+    e.log('processing molecules into fingerprints...')
+    
     for c, (index, graph) in enumerate(index_data_map.items()):
         smiles: str = graph['graph_repr']
         fingerprint = gen.GetFingerprint(Chem.MolFromSmiles(smiles))

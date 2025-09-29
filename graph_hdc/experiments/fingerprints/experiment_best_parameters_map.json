@@ -497,6 +497,396 @@
     [
         [
             "rdkit",
+            "lipophilicity",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 100,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "morgan",
+            "bace_reg",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.0001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "morgan",
+            "lipophilicity",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.0001,
+            "NN_LEARNING_RATE_INIT": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "bace_reg",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 100,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": "sqrt"
+        }
+    ],
+    [
+        [
+            "morgan",
+            "bace_reg",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 10,
+            "KN_WEIGHTS": "uniform"
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "freesolv",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.0001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "freesolv",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.0001,
+            "NN_LEARNING_RATE_INIT": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "lipophilicity",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 100,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": null
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "bace_reg",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 3,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "morgan",
+            "freesolv",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                50,
+                50
+            ],
+            "NN_ALPHA": 0.0001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "morgan",
+            "freesolv",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 500,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": "sqrt"
+        }
+    ],
+    [
+        [
+            "morgan",
+            "bace_reg",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.0001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "freesolv",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 100,
+            "RF_MAX_DEPTH": null,
+            "RF_MAX_FEATURES": "sqrt"
+        }
+    ],
+    [
+        [
+            "morgan",
+            "freesolv",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 3,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "morgan",
+            "freesolv",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "bace_reg",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                10,
+                10
+            ],
+            "NN_ALPHA": 0.0001,
+            "NN_LEARNING_RATE_INIT": 0.0001
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "bace_reg",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "bace_reg",
+            "random_forest"
+        ],
+        {
+            "RF_NUM_ESTIMATORS": 100,
+            "RF_MAX_DEPTH": 10,
+            "RF_MAX_FEATURES": "sqrt"
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "bace_reg",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                10,
+                10
+            ],
+            "NN_ALPHA": 0.0001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "lipophilicity",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.0001,
+            "NN_LEARNING_RATE_INIT": 0.0001
+        }
+    ],
+    [
+        [
+            "morgan",
+            "lipophilicity",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "lipophilicity",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.0001,
+            "NN_LEARNING_RATE_INIT": 0.001
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "lipophilicity",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "freesolv",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "freesolv",
+            "neural_net2"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                100,
+                100
+            ],
+            "NN_ALPHA": 0.0001,
+            "NN_LEARNING_RATE_INIT": 0.01
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "lipophilicity",
+            "neural_net"
+        ],
+        {
+            "NN_HIDDEN_LAYER_SIZES": [
+                10,
+                10
+            ],
+            "NN_ALPHA": 0.0001,
+            "NN_LEARNING_RATE_INIT": 0.0001
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "lipophilicity",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 5,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "morgan",
+            "bace_reg",
+            "grad_boost"
+        ],
+        {
+            "GB_NUM_ESTIMATORS": 300,
+            "GB_MAX_DEPTH": 4,
+            "GB_LEARNING_RATE": 0.01
+        }
+    ],
+    [
+        [
+            "morgan",
+            "lipophilicity",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 3,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "rdkit",
+            "freesolv",
+            "k_neighbors"
+        ],
+        {
+            "KN_NUM_NEIGHBORS": 3,
+            "KN_WEIGHTS": "distance"
+        }
+    ],
+    [
+        [
+            "rdkit",
             "clogp",
             "random_forest"
         ],

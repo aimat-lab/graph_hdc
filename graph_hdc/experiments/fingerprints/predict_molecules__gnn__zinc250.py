@@ -24,12 +24,13 @@ NUM_TEST: int = 1000
 # :param TARGET_INDEX:
 #       The index of the target in the graph labels. This parameter is used to determine the target of the
 #       prediction task.
-TARGET_INDEX: int = 1 # QED
+TARGET_INDEX: int = 0 # logp
 # :param NUM_DATA:
 #       The number of samples to be used for the experiment. This parameter can be either an integer or a float between 0 and 1.
 #       In case of an integer we use it as the number of samples to be used, in case of a float we use it as the fraction
 #       of the dataset to be used. This parameter is used to limit the size of the dataset for the experiment.
 NUM_DATA: float = 1.0
+NUM_TRAIN = 100_000
 
 
 # == EXPERIMENT PARAMETERS ==

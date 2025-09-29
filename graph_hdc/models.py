@@ -22,8 +22,10 @@ from graph_hdc.utils import HypervectorCombinations
 from graph_hdc.utils import AbstractEncoder
 from graph_hdc.utils import CategoricalOneHotEncoder
 from graph_hdc.utils import CategoricalIntegerEncoder
+from graph_hdc.utils import ContinuousEncoder   
 from graph_hdc.graph import data_list_from_graph_dicts
 from graph_hdc.functions import resolve_function, desolve_function
+from graph_hdc.binding import _circular_convolution_fft
 
 
 # === HYPERDIMENSIONAL MESSAGE PASSING NETWORKS ===
@@ -71,7 +73,24 @@ class AbstractHyperNet(pl.LightningModule):
             result_list.extend(results)
             
         return result_list
-    
+
+    def forward_graph(self, graph: dict) -> Dict[str, np.ndarray]:
+        """
+        Given a single ``graph`` dict representation, this method will run the hypernet forward pass
+        on that graph and return a dictionary containing the result.
+
+        This is a convenience method that simply calls forward_graphs with a single-element list
+        and returns the first (and only) result.
+
+        :param graph: A graph dict representation containing the information about the nodes,
+            edges, and properties of the graph.
+
+        :returns: A result dictionary containing the same string keys as the result of the
+            "forward" method but with numpy array values for the single graph.
+        """
+        results = self.forward_graphs([graph])
+        return results[0]
+
     def extract_graph_results(self,
                               data: Data,
                               graph_results: Dict[str, torch.Tensor],
@@ -188,6 +207,7 @@ class HyperNet(AbstractHyperNet):
         self.node_encoder_hv_dicts: Dict[str, dict] = {
             name: encoder.get_encoder_hv_dict()
             for name, encoder in self.node_encoder_map.items()
+            if not isinstance(encoder, ContinuousEncoder)
         }
         
         # HypervectorCombinations is a special custom data structure which is used to construct all possible 
@@ -210,7 +230,7 @@ class HyperNet(AbstractHyperNet):
             
         self.node_hv_combination_stack = torch.stack(self.node_hv_combination_stack, dim=0)
         
-    # -- encoding
+    # --- encoding ---
     # These methods handle the encoding of the graph structures into the graph embedding vector
     
     def encode_properties(self, data: Data) -> Data:
@@ -225,7 +245,7 @@ class HyperNet(AbstractHyperNet):
             hypervectors.
         """
         
-        # ~ node properties
+        # --- node properties ---
         # generally, we want to generate a single high-dimensional hypervector representation for each of the 
         # nodes in the graph. However, we might want to individually encode different properties of the nodes
         # using different encoders that are specified as entries in the "node_encoder_map". In this case we 
@@ -237,8 +257,11 @@ class HyperNet(AbstractHyperNet):
             # property_value: (batch_size * num_nodes, num_node_features)
             property_value = getattr(data, node_property)
             # property_hv: (batch_size * num_nodes, hidden_dim)
-            #property_hv = torch.vmap(encoder.encode, in_dims=0)(property_value)
-            property_hv = torch.stack([encoder.encode(tens) for tens in property_value])
+            if hasattr(encoder, 'encode_batch'):
+                property_hv = encoder.encode_batch(property_value)
+            else: 
+                property_hv = torch.stack([encoder.encode(tens) for tens in property_value])
+            
             node_property_hvs.append(property_hv)
         
         if node_property_hvs:
@@ -252,8 +275,9 @@ class HyperNet(AbstractHyperNet):
             # In this case, this means that we iteratively bind all of the individual property hypervectors 
             # into a single hypervector.
             # property_hv = (batch_size * num_nodes, hidden_dim)
-            node_property_hv = torch_pairwise_reduce(node_property_hvs, func=self.bind_fn, dim=0)
-            node_property_hv = node_property_hv.squeeze()
+            #node_property_hv = torch_pairwise_reduce(node_property_hvs, func=self.bind_fn, dim=0)
+            #node_property_hv = node_property_hv.squeeze()
+            node_property_hv = _circular_convolution_fft(node_property_hvs)
             
         else:
             node_property_hv = torch.zeros(data.x.size(0), self.hidden_dim, device=self.device)
@@ -262,7 +286,7 @@ class HyperNet(AbstractHyperNet):
         # in the forward pass of the model
         setattr(data, 'node_hv', node_property_hv)
         
-        # ~ graph properties
+        # --- graph properties ---
         # There is also the option to encode a high-dimensional hypervector representation containing the 
         # properties of the overall graph (e.g. encoding the size of the graph). Here we also want to support 
         # the possibility to encode multiple properties of the graph using different encoders that are specified
@@ -274,8 +298,11 @@ class HyperNet(AbstractHyperNet):
             # property_value: (batch_size, num_graph_features)
             property_value = getattr(data, graph_property)
             # property_hv: (batch_size, hidden_dim)
-            #property_hv = torch.stack([encoder.encode(tens) for tens in property_value])
-            property_hv = torch.stack([encoder.encode(tens) for tens in property_value])
+            if hasattr(encoder, 'encode_batch'):
+                property_hv = encoder.encode_batch(property_value)
+            else: 
+                property_hv = torch.stack([encoder.encode(tens) for tens in property_value])
+            
             graph_property_hvs.append(property_hv)
             
         if graph_property_hvs:
@@ -283,8 +310,9 @@ class HyperNet(AbstractHyperNet):
             graph_property_hvs = torch.stack(graph_property_hvs, dim=0)
             
             # graph_property_hv: (batch_size, hidden_dim)
-            graph_property_hv = torch_pairwise_reduce(graph_property_hvs, func=self.bind_fn, dim=0)
-            graph_property_hv = graph_property_hv.squeeze()
+            #graph_property_hv = torch_pairwise_reduce(graph_property_hvs, func=self.bind_fn, dim=0)
+            graph_property_hv = torch.sum(graph_property_hvs, dim=0)
+            graph_property_hv = graph_property_hv#.squeeze()
             
         else:
             graph_property_hv = torch.zeros(torch.max(data.batch) + 1, self.hidden_dim, device=self.device)
@@ -295,9 +323,17 @@ class HyperNet(AbstractHyperNet):
             
         return data
     
+    @property
+    def uses_graph_properties(self) -> bool:
+        """
+        A simple utility function that returns True if the self.graph_encoder_map contains any entries 
+        and therefore the encoding of graph properties is used.
+        """
+        return bool(len(self.graph_encoder_map) > 0)
+    
     def forward(self, 
                 data: Data,
-                bidirectional: bool = True,
+                bidirectional: bool = False,
                 ) -> dict:
         """
         Performs a forward pass on the given PyG ``data`` object which represents a batch of graphs. Primarily 
@@ -312,14 +348,14 @@ class HyperNet(AbstractHyperNet):
         # node_dim: (batch_size * num_nodes)
         node_dim = data.x.size(0)
         
-        # ~ mapping node & graph properties as hypervectors
+        # --- mapping node & graph properties as hypervectors ---
         # The "encoder_properties" method will actually manage the encoding of the node and graph properties of 
         # the graph (as represented by the Data object) into representative 
         # Afterwards, the data object contains the additional properties "data.node_hv" and "data.graph_hv" 
         # which represent the encoded hypervectors for the individual nodes or for the overall graphs respectively.
         data = self.encode_properties(data)
         
-        # ~ handling continuous edge weights
+        # --- handling continuous edge weights ---
         # Optionally it is possible for the input graph structures to also define a "edge_weight" property which 
         # should be a continuous value that represents the weight of the edge. This weight will later be used 
         # to weight/gate the message passing over the corresponding edge during the message-passing steps.
@@ -331,9 +367,9 @@ class HyperNet(AbstractHyperNet):
         else:
             # If the given graphs do not define any edge weights we set the default values to 10 for all edges 
             # because sigmoid(10) ~= 1.0 which will effectively be the same as discrete edges.
-            edge_weight = 100 * torch.ones(data.edge_index.shape[1], 1, device=self.device)
+            edge_weight = 1000. * torch.ones(data.edge_index.shape[1], 1, device=self.device)
             
-        # ~ handling edge bi-directionality
+        # --- handling edge bi-directionality ---
         # If the bidirectional flag is given we will duplicate each edge in the input graphs and reverse the 
         # order of node indices such that each node of each edge is always considered as a source and a target 
         # for the message passing operation.
@@ -346,8 +382,10 @@ class HyperNet(AbstractHyperNet):
         else:
             edge_index = data.edge_index
             edge_weight = edge_weight
-            
-        # ~ pushing to device
+                        
+        # --- pushing to device ---
+        # Its possible to use gpu acceleration and therefore we need to push all the relevant tensors to the
+        # correct device that was selected when the HyperNet instance was created.
         data = data.to(self.device)
         edge_weight = edge_weight.to(self.device)
         edge_index = edge_index.to(self.device)
@@ -355,33 +393,47 @@ class HyperNet(AbstractHyperNet):
         # data.edge_index: (2, batch_size * num_edges)
         srcs, dsts = edge_index
     
-        # In this data structure we will stack all the intermediate node embeddings for the various message-passing 
-        # depths.
+        # In this data structure we will stack all the intermediate node embeddings for the various
+        # message-passing depths.
         # node_hv_stack: (num_layers + 1, batch_size * num_nodes, hidden_dim)
-        node_hv_stack: torch.Tensor = torch.zeros(
-            size=(self.depth + 1, node_dim, self.hidden_dim), 
-            device=self.device
-        )
-        node_hv_stack[0] = data.node_hv
-        
-        # ~ message passing
+        node_hv_layers = [data.node_hv]
+
+        # --- message passing ---
+        # Finally we perform the message passing itself over the given number of layers (depth).
+        # Te message passing will create messages from the source nodes to the target nodes (weighted by
+        # their edge weights) and then aggregate all the incoming messages for each target node by summing
+        # up the messages. The node representation of the next layer is then calcualted by binding the
+        # current node representation with the aggregated message representation and normalizing the result.
         for layer_index in range(self.depth):
             # messages are gated with the corresponding edge weights!
-            messages = node_hv_stack[layer_index][dsts] * sigmoid(edge_weight)
-            aggregated = scatter(messages, srcs, reduce='sum')
-            node_hv_stack[layer_index + 1] = normalize(self.bind_fn(node_hv_stack[layer_index], aggregated))
+            messages = node_hv_layers[layer_index][dsts] * sigmoid(edge_weight)
+            aggregated = scatter(messages, srcs, reduce='sum', dim_size=data.node_hv.size(0))
+            #print(node_hv_layers[layer_index].shape, aggregated.shape)
+            next_layer = normalize(self.bind_fn(node_hv_layers[layer_index], aggregated))
+            #next_layer = normalize(_circular_convolution_fft(torch.stack([node_hv_layers[0], aggregated])))
+            node_hv_layers.append(next_layer)
+
+        # Stack all layers into a tensor
+        node_hv_stack = torch.stack(node_hv_layers, dim=0)
         
         # We calculate the final graph-level embedding as the sum of all the node embeddings over all the various 
         # message passing depths and as the sum over all the nodes.
+        # If the self.normalize_all flag is set to True we also normalize the node embeddings after summing
+        # over the message passing depths as well as the final graph embedding.
         node_hv = node_hv_stack.sum(dim=0)
         if self.normalize_all:
-            node_hv = normalize(node_hv, dim=1)
+            node_hv = normalize(node_hv)
         
         readout = scatter(node_hv, data.batch, reduce=self.pooling)
-        if self.normalize_all:
-            readout = normalize(readout, dim=1)
         
-        embedding = readout
+        # This is the main result of the message passing part.
+        embedding: torch.Tensor = readout
+        
+        # --- graph properties ---
+        # The hypernet may not only use node properties for a graph but also graph-level global properties.
+        # If that is the case we simply add those to the final results.
+        if self.uses_graph_properties:
+            embedding = normalize(normalize(embedding) + normalize(data.graph_hv))
         
         # Graph hv stack is supposed to contain the graph hypervectors for each of the graphs in the 
         # batch at the different message passing depths. Whcih means that the different layers 
@@ -421,7 +473,7 @@ class HyperNet(AbstractHyperNet):
             'graph_hv_stack': graph_hv_stack,
         }
         
-    # -- decoding
+    # --- decoding ---
     # These methods handle the inverse operation -> The decoding of the graph embedding vectors back into 
     # the original graph structure.
         
@@ -485,7 +537,89 @@ class HyperNet(AbstractHyperNet):
                 constraints_order_zero.append(result_dict)
                 
         return constraints_order_zero
-    
+
+    def decode_nodes(self,
+                     embedding: torch.Tensor,
+                     iterations: int = 1,
+                     ) -> dict:
+        """
+        Returns decoded node information in graph dict format from the given ``embedding`` vector.
+
+        This method builds upon the decode_order_zero method to provide nodes in the standard graph dict
+        format that can be used by other parts of the codebase. It creates a full connectivity edge structure
+        and extracts all node properties as properly ordered numpy arrays.
+
+        :param embedding: The high-dimensional graph embedding vector that represents the graph.
+        :param iterations: Number of iterations for the decoding process (passed to decode_order_zero).
+
+        :returns: A graph dict containing:
+            - "node_indices": A numpy array of node indices (0, 1, 2, ...)
+            - "edge_index_full": A numpy array of shape (num_edges, 2) representing full connectivity
+            - "edge_weight_full": A numpy array of shape (num_edges,) with all zeros
+            - Additional arrays for each node property found in the constraints
+        """
+
+        # Get the constraints from decode_order_zero
+        constraints = self.decode_order_zero(embedding, iterations)
+
+        if not constraints:
+            # Return empty graph dict if no constraints found
+            return {
+                'node_indices': np.array([], dtype=int),
+                'edge_index_full': np.array([], dtype=int).reshape(0, 2),
+                'edge_weight_full': np.array([], dtype=float),
+            }
+
+        # Build ordered list of nodes from constraints
+        node_list = []
+        node_index = 0
+
+        for constraint in constraints:
+            num_nodes = constraint['num']
+            node_properties = constraint['src']
+
+            for _ in range(num_nodes):
+                node_dict = {'index': node_index}
+                node_dict.update(node_properties)
+                node_list.append(node_dict)
+                node_index += 1
+
+        total_nodes = len(node_list)
+
+        # Create node_indices tensor
+        node_indices = np.arange(total_nodes, dtype=int)
+
+        # Create full connectivity edge structure
+        edge_index_full = []
+        for i in range(total_nodes):
+            for j in range(i):
+                edge_index_full.append([i, j])
+
+        edge_index_full = np.array(edge_index_full, dtype=int)
+        edge_weight_full = np.zeros((len(edge_index_full), 1), dtype=float)
+
+        # Build the graph dict
+        graph_dict = {
+            'node_indices': node_indices,
+            'edge_index_full': edge_index_full,
+            'edge_weight_full': edge_weight_full,
+        }
+
+        # Extract node properties into properly ordered arrays
+        if total_nodes > 0:
+            # Get all unique property names from the node encoders
+            property_names = set()
+            for node in node_list:
+                property_names.update(node.keys())
+            property_names.discard('index')  # Remove the index key
+
+            # Create arrays for each property
+            for prop_name in property_names:
+                prop_values = [node.get(prop_name) for node in node_list]
+                graph_dict[prop_name] = np.array(prop_values)
+
+        return graph_dict
+
     def decode_order_one(self,
                          embedding: torch.Tensor,
                          constraints_order_zero: List[dict],
@@ -769,8 +903,10 @@ class HyperNet(AbstractHyperNet):
         # discretizing the still continuous edge weights and constructing a new "edge_index"
         # connectivity structure based only on the edges that have a weight > 0.5
         print(batch.edge_weight)
-        batch.edge_weight = (batch.edge_weight >= 0).float()
-        result = self.forward(batch)
+        # Create a new batch to avoid in-place operations on tensors with gradients
+        batch_discrete = batch.clone()
+        batch_discrete.edge_weight = (batch.edge_weight >= 0).float().detach()
+        result = self.forward(batch_discrete)
         embedding = result['graph_embedding']  # shape (candidate_batch_size, hidden_dim)
         losses = torch.square((embedding - graph_hv.expand_as(embedding))).mean(dim=1)
             

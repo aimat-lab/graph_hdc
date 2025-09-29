@@ -30,7 +30,7 @@ NUM_DATA: float = 1.0
 #       The index of the target in the graph labels. This parameter is used to determine the target of the
 #       prediction task.
 TARGET_INDEX: int = 1 # QED
-NUM_TRAIN = 100_000
+NUM_TRAIN = 200_000
 
 # == EMBEDDING PARAMETERS ==
 

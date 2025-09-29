@@ -26,15 +26,17 @@ NUM_TEST: int = 1000
 # :param FINGERPRINT_SIZE:
 #       The size of the fingerprint to be generated. This will be the number of elements in the 
 #       fingerprint vector representation of each molecule.
-FINGERPRINT_SIZE: int = 2048 * 4
+FINGERPRINT_SIZE: int = 2048
 # :param FINGERPRINT_RADIUS:
 #       The radius of the fingerprint to be generated. This parameter determines the number of
 #       bonds to be considered when generating the fingerprint.
 FINGERPRINT_RADIUS: int = 2
 
+FINGERPRINT_TYPE: str = 'atom' # rdkit, atom, torsion
+
 # == EXPERIMENT PARAMETERS ==
 
-MODELS = ['neural_net2']
+MODELS = ['neural_net']
 
 experiment = Experiment.extend(
     'predict_molecules__fp.py',

@@ -155,13 +155,18 @@ def data_from_graph_dict(graph: dict) -> Data:
     """
     
     graph = copy.deepcopy(graph)
-    if isinstance(graph['edge_indices'], list):
+    if 'edge_indices' in graph and isinstance(graph['edge_indices'], list):
         graph['edge_indices'] = np.array(graph['edge_indices'], dtype=int)
     
+    # Use placeholder values if required keys are missing
+    node_attrs = graph.get('node_attributes', np.array([[]]))
+    edge_indices = graph.get('edge_indices', np.array([[0], [0]]))
+    edge_attrs = graph.get('edge_attributes', np.array([[]]))
+
     data = Data(
-        x=torch.tensor(graph['node_attributes'], dtype=torch.float),
-        edge_index=torch.tensor(graph['edge_indices'].T, dtype=torch.long),
-        edge_attr=torch.tensor(graph['edge_attributes'], dtype=torch.float),
+        x=torch.tensor(node_attrs, dtype=torch.float),
+        edge_index=torch.tensor(edge_indices.T, dtype=torch.long),
+        edge_attr=torch.tensor(edge_attrs, dtype=torch.float),
     )
     
     if 'graph_labels' in graph:
@@ -169,9 +174,12 @@ def data_from_graph_dict(graph: dict) -> Data:
     
     if 'edge_weights' in graph:
         data.edge_weight = torch.tensor(graph['edge_weights'], dtype=torch.float)
+        
+    if 'edge_index_full' in graph:
+        data.edge_index_full = torch.tensor(graph['edge_index_full'].T, dtype=torch.long)
     
     for key, value in graph.items():
-        if key not in ['node_attributes', 'edge_indices', 'edge_attributes', 'graph_labels', 'edge_weights']:
+        if key not in ['node_attributes', 'edge_indices', 'edge_attributes', 'graph_labels', 'edge_weights', 'edge_index_full']:
             try:
                 setattr(data, key, torch.tensor(value, dtype=torch.float))
             # It can happen that we attach a numpy array full of strings to the graph dict as well in which case 
@@ -186,10 +194,66 @@ def data_list_from_graph_dicts(graphs: list[dict]) -> list[Data]:
     """
     Given a list ``graphs`` of graph dicts, returns a list of torch_geometric Data objects
     to represent the graphs.
-    
+
     :param graphs: A list of graph dicts.
-    
+
     :returns: A list of Data objects.
     """
     data_list = [data_from_graph_dict(graph) for graph in graphs]
     return data_list
+
+
+def data_add_full_connectivity(data: Data) -> Data:
+    """
+    Add full connectivity properties to a PyTorch Geometric Data object.
+
+    This function dynamically adds two properties to the Data object:
+    - edge_index_full: Complete edge list representing full connectivity (2, num_nodes**2)
+    - edge_weight_full: Binary weights indicating which edges exist in original graph (num_nodes**2,)
+
+    Example:
+
+    .. code-block:: python
+
+        # Assume data has 3 nodes and edges (0,1) and (1,2)
+        data = Data(x=torch.randn(3, 5), edge_index=torch.tensor([[0, 1], [1, 2]]).T)
+        data = add_full_connectivity_properties(data)
+
+        # data.edge_index_full will be shape (2, 9) representing all possible edges
+        # data.edge_weight_full will be shape (9,) with 1s for existing edges, 0s otherwise
+
+    :param data: A PyTorch Geometric Data object with x (node features) and edge_index properties.
+
+    :returns: The same Data object with added edge_index_full and edge_weight_full properties.
+    """
+    num_nodes = data.x.size(0)
+
+    # Create full connectivity: all possible edges including self-loops
+    full_edges = []
+    for i in range(num_nodes):
+        for j in range(i):
+            full_edges.append([i, j])
+
+    edge_index_full = torch.tensor(full_edges, dtype=torch.long).T  # Shape: (2, num_nodes**2)
+
+    # Convert original edge_index to set of tuples for efficient lookup
+    original_edges = set()
+    for i in range(data.edge_index.size(1)):
+        src, dst = data.edge_index[0, i].item(), data.edge_index[1, i].item()
+        original_edges.add((src, dst))
+
+    # Mark existing edges with weight 1
+    edge_weight_full = []
+    for idx, (i, j) in enumerate(full_edges):
+        if (i, j) in original_edges or (j, i) in original_edges:
+            edge_weight_full.append(1.0)
+        else:
+            edge_weight_full.append(0.0)
+            
+    edge_weight_full = torch.tensor(edge_weight_full, dtype=torch.float)
+
+    # Attach the properties to the data object
+    data.edge_index_full = edge_index_full
+    data.edge_weight_full = edge_weight_full.unsqueeze(-1)
+
+    return data

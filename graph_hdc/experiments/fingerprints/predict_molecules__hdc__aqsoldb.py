@@ -19,21 +19,21 @@ DATASET_NAME_ID: str = DATASET_NAME
 DATASET_TYPE: str = 'regression'
 # :param NUM_TEST:
 #       The number of test samples to be used for the evaluation of the models.
-NUM_TEST: int = 0.1
+NUM_TEST: int = 0.2
 
 # == EMBEDDING PARAMETERS ==
 
 # :param EMBEDDING_SIZE:
 #       The size of the graph embedding vectors. This will be the number of elements in each of the 
 #       hypervectors that represent the individual molecular graphs.
-EMBEDDING_SIZE: int = 1024
+EMBEDDING_SIZE: int = 2048
 # :param NUM_LAYERS:
 #       The number of layers in the hypernetwork. This parameter determines the depth of the hypernetwork
 #       which is used to generate the graph embeddings. This means it is the number of message passing 
 #       steps applied in the encoder.
 NUM_LAYERS: int = 2
 
-MODELS = ['neural_net2']
+MODELS = ['neural_net']
 
 # == EXPERIMENT PARAMETERS ==
 

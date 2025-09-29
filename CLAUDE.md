@@ -6,6 +6,49 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a research project implementing **hyperdimensional computing (HDC)** for graph structures. The project uses message passing networks to encode graphs into high-dimensional hypervectors that can be decoded to recover structural information. It focuses on molecular property prediction and graph generation tasks.
 
+## Virtual Environment
+
+This project uses a virtual environment which should be activated before running any command line tools or scripts.
+To activate the virtual environment, run:
+
+```bash
+source .venv/bin/activate
+```
+
+## Development Guidelines
+
+### Docstrings
+
+Docstrings should use the ReStructuredText (reST) format. This is important for generating documentation and for consistency across the codebase. Docstrings should always start with a one-line summary followed by a more detailed paragraph - also including usage examples, for instance. If appropriate, docstrings should not only describe a method or function but also shed some light on the design rationale.
+
+Documentation should also be *appropriate* in length. For simple functions, a brief docstring is sufficient. For more complex functions or classes, more detailed explanations and examples should be provided.
+
+An example docstring may look like this:
+
+```python
+
+def multiply(a: int, b: int) -> int:
+    """
+    Multiply two integers `a` and `b`.
+
+    This function takes two integers as input and returns their product.
+
+    Example:
+    
+    ... code-block:: python
+
+        result = multiply(3, 4)
+        print(result)  # Output: 12
+
+    :param a: The first integer to multiply.
+    :param b: The second integer to multiply.
+
+    :return: The product of the two integers.
+    """
+    return a * b
+
+```
+
 ## Core Architecture
 
 ### Main Components
@@ -15,6 +58,8 @@ This is a research project implementing **hyperdimensional computing (HDC)** for
 - **Binding operations** (`graph_hdc/binding.py`): Core HDC binding functions like circular convolution for combining hypervectors
 - **Encoders** (`graph_hdc/utils.py`): Property encoders (categorical, numerical) for converting graph attributes to hypervectors
 - **Special modules** (`graph_hdc/special/`): Domain-specific utilities for molecules and color graphs
+- **Unittests** (`tests/`): Comprehensive tests for all components using `pytest`
+- **Experiment scripts** (`graph_hdc/experiments/fingerprints/`): Experimentation framework using PyComex for molecular property prediction tasks
 
 ### Key Concepts
 
@@ -27,11 +72,10 @@ This is a research project implementing **hyperdimensional computing (HDC)** for
 
 ### Development Environment
 
+This project uses a virtual environment for dependency management. The virtual environment should be activated before every command.
+
 ```bash
-# Setup virtual environment and UV (from DEVELOP.rst)
-uv venv --seed --python 3.10 .venv
 source .venv/bin/activate
-uv pip install -e .
 ```
 
 ### Testing

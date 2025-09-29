@@ -58,6 +58,11 @@ DATASET_NAME: str = 'clintox'
 #       but in cases for example one dataset is used as the basis of some deterministic calculation of the target values 
 #       and in this case the name should identify it as such.
 DATASET_NAME_ID: str = DATASET_NAME
+# :param TARGET_INDEX:
+#       The index of the target in the graph labels. This parameter is used to determine the target of the
+#       prediction task. If set to None, the full list of targets is used (for multi-target datasets).
+
+TARGET_INDEX: Union[int, None] = None
 # :param DATASET_TYPE:
 #       The type of the dataset, either 'classification', 'binary', or 'regression'. This parameter is used to determine the
 #       evaluation metrics and the type of the prediction target.
@@ -83,10 +88,10 @@ NUM_TRAIN: Union[int, float] = 1.0
 DATASET_NOISE: float = 0.0
 # :param NUM_VAL:
 #       The number of validation samples to be used for the evaluation of the models during training.
-NUM_VAL: int = 10
+NUM_VAL: int = 0.1
 # :param SEED:
 #       The random seed to be used for the experiment.
-SEED: int = 2
+SEED: int = 1
 # :param USE_SMOTE:
 #       Whether to use the SMOTE algorithm to oversample the minority class in the dataset. This is only used for
 #       classification datasets. If set to True, the SMOTE algorithm will be applied to the training dataset after
@@ -135,8 +140,8 @@ KN_NUM_NEIGHBORS: int = 5
 KN_WEIGHTS: str = 'uniform'
 
 NN_HIDDEN_LAYER_SIZES: Tuple[int] = (100, 100, 100)
-NN_ALPHA: float = 0.001
-NN_LEARNING_RATE_INIT: float = 0.01
+NN_ALPHA: float = 0.0001
+NN_LEARNING_RATE_INIT: float = 0.001
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -393,13 +398,34 @@ def load_dataset(e: Experiment) -> dict[int, GraphDict]:
     return index_data_map, metadata
 
 
-@experiment.hook('get_graph_labels')
+@experiment.hook('get_graph_labels', default=True)
 def get_graph_labels(e: Experiment,
                      index: int,
                      graph: dict
                      ) -> np.ndarray:
+    """
+    This hook gets called during the processing of the dataset and gets the index of an element
+    in the dataset as well as the graph dict representing data element. This hook is supposed to 
+    return the array of target values for the graph.
+    """
     
-    return graph['graph_labels']
+    # If a specific index in the list of targets is declared that we use that one otherwise we return 
+    # the full list of targets. This is the case for example in multi-target datasets where we want to
+    # only predict one of the targets. For multi-classification we need to return the one hot target 
+    # vector.
+    if e.TARGET_INDEX is not None:
+        return graph['graph_labels'][e.TARGET_INDEX:e.TARGET_INDEX+1]
+    else:
+        return graph['graph_labels']
+
+
+# @experiment.hook('get_graph_labels', replace=True, default=False)
+# def get_graph_labels(e: Experiment,
+#                      index: int,
+#                      graph: dict,
+#                      **kwargs,
+#                      ) -> np.ndarray:
+#     return graph['graph_labels'][e.TARGET_INDEX:e.TARGET_INDEX+1]
 
 
 @experiment.hook('filter_dataset', replace=False, default=True)
@@ -407,7 +433,8 @@ def filter_dataset(e: Experiment,
                    index_data_map: dict[int, dict],
                    ) -> tuple[list, list, list]:
     
-    e.log('filtering dataset to remove invalid SMILES and unconnected graphs...')
+    e.log(f'filtering dataset to remove invalid SMILES and unconnected graphs...')
+    e.log(f'starting with {len(index_data_map)} samples...')
     indices = list(index_data_map.keys())
     for index in indices:
         graph = index_data_map[index]
@@ -416,16 +443,22 @@ def filter_dataset(e: Experiment,
         mol = Chem.MolFromSmiles(smiles)
         if not mol:
             del index_data_map[index]
+            continue
             
-        elif len(mol.GetAtoms()) < 2:
+        if len(mol.GetAtoms()) < 2:
             del index_data_map[index]
+            continue
             
-        elif len(mol.GetBonds()) < 1:
+        if len(mol.GetBonds()) < 1:
             del index_data_map[index]
+            continue
             
         # disconnected graphs
-        elif '.' in smiles:
+        if '.' in smiles:
             del index_data_map[index]
+            continue
+            
+    e.log(f'finished filtering dataset with {len(index_data_map)} samples remaining.')
 
 
 @experiment.hook('dataset_split', replace=False, default=True)
@@ -744,9 +777,15 @@ def train_model__neural_net(e: Experiment,
     
     kwargs = {
         'hidden_layer_sizes': e.NN_HIDDEN_LAYER_SIZES,
-        'alpha': e.NN_ALPHA,
-        'learning_rate_init': e.NN_LEARNING_RATE_INIT,
-        'max_iter': 500,
+        #'alpha': e.NN_ALPHA,
+        #'learning_rate_init': e.NN_LEARNING_RATE_INIT,
+        'max_iter': 2000,
+        'early_stopping': True,
+        'validation_fraction': 0.2,
+        'n_iter_no_change': 100,
+        'solver': 'adam',
+        'activation': 'relu',
+        'random_state': e.SEED,
     }
     
     time_start = time.time()
@@ -799,46 +838,55 @@ def train_model__neural_net2(e: Experiment,
           f'and {len(val_indices_)} validation samples.')
     
     ## --- converting data to torch dataset ---
-    # To train a Lightning model, the dataset first needs to be converted into 
-    # the format of a pytorch dataset consisting of pytorch tensors.
-    X_train = np.array([index_data_map[i]['graph_features'] for i in train_indices])
-    y_train = np.array([index_data_map[i]['graph_labels'] for i in train_indices])
+    # Memory-efficient dataset that creates tensors on-the-fly
+    class LazyDataset(torch.utils.data.Dataset):
+        def __init__(self, indices, data_map):
+            self.indices = indices
+            self.data_map = data_map
+            
+        def __len__(self):
+            return len(self.indices)
+            
+        def __getitem__(self, idx):
+            data_idx = self.indices[idx]
+            features = torch.tensor(self.data_map[data_idx]['graph_features'], dtype=torch.float32)
+            labels = torch.tensor(self.data_map[data_idx]['graph_labels'], dtype=torch.float32)
+            return features, labels
     
-    X_train = torch.tensor(X_train, dtype=torch.float32)
-    y_train = torch.tensor(y_train, dtype=torch.float32)
+    # Create memory-efficient datasets
+    train_dataset = LazyDataset(train_indices, index_data_map)
     
-    # Create a PyTorch dataset
-    train_dataset = torch.utils.data.TensorDataset(X_train, y_train)
-    # Create a DataLoader for the training dataset. This will be the object that 
-    # is later given to the trainer and which will manage the batching and the shuffling 
-    # of the data during training.
+    # Create a DataLoader with optimized settings for performance
     train_loader = torch.utils.data.DataLoader(
         train_dataset, 
         batch_size=64, 
         shuffle=True,
         drop_last=True,
+        num_workers=4,
+        prefetch_factor=2,
+        pin_memory=False,
     )
     
-    X_val = np.array([index_data_map[i]['graph_features'] for i in val_indices_])
-    y_val = np.array([index_data_map[i]['graph_labels'] for i in val_indices_])
+    # Create memory-efficient validation dataset
+    val_dataset = LazyDataset(val_indices_, index_data_map)
     
-    X_val = torch.tensor(X_val, dtype=torch.float32)
-    y_val = torch.tensor(y_val, dtype=torch.float32)
-    
-    # Create a PyTorch dataset for validation
-    val_dataset = torch.utils.data.TensorDataset(X_val, y_val)
-    # Create a DataLoader for the validation dataset
+    # Create a DataLoader for the validation dataset with optimized settings
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=64,
         shuffle=False,
+        num_workers=4,
+        prefetch_factor=2,
+        pin_memory=False,
     )
     
     ## --- creating the neural network model ---
     
-    # input output dimensions
-    input_dim = X_train.shape[1]
-    output_dim = y_train.shape[1] if len(y_train.shape) > 1 else 1
+    # input output dimensions from sample data
+    sample_features = index_data_map[train_indices[0]]['graph_features']
+    sample_labels = index_data_map[train_indices[0]]['graph_labels']
+    input_dim = len(sample_features) if isinstance(sample_features, (list, tuple)) else sample_features.shape[0]
+    output_dim = len(sample_labels) if isinstance(sample_labels, (list, tuple)) else (sample_labels.shape[0] if len(sample_labels.shape) > 0 else 1)
     
     # The model itself
     model = NeuralNet(
@@ -875,9 +923,6 @@ def train_model__neural_net2(e: Experiment,
     # important: After the training is done, we need to put the model into evaluation 
     # mode to ensure it uses the running statistics for the batch norm.
     model.eval()
-    
-    y_val_pred = model.predict(X_val)
-    print(r2_score(y_val.numpy(), y_val_pred))
     
     return model
     
@@ -1132,39 +1177,50 @@ def evaluate_model(e: Experiment,
 def experiment(e: Experiment):
     
     e.log('starting experiment to predict molecule dataset...')
+    e.log_parameters()
     
-    # ~ data loading
+    # --- data loading ---
+    # First of all we need to load the dataset. Since this is a time consuming operation, we wrap this 
+    # as a cached operation so that it only has to be done once per dataset after which the result may just be 
+    # loaded from the disk.
     
-    # This hook returns a dict whose keys are the unique integer indices of the dataset elements and the values 
-    # are the corresponding graph dict representations.
-    e.log(f'loading dataset "{e.DATASET_NAME}"...')
-    index_data_map: dict[int, GraphDict]
-    index_data_map, metadata = e.apply_hook(
-        'load_dataset',
-    )
-    
-    example_graph = next(iter(index_data_map.values()))
-    e.log('example graph:')
-    pprint(example_graph)
+    @experiment.cache.cached(name=f'load__{e.DATASET_NAME}')
+    def load_data():
+        # This hook returns a dict whose keys are the unique integer indices of the dataset elements and the values 
+        # are the corresponding graph dict representations.
+        e.log(f'loading dataset "{e.DATASET_NAME}"...')
+        index_data_map: dict[int, GraphDict]
+        index_data_map, metadata = e.apply_hook(
+            'load_dataset',
+        )
+        
+        # :hook filter_dataset:
+        #       An action hook that is called after the dataset has been loaded and before the dataset indices are 
+        #       obtained, this optional hook presents the opportunity to filter the dataset based on certain criteria.
+        e.apply_hook(
+            'filter_dataset',
+            index_data_map=index_data_map,
+        )
+        
+        return index_data_map
+        
+    index_data_map: dict[int, GraphDict] = load_data()
     
     e.log('determine the graph labels...')
     for index in list(index_data_map.keys()):
         
         graph = index_data_map[index]
-        try:
-            # :hook get_graph_labels:
-            #       This hook is called on each graph in the dataset and is supposed to return the numpy array 
-            #       representing the graph labels to serve as the prediction target.
-            graph_labels = e.apply_hook(
-                'get_graph_labels',
-                index=index,
-                graph=graph
-            )
+        # :hook get_graph_labels:
+        #       This hook is called on each graph in the dataset and is supposed to return the numpy array 
+        #       representing the graph labels to serve as the prediction target.
+        graph_labels = e.apply_hook(
+            'get_graph_labels',
+            index=index,
+            graph=graph
+        )
+                
+        graph['graph_labels'] = graph_labels.astype(float)
             
-        except Exception as exc:
-            del index_data_map[index]
-            continue
-        
         if e.DATASET_NOISE > 0.0:
             
             if e.DATASET_TYPE == 'classification':
@@ -1174,17 +1230,12 @@ def experiment(e: Experiment):
             elif e.DATASET_TYPE == 'regression':
                 noise = np.random.normal(0, e.DATASET_NOISE, graph_labels.shape)
                 graph_labels += noise
-
-        graph['graph_labels'] = graph_labels
     
-    # :hook filter_dataset:
-    #       An action hook that is called after the dataset has been loaded and before the dataset indices are 
-    #       obtained, this optional hook presents the opportunity to filter the dataset based on certain criteria.
-    e.apply_hook(
-        'filter_dataset',
-        index_data_map=index_data_map,
-    )
-    
+    # --- dataset splitting ---
+    # Now that we have loaded the dataset, we need to split it into training, validation and 
+    # testing sets. We do this by first obtaining the list of all indices in the dataset
+    # and then applying the dataset_split hook to obtain the actual splits which we then store 
+    # into the experiment storage for later use.
     indices = list(index_data_map.keys())
     e.log(f'loaded dataset with {len(index_data_map)} elements...')
     
@@ -1251,6 +1302,7 @@ def experiment(e: Experiment):
         e.log('scaling the regression labels...')
         scaler = StandardScaler()
         y_train = np.array([index_data_map[i]['graph_labels'] for i in train_indices])
+        e.log(f' * y_train shape: {y_train.shape}')
         scaler.fit(y_train)
 
         for index in index_data_map:

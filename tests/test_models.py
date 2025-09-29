@@ -431,3 +431,117 @@ class TestHyperNet:
             assert 'src' in constraint
             assert 'dst' in constraint
             assert 'num' in constraint
+
+    def test_decode_nodes(self):
+        """
+        The decode_nodes method should return a graph dict with properly formatted node information
+        including node_indices, full connectivity edges, and node properties as arrays.
+        """
+        # setting up model
+        dim = 10_000
+        encoder = CategoricalIntegerEncoder(dim, 5)
+        hyper_net = HyperNet(
+            hidden_dim=dim,
+            depth=3,
+            node_encoder_map={
+                'x': encoder,
+            },
+            bind_fn=circular_convolution_fft,
+            unbind_fn=circular_correlation_fft,
+        )
+
+        # setting up simple test graph with 4 nodes: 2 of type 0, 1 of type 1, 1 of type 2
+        graph = {
+            'node_indices': np.array([0, 1, 2, 3, 4], dtype=int),
+            'node_attributes': np.array([[0], [0], [1], [2], [2]], dtype=float),
+            'edge_indices': np.array([[0, 1], [1, 2], [2, 3], [3, 0], [4, 1]], dtype=int),
+            'edge_attributes': np.array([[1], [1], [1], [1], [1]], dtype=float),
+        }
+        data_list = data_list_from_graph_dicts([graph])
+        data = next(iter(DataLoader(data_list, batch_size=1)))
+
+        # forward pass - encoding into embedding
+        result: dict = hyper_net.forward(data)
+        embedding = result['graph_embedding']
+
+        # decode nodes into graph dict format
+        decoded_graph = hyper_net.decode_nodes(embedding)
+        pprint(decoded_graph)
+
+        assert isinstance(decoded_graph, dict)
+
+        # Check required keys exist
+        assert 'node_indices' in decoded_graph
+        assert 'edge_index_full' in decoded_graph
+        assert 'edge_weight_full' in decoded_graph
+        assert 'x' in decoded_graph  # Should have the node property
+
+        # Check node_indices
+        node_indices = decoded_graph['node_indices']
+        assert isinstance(node_indices, np.ndarray)
+        assert len(node_indices) == 5  # Should have 4 total nodes (2+1+1)
+        assert np.array_equal(node_indices, np.arange(5))
+
+        # Check node properties
+        x_values = decoded_graph['x']
+        assert isinstance(x_values, np.ndarray)
+        assert len(x_values) == 5
+        # Should have 2 nodes of type 0, 1 of type 1, 1 of type 2
+        unique_values, counts = np.unique(x_values, return_counts=True)
+        expected_counts = {0: 2, 1: 1, 2: 2}
+        for val, count in zip(unique_values, counts):
+            assert expected_counts[val] == count
+
+        # Check full connectivity edges
+        edge_index_full = decoded_graph['edge_index_full']
+        assert isinstance(edge_index_full, np.ndarray)
+        assert edge_index_full.shape == (25, 2)  # 4*4 = 16 edges for full connectivity
+
+        # Check edge weights (should all be zero)
+        edge_weight_full = decoded_graph['edge_weight_full']
+        assert isinstance(edge_weight_full, np.ndarray)
+        assert edge_weight_full.shape == (25, 1)
+        assert np.all(edge_weight_full == 0.0)
+
+        # Verify full connectivity structure
+        expected_edges = set()
+        for i in range(5):
+            for j in range(5):
+                expected_edges.add((i, j))
+
+        actual_edges = set()
+        for i, j in edge_index_full:
+            actual_edges.add((i, j))
+
+        assert expected_edges == actual_edges
+
+    def test_decode_nodes_empty_graph(self):
+        """
+        Test that decode_nodes handles empty graphs properly.
+        """
+        # setting up model
+        dim = 1000
+        encoder = CategoricalIntegerEncoder(dim, 5)
+        hyper_net = HyperNet(
+            hidden_dim=dim,
+            depth=3,
+            node_encoder_map={
+                'x': encoder,
+            },
+        )
+
+        # Create a zero embedding (should decode to empty graph)
+        empty_embedding = torch.zeros(dim)
+
+        # decode nodes
+        decoded_graph = hyper_net.decode_nodes(empty_embedding)
+
+        assert isinstance(decoded_graph, dict)
+        assert 'node_indices' in decoded_graph
+        assert 'edge_index_full' in decoded_graph
+        assert 'edge_weight_full' in decoded_graph
+
+        # Should all be empty
+        assert len(decoded_graph['node_indices']) == 0
+        assert decoded_graph['edge_index_full'].shape == (0, 2)
+        assert len(decoded_graph['edge_weight_full']) == 0

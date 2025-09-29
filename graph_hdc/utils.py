@@ -41,6 +41,39 @@ NULL_LOGGER.addHandler(logging.NullHandler())
 
 # == HYPERVECTOR UTILS ==
 
+
+def generate_hermitian_symmetric_vector(k, rng=None):
+    """
+    Generate a Hermitian symmetric vector in the Fourier domain of dimension k.
+    :param k: The dimensionality of the vector to be generated.
+    :returns: A torch.Tensor of shape (k,) representing the Hermitian symmetric vector.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    # Determine number of unique frequency components
+    half_k = k // 2 + 1  # +1 to include the Nyquist frequency if k is even
+    # Random complex vector for positive frequencies
+    # positive_freqs = np.random.randn(half_k) + 1j * np.random.randn(half_k)
+    positive_freqs = rng.normal(size=half_k) + 1j * rng.normal(size=half_k)
+    # Enforce real values for DC and Nyquist if they exist (self-conjugate points)
+    # positive_freqs[0] = np.random.randn()  # DC component must be real
+    positive_freqs[0] = rng.normal(size=1)  # DC component must be real
+    if k % 2 == 0:  # Nyquist frequency only exists if k is even
+        # positive_freqs[-1] = np.random.randn()
+        positive_freqs[-1] = rng.normal(size=1)
+    # Create full Hermitian symmetric vector
+    full_spectrum = np.zeros(k, dtype=complex)
+    full_spectrum[:half_k] = positive_freqs  # Positive frequencies
+    full_spectrum[half_k:] = np.conj(positive_freqs[-2:0:-1])  # Negative frequencies
+    # Compute the inverse Fourier transform to get the time-domain signal
+    time_domain_signal = np.fft.ifft(full_spectrum)
+    # Calculate the norm of the time-domain signal
+    norm = np.linalg.norm(time_domain_signal)
+    # Scale full_spectrum to make the norm of the inverse Fourier transform equal to 1
+    full_spectrum = full_spectrum / norm
+    return torch.from_numpy(full_spectrum)
+
+
 class AbstractEncoder:
     """
     Abstract base class for the property encoders. An encoder class is used to encode individual properties 
@@ -95,6 +128,110 @@ class AbstractEncoder:
         raise NotImplementedError()
     
     
+class ContinuousEncoder(AbstractEncoder):
+    """
+    Fourier Holographic Reduced Representation (FHRR) encoder for continuous values.
+    
+    Encodes continuous scalar values into high-dimensional hypervectors using FHRR, which creates
+    smooth distributed representations where similar input values produce similar hypervectors.
+    The encoding preserves ordinal relationships and enables approximate decoding.
+    
+    :param dim: Dimensionality of the output hypervector
+    :type dim: int
+    :param size: Expected range of input values for normalization
+    :type size: float  
+    :param bandwidth: Controls encoding sensitivity - smaller values create more sensitive encodings
+    :type bandwidth: float
+    :param seed: Random seed for reproducible encoder generation
+    :type seed: Optional[int]
+    """
+    def __init__(
+        self,
+        dim: int,
+        size: float,
+        bandwidth: float,
+        seed: Optional[int] = None,
+    ):
+        self.dim = dim
+        self.size = size
+        self.bandwidth = bandwidth
+        self.seed = seed
+        
+        rng = np.random.default_rng(seed + 1) if seed is not None else None
+        self.matrix = generate_hermitian_symmetric_vector(self.dim, rng=rng)
+
+    def encode(self, value: Any) -> torch.Tensor:
+        """
+        Encode continuous value(s) into hypervector(s) using FHRR.
+        
+        Transforms continuous values into high-dimensional representations by raising
+        the Hermitian matrix to powers based on normalized input values, then applying
+        inverse FFT to obtain real-valued hypervectors.
+        
+        :param value: Continuous value(s) to encode, either scalar tensor or 1D batch
+        :type value: torch.Tensor
+        :return: Hypervector representation(s) of shape (dim,) for scalar or (batch_size, dim) for batch
+        :rtype: torch.Tensor
+        """
+        # Handle scalar and batch inputs
+        if value.dim() == 0:
+            # Scalar input
+            exponent = (value / self.bandwidth).unsqueeze(-1)
+            exponents = self.matrix ** exponent
+            code = torch.fft.ifft(exponents).real
+            return code
+        else:
+            # Batch input
+            batch_size = value.shape[0]
+            exponent = value / self.bandwidth
+            # Expand matrix for batch processing
+            matrix_expanded = self.matrix.unsqueeze(0).expand(batch_size, -1)
+            exponent_expanded = exponent.unsqueeze(-1)
+            exponents = matrix_expanded ** exponent_expanded
+            code = torch.fft.ifft(exponents).real
+            return code
+        
+    def encode_batch(self, values: torch.Tensor) -> torch.Tensor:
+        # Scalar input
+        exponent = (values / self.bandwidth).unsqueeze(-1)
+        exponents = self.matrix ** exponent
+        code = torch.fft.ifft(exponents).real
+        return code
+    
+    def decode(self, hv: torch.Tensor) -> Any:
+        """
+        Approximate decoding of FHRR hypervector back to continuous value.
+        
+        Attempts to recover the original continuous value from its hypervector representation
+        using frequency domain analysis. The method extracts phase information from the FFT
+        and estimates the original scaling factor using the Hermitian matrix logarithm.
+        
+        :param hv: Hypervector to decode of shape (dim,)
+        :type hv: torch.Tensor
+        :return: Approximated continuous value (note: decoding is inherently lossy)
+        :rtype: torch.Tensor
+        """
+        # Convert to complex for FFT
+        hv_complex = hv + 0j
+        
+        # Take FFT to get frequency domain representation
+        freq_domain = torch.fft.fft(hv_complex)
+        
+        # Extract phase information (angle of complex numbers)
+        phases = torch.angle(freq_domain)
+        
+        # Use the Hermitian matrix to estimate the original exponent
+        # This is an approximation based on the logarithm of the frequency domain
+        log_matrix = torch.log(self.matrix + 1e-10)  # Add small epsilon for numerical stability
+        
+        # Estimate the scaling factor from the phase information
+        # This is a heuristic approach - may need refinement
+        with torch.no_grad():
+            estimated_exponent = torch.mean(phases / (log_matrix + 1e-10))
+            estimated_value = estimated_exponent * self.bandwidth
+            
+        return estimated_value.real
+    
     
 class CategoricalOneHotEncoder(AbstractEncoder):
     """
@@ -113,18 +250,22 @@ class CategoricalOneHotEncoder(AbstractEncoder):
     def __init__(self,
                  dim: int,
                  num_categories: int,
-                 seed: Optional[int] = None,
+                 seed: Optional[int] = 0,
                  ):
         AbstractEncoder.__init__(self, dim, seed)
         self.num_categories = num_categories
         
-        random = np.random.default_rng(seed)
-        self.embeddings: torch.Tensor = torch.tensor(random.normal(
-            # This scaling is important to have normalized base vectors
-            loc=0.0,
-            scale=(1.0 / np.sqrt(dim)), 
-            size=(num_categories, dim)
-        ).astype(np.float32))
+        self.gen = torch.Generator()
+        self.gen.manual_seed(seed)
+        self.dist = torch.distributions.Normal(0.0, 1.0 / np.sqrt(dim), generator=self.gen)
+        self.embeddings = self.dist.sample((num_categories, dim))
+        #random = np.random.default_rng(seed + 2)
+        # self.embeddings: torch.Tensor = torch.tensor(random.normal(
+        #     # This scaling is important to have normalized base vectors
+        #     loc=0.0,
+        #     scale=(1.0 / np.sqrt(dim)), 
+        #     size=(num_categories, dim)
+        # ).astype(np.float32))
     
     def encode(self, value: Any
                ) -> torch.Tensor:
@@ -162,21 +303,27 @@ class CategoricalIntegerEncoder(AbstractEncoder):
     def __init__(self,
                  dim: int,
                  num_categories: int,
-                 seed: Optional[int] = None,
+                 seed: Optional[int] = 0,
                  ):
         AbstractEncoder.__init__(self, dim, seed)
         self.num_categories = num_categories
         
-        random = np.random.default_rng(seed)
-        self.embeddings: torch.Tensor = torch.tensor(random.normal(
-            # This scaling is important to have normalized base vectors
-            loc=0.0,
-            scale=(1.0 / np.sqrt(dim)), 
-            size=(num_categories, dim),
-        ).astype(np.float32))
+        torch.manual_seed(seed)
+        self.dist = torch.distributions.Normal(0.0, 1.0 / np.sqrt(dim))
+        self.embeddings = self.dist.sample((num_categories, dim))
+        # random = np.random.default_rng(seed + 3)
+        # self.embeddings: torch.Tensor = torch.tensor(random.normal(
+        #     # This scaling is important to have normalized base vectors
+        #     loc=0.0,
+        #     scale=(1.0 / np.sqrt(dim)), 
+        #     size=(num_categories, dim),
+        # ).astype(np.float32))
     
     def encode(self, value: Any) -> torch.Tensor:
         return self.embeddings[int(value)]
+    
+    # def encode_batch(self, values: torch.Tensor) -> torch.Tensor:
+    #     return self.embeddings[values.long()]
     
     def decode(self, 
                hv: torch.Tensor, 

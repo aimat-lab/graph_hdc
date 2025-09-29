@@ -47,20 +47,30 @@ ENCODING_PARAM_TUPLES: list[tuple[str, dict]] = [
 
 DATASET_PARAM_TUPLES: dict[str, dict] = [
     ('aqsoldb', {'NOTE': 'aqsoldb_logs'}),
-    ('lipop', {'NOTE': 'lipop_logd'}),
-    ('zinc250', {'TARGET_INDEX': 0, 'NOTE': 'zinc_clogp'}), 
-    ('zinc250', {'TARGET_INDEX': 1, 'NOTE': 'zinc_qed'}),
-    ('zinc250', {'TARGET_INDEX': 2, 'NOTE': 'zinc_sas'}),
+    ('clogp', {'NOTE': 'clogp'}),
+    ('freesolv', {'TARGET_INDEX': 0, 'DATASET_NAME': 'freesolv', 'DATASET_TYPE': 'regression', 'NOTE': 'freesolv_hfe'}),
+    ('lipophilicity', {'TARGET_INDEX': 0, 'DATASET_NAME': 'lipophilicity', 'DATASET_TYPE': 'regression', 'NOTE': 'lipophilicity_logD'}),
+    ('bace_reg', {'TARGET_INDEX': 0, 'DATASET_NAME': 'bace_reg', 'DATASET_TYPE': 'regression', 'NOTE': 'bace_ic50'}),
+    ('hopv15_exp', {'TARGET_INDEX': 2, 'DATASET_NAME': 'hopv15_exp', 'DATASET_TYPE': 'regression', 'NOTE': 'hopv15_gap'}),
+    ('hopv15_exp', {'TARGET_INDEX': 3, 'DATASET_NAME': 'hopv15_exp', 'DATASET_TYPE': 'regression', 'NOTE': 'hopv15_jsc'}),
+    ('hopv15_exp', {'TARGET_INDEX': 4, 'DATASET_NAME': 'hopv15_exp', 'DATASET_TYPE': 'regression', 'NOTE': 'hopv15_voc'}),
+    ('hopv15_exp', {'TARGET_INDEX': 5, 'DATASET_NAME': 'hopv15_exp', 'DATASET_TYPE': 'regression', 'NOTE': 'hopv15_pce'}),
+    ('compas', {'TARGET_INDEX': 3, 'NOTE': 'compas_dipole'}),
+    ('compas', {'TARGET_INDEX': 2, 'NOTE': 'compas_gap'}),
+    ('compas', {'TARGET_INDEX': 4, 'NOTE': 'compas_energy'}),
     ('qm9_smiles', {'TARGET_INDEX': 3, 'NOTE': 'qm9_dipole'}),
     ('qm9_smiles', {'TARGET_INDEX': 4, 'NOTE': 'qm9_alpha'}),
     ('qm9_smiles', {'TARGET_INDEX': 7, 'NOTE': 'qm9_gap'}),
     ('qm9_smiles', {'TARGET_INDEX': 10, 'NOTE': 'qm9_energy'}),
-    ('compas', {'TARGET_INDEX': 3, 'NOTE': 'compas_dipole'}),
-    ('compas', {'TARGET_INDEX': 2, 'NOTE': 'compas_gap'}),
-    ('compas', {'TARGET_INDEX': 4, 'NOTE': 'compas_energy'}),
-    ('tadf', {'TARGET_INDEX': 0, 'NOTE': 'tadf_rate'}), 
-    ('tadf', {'TARGET_INDEX': 1, 'NOTE': 'tadf_splitting'}),
-    ('tadf', {'TARGET_INDEX': 2, 'NOTE': 'tadf_oscillator'}),
+    ('qm9_smiles', {'TARGET_INDEX': 9, 'NOTE': 'qm9_zpve'}),
+    ('qm9_smiles', {'TARGET_INDEX': 12, 'NOTE': 'qm9_enthalpy'}),
+    ('qm9_smiles', {'TARGET_INDEX': 14, 'NOTE': 'qm9_cv'}),
+    # ('tadf', {'TARGET_INDEX': 0, 'NOTE': 'tadf_rate'}), 
+    # ('tadf', {'TARGET_INDEX': 1, 'NOTE': 'tadf_splitting'}),
+    # ('tadf', {'TARGET_INDEX': 2, 'NOTE': 'tadf_oscillator'}),
+    # ('zinc250', {'TARGET_INDEX': 0, 'NOTE': 'zinc_clogp'}), 
+    # ('zinc250', {'TARGET_INDEX': 1, 'NOTE': 'zinc_qed'}),
+    # ('zinc250', {'TARGET_INDEX': 2, 'NOTE': 'zinc_sas'}),
 ]
 
 # This maps from the encoding method to a dictionary of parameters that are specific to 
@@ -125,6 +135,9 @@ with tqdm(total=num_experiments, desc="Scheduling experiments") as pbar:
                 # parameters.
                 experiment_module = f'predict_molecules__{encoding}__{dataset_name}.py'
                 experiment_path = os.path.join(PATH, experiment_module)
+                if not os.path.exists(experiment_path):
+                    experiment_module = f'predict_molecules__{encoding}.py'
+                    experiment_path = os.path.join(PATH, experiment_module)
                 
                 python_command_list = [
                     'python',
