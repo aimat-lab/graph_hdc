@@ -66,7 +66,10 @@ of dataset size vs. error residuals).
 - ``ex_04_d``: On the Zinc250k dataset using the QED as the target property. Comparison between GNN as the baseline, fingerpring and HDC (neural_net and random_forest each). Sweep over different training dataset sizes. Fixex configuration for embedding depth 2 and embedding size 2048.
   - Here, fingerprints and HDC perform about the same, while GNN clearly performs better.
 
-- ex ``ex_04_aa``: Doing the thing
+- ex ``ex_04_ab``: On the QM9 dataset using the internal energy U0 as the target property. Comparison between GNN as the baseline/upper limit and the HDC and FP methods. Neural net and random forest for each method. Sweep over different training dataset sizes. Configuration for 8192 embedding size and 2 embedding depth.
+  - Result shows that FP performs really badly and that FP is much better - at the same level as GNNs and even better for larger dataset sizes at some point.
+- ``ex_04_ac``: On the AqSolDB dataset using the solubility as the target property. Comparison between GNN as the baseline/upper limit and the HDC and FP methods. Neural net and random forest for each method. Sweep over different training dataset sizes. Configuration for 8192 embedding size and 2 embedding depth.
+
 
 ## Experiment 5
 
