@@ -1,0 +1,20 @@
+# PyComex configuration file for BBBP dataset fingerprint experiments
+pycomex: true
+
+extend: predict_molecules__fp.py
+
+name: fp_bbbp
+
+description: |
+  Fingerprint-based molecular property prediction on the BBBP dataset.
+
+  BBBP (Blood-Brain Barrier Penetration) is a binary classification dataset for
+  predicting blood-brain barrier permeability.
+
+parameters:
+  DATASET_NAME: "bbbp"
+  DATASET_NAME_ID: "bbbp"
+  DATASET_TYPE: "binary"
+  NUM_TEST: 0.1
+  FINGERPRINT_SIZE: 2048
+  FINGERPRINT_RADIUS: 2

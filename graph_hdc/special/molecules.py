@@ -41,7 +41,7 @@ class AtomEncoder(AbstractEncoder):
         
         torch.manual_seed(seed)
         self.dist = torch.distributions.Normal(0.0, 1.0 / np.sqrt(dim))
-        self.embeddings = self.dist.sample((self.num_categories, dim))
+        self.embeddings = self.dist.sample((self.num_categories, dim)).to(torch.float64)
         # random = np.random.default_rng(seed)
         # self.embeddings: torch.Tensor = torch.tensor(random.normal(
         #     # This scaling is important to have normalized base vectors
@@ -150,9 +150,9 @@ def graph_dict_from_mol(mol: Chem.Mol,
     # --- Connectivity from mol ---
     edges = list(nx_graph.edges())
     edge_indices = np.array(edges, dtype=int)
-    # create bidirectional edges by appending flipped (j,i) pairs
-    edge_indices = np.concatenate([edge_indices, edge_indices[:, ::-1]], axis=0)
-        
+    # Keep edges directional (not bidirectional)
+    # Previously: edge_indices = np.concatenate([edge_indices, edge_indices[:, ::-1]], axis=0)
+
     graph['edge_indices'] = edge_indices
     
     # --- Calculating node degree (from networkx graph) ---
@@ -271,43 +271,61 @@ def make_molecule_graph_encoder_map_cont(
 
     
 def mol_from_graph_dict(graph: dict) -> Chem.Mol:
-    
+    """
+    Create an RDKit molecule from a graph dict representation.
+
+    Handles bidirectional edges by only adding each unique bond once.
+
+    :param graph: Graph dict with node_atoms, node_valences, edge_indices, etc.
+    :returns: RDKit Mol object
+    """
     mol = Chem.RWMol()
     atom_idx_map = {}
 
     # Add atoms
     for index in graph['node_indices']:
-        
+
         atomic_number: int = int(graph['node_atoms'][index])
         atom = Chem.Atom(atomic_number)
-    
+
         idx = mol.AddAtom(atom)
         atom_idx_map[int(index)] = idx
 
-    # Add bonds
+    # Add bonds - handle bidirectional edges by tracking added bonds
+    added_bonds = set()
     for i, j in graph['edge_indices']:
-        
-        valence_i = 8 - pt.GetNOuterElecs(int(graph['node_atoms'][int(i)]))
-        valence_j = 8 - pt.GetNOuterElecs(int(graph['node_atoms'][int(j)]))
-        # print()
-        # print(graph['node_atoms'][int(i)], valence_i)
-        # print(graph['node_atoms'][int(j)], valence_j)
-        
-        num_hs_i = graph['node_valences'][int(i)]
-        num_hs_j = graph['node_valences'][int(j)]
-        
-        num_bonds_i = sum(int(i in edge and j not in edge) for edge in graph['edge_indices'])
-        num_bonds_j = sum(int(j in edge and i not in edge) for edge in graph['edge_indices'])
-        
+        # Normalize bond to (min, max) to avoid adding duplicate bonds
+        bond_key = tuple(sorted([int(i), int(j)]))
+
+        if bond_key in added_bonds:
+            continue  # Skip if already added
+
+        added_bonds.add(bond_key)
+        i, j = int(i), int(j)
+
+        valence_i = 8 - pt.GetNOuterElecs(int(graph['node_atoms'][i]))
+        valence_j = 8 - pt.GetNOuterElecs(int(graph['node_atoms'][j]))
+
+        num_hs_i = graph['node_valences'][i]
+        num_hs_j = graph['node_valences'][j]
+
+        # Count unique bonds (not directional edges)
+        unique_bonds_i = len(set(tuple(sorted([i, other])) for other in range(len(graph['node_indices'])) if (i, other) in graph['edge_indices'] or (other, i) in graph['edge_indices']))
+        unique_bonds_j = len(set(tuple(sorted([j, other])) for other in range(len(graph['node_indices'])) if (j, other) in graph['edge_indices'] or (other, j) in graph['edge_indices']))
+
+        num_bonds_i = unique_bonds_i - 1  # -1 because we're currently adding one
+        num_bonds_j = unique_bonds_j - 1
+
         bond_order = math.floor(((valence_i + valence_j) - (num_bonds_i + num_bonds_j) - (num_hs_i + num_hs_j)) / 2)
-        
-        # Add bond with correct bond order if possible
+        bond_order = max(1, bond_order)  # Ensure at least single bond
+
+        # Add bond with correct bond order
         if bond_order == 3:
-            mol.AddBond(atom_idx_map[int(i)], atom_idx_map[int(j)], Chem.BondType.TRIPLE)
+            mol.AddBond(atom_idx_map[i], atom_idx_map[j], Chem.BondType.TRIPLE)
         elif bond_order == 2:
-            mol.AddBond(atom_idx_map[int(i)], atom_idx_map[int(j)], Chem.BondType.DOUBLE)
+            mol.AddBond(atom_idx_map[i], atom_idx_map[j], Chem.BondType.DOUBLE)
         else:
-            mol.AddBond(atom_idx_map[int(i)], atom_idx_map[int(j)], Chem.BondType.SINGLE)
+            mol.AddBond(atom_idx_map[i], atom_idx_map[j], Chem.BondType.SINGLE)
 
     # Sanitize molecule to update valence and bond orders
     #Chem.SanitizeMol(mol)

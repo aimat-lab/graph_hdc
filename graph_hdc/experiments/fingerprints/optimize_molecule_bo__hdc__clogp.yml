@@ -1,0 +1,79 @@
+# PyComex configuration file for CLogP optimization using HDC with Bayesian Optimization
+pycomex: true
+
+extend: optimize_molecule_bo__hdc.py
+
+include: mixin_clogp.py
+
+name: optimize_bo_hdc_aqsoldb_clogp
+
+description: |
+  HDC-based Bayesian Optimization for molecular search on CLogP prediction.
+
+  This experiment uses the AqSolDB dataset structure but optimizes for CLogP
+  (calculated LogP) values computed via RDKit's Crippen method instead of the
+  default logS (aqueous solubility) values.
+
+  Key features:
+  - Hyperdimensional computing (HDC) representations via HyperNet encoder
+  - Bayesian Optimization with Gaussian Process models from BotTorch
+  - Multiple independent trials for robust performance evaluation
+  - Efficient search through discrete molecular space
+  - Acquisition function-guided exploration-exploitation trade-off
+
+  The mixin_clogp.py calculates CLogP values for all molecules and replaces the
+  graph_labels, which are then used as the target property for optimization.
+
+  Bayesian Optimization approach:
+  1. Start with random initial samples to build GP surrogate
+  2. Iteratively: Train GP → Compute acquisition → Select molecules → Observe values
+  3. Track best molecules found over rounds
+  4. Average performance across multiple trials
+
+parameters:
+  SEED: 1
+
+  # Dataset configuration
+  DATASET_NAME: "aqsoldb"
+  DATASET_NAME_ID: "aqsoldb_clogp_bo"
+  NUM_DATA: null  # Use full dataset
+  NUM_HOLDOUT: 0.0  # Hold out 10% for final evaluation
+
+  # Target property
+  TARGET_INDEX: 0  # First (and only) target after mixin replaces labels with CLogP
+  TARGET_VALUE: 15.0  # Target CLogP value to search for
+  TARGET_MODE: "minimize_distance"  # Minimize distance to target value
+
+  # HDC parameters
+  EMBEDDING_SIZE: 2048  # Moderate size for good GP performance
+  NUM_LAYERS: 2
+  ENCODING_MODE: "continuous"  # Better for regression and GP modeling
+  DEVICE: "cpu"
+  BATCH_SIZE: 200  # For HyperNet forward pass
+
+  # Bayesian Optimization parameters
+  NUM_INITIAL_SAMPLES: 20  # Random molecules to start with
+  NUM_BO_ROUNDS: 25  # Number of BO iterations
+  NUM_SAMPLES_PER_ROUND: 3  # Molecules to select each round
+  NUM_TRIALS: 25  # Independent runs for averaging
+
+  # Acquisition function configuration
+  ACQUISITION_FUNCTION: "EI"  # Expected Improvement (or "UCB", "PI")
+  UCB_BETA: 2.0  # Exploration parameter for UCB (only used if ACQUISITION_FUNCTION="UCB")
+
+  # GP configuration
+  GP_NOISE_CONSTRAINT: 0.0001  # Lower bound for observation noise
+  NORMALIZE_REPRESENTATIONS: true  # Standardize features for better GP fitting
+  USE_PCA_COMPRESSION: false  # No PCA compression (2048D is manageable)
+  PCA_COMPONENTS: 50  # Only used if USE_PCA_COMPRESSION=true
+
+  # Visualization
+  PLOT_INDIVIDUAL_TRIALS: true  # Plot each trial's trajectory
+  PLOT_GP_POSTERIOR: false  # Skip GP posterior plots (can be slow)
+  NUM_BEST_MOLECULES_TO_SHOW: 5  # Number of best molecules to visualize
+
+  # Note for experiment tracking
+  NOTE: |
+    Bayesian Optimization experiment for CLogP molecular search using HDC representations.
+    Expected Improvement acquisition function with 20 initial samples and 30 BO rounds.
+    Testing efficiency of BO vs gradient descent optimization approaches.

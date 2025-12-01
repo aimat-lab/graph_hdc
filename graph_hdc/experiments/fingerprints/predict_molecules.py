@@ -151,6 +151,7 @@ NN_LEARNING_RATE_INIT: float = 0.001
 NOTE: str = ''
 
 __DEBUG__: bool = True
+__NOTIFY__: bool = False
 
 experiment = Experiment(
     base_path=folder_path(__file__),

@@ -1,0 +1,54 @@
+# PyComex configuration file for ZINC250k optimization using HDC
+pycomex: true
+
+extend: optimize_molecule__hdc.py
+
+name: optimize_hdc_zinc250
+
+description: |
+  HDC-based molecular representation optimization on ZINC250k dataset.
+
+  ZINC250k is a large-scale multi-target regression dataset. This configuration
+  optimizes for the property at TARGET_INDEX=0.
+
+parameters:
+  SEED: null
+
+  DATASET_NAME: "zinc250k"
+  DATASET_NAME_ID: "zinc250k"
+
+  # Target property
+  TARGET_INDEX: 0  # First (and only) target after mixin replaces labels with CLogP
+  TARGET_VALUE: -2
+  TARGET_RELATIVE: false
+
+  # HDC parameters
+  EMBEDDING_SIZE: 2048
+  NUM_LAYERS: 3
+  ENCODING_MODE: "continuous"
+
+  # Ensemble parameters
+  ENSEMBLE_SIZE: 10
+  BOOTSTRAP_FRACTION: 0.5
+  MAX_EPOCHS: 100
+  USE_BEST_MODEL_RESTORER: false
+
+  # Optimization parameters
+  NUM_OPTIMIZATION_SAMPLES: 100
+  OPTIMIZATION_EPOCHS: 200
+  OPTIMIZATION_LEARNING_RATE: 0.1
+  OPTIMIZATION_LEARNING_RATE_REDUCTION: 0.1
+  PCA_OPTIMIZATION_COMPONENTS: 64
+  UNCERTAINTY_WEIGHT: 0.1
+  ENABLE_GRADIENT_CLIPPING: true
+  TRAJECTORY_SAMPLING_INTERVAL: 10
+  ORIGINAL_DISTANCE_WEIGHT: 0.0
+  DISTANCE_METRIC: "cosine"
+
+  # Dataset splits
+  NUM_TEST: 0.5
+  NUM_TRAIN: 1.0
+  NUM_VAL: 0.1
+
+  # Other
+  PLOT_INDIVIDUAL_TRAJECTORIES: true

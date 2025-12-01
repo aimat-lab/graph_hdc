@@ -1,0 +1,21 @@
+# PyComex configuration file for Lipophilicity dataset HDC experiments
+pycomex: true
+
+extend: predict_molecules__hdc.py
+
+name: hdc_lipop
+
+description: |
+  HDC-based molecular property prediction on the Lipophilicity dataset.
+
+  Lipophilicity is a regression dataset for octanol/water distribution coefficient
+  (logD at pH 7.4) prediction.
+
+parameters:
+  DATASET_NAME: "lipophilicity"
+  DATASET_NAME_ID: "lipophilicity"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 0.1
+  EMBEDDING_SIZE: 2048
+  NUM_LAYERS: 2
+  MODELS: ["neural_net"]

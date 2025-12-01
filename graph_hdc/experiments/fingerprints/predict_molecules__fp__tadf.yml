@@ -1,0 +1,26 @@
+# PyComex configuration file for TADF dataset fingerprint experiments
+pycomex: true
+
+extend: predict_molecules__fp.py
+
+name: fp_tadf
+
+description: |
+  Fingerprint-based molecular property prediction on the TADF dataset.
+
+  TADF is a multi-target regression dataset with three properties:
+  - 0: TADF rate
+  - 1: Singlet-triplet energy
+  - 2: Oscillator strength
+
+  This configuration predicts the TADF rate using TARGET_INDEX=0.
+
+parameters:
+  DATASET_NAME: "tadf"
+  DATASET_NAME_ID: "tadf"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 1000
+  NUM_DATA: 1.0
+  TARGET_INDEX: 0
+  FINGERPRINT_SIZE: 2048
+  FINGERPRINT_RADIUS: 2

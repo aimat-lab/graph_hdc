@@ -13,3 +13,8 @@ lightning_logs/
 **/.aslurm/*
 
 **/_*
+
+**/experiments/**/*.png
+**/experiments/**/*.pdf
+**/experiments/**/*.csv
+**/experiments/**/*.db

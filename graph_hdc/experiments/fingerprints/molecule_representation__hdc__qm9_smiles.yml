@@ -1,0 +1,33 @@
+# PyComex configuration file for QM9 SMILES dataset HDC molecule representation
+pycomex: true
+
+extend: molecule_representation__hdc.py
+
+name: molecule_representation_hdc_qm9_smiles_polarizability
+
+description: |
+  HDC-based molecular representation investigation on the QM9 SMILES dataset.
+
+  This configuration analyzes how HDC hypervectors cluster molecules with
+  respect to their polarizability values (TARGET_INDEX=4).
+
+  The experiment generates:
+  - 2D PCA and UMAP visualizations colored by clogp and polarizability
+  - PCA variance analysis across multiple dimensions
+  - Statistics on how much variance is explained by different dimensionalities
+
+parameters:
+  DATASET_NAME: "qm9_smiles"
+  DATASET_NAME_ID: "qm9_smiles_polarizability"
+  TARGET_INDEX: 4
+  COLOR_PROPERTIES: ['clogp', 'target']
+  EMBEDDING_SIZE: 4096
+  NUM_LAYERS: 2
+  ENCODING_MODE: "continuous"
+  DEVICE: "cpu"
+  BATCH_SIZE: 600
+  PCA_DIMENSIONS: [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+  UMAP_N_NEIGHBORS: 150
+  UMAP_MIN_DIST: 0.0
+  UMAP_METRIC: "cosine"
+  SAVE_EMBEDDINGS: false

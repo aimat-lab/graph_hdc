@@ -255,10 +255,9 @@ class CategoricalOneHotEncoder(AbstractEncoder):
         AbstractEncoder.__init__(self, dim, seed)
         self.num_categories = num_categories
         
-        self.gen = torch.Generator()
-        self.gen.manual_seed(seed)
-        self.dist = torch.distributions.Normal(0.0, 1.0 / np.sqrt(dim), generator=self.gen)
-        self.embeddings = self.dist.sample((num_categories, dim))
+        torch.manual_seed(seed)
+        self.dist = torch.distributions.Normal(0.0, 1.0 / np.sqrt(dim))
+        self.embeddings = self.dist.sample((num_categories, dim)).to(torch.float64)
         #random = np.random.default_rng(seed + 2)
         # self.embeddings: torch.Tensor = torch.tensor(random.normal(
         #     # This scaling is important to have normalized base vectors
@@ -310,7 +309,7 @@ class CategoricalIntegerEncoder(AbstractEncoder):
         
         torch.manual_seed(seed)
         self.dist = torch.distributions.Normal(0.0, 1.0 / np.sqrt(dim))
-        self.embeddings = self.dist.sample((num_categories, dim))
+        self.embeddings = self.dist.sample((num_categories, dim)).to(torch.float64)
         # random = np.random.default_rng(seed + 3)
         # self.embeddings: torch.Tensor = torch.tensor(random.normal(
         #     # This scaling is important to have normalized base vectors

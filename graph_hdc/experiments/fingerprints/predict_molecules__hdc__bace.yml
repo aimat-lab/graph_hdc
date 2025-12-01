@@ -1,0 +1,20 @@
+# PyComex configuration file for BACE dataset HDC experiments
+pycomex: true
+
+extend: predict_molecules__hdc.py
+
+name: hdc_bace
+
+description: |
+  HDC-based molecular property prediction on the BACE dataset.
+
+  BACE (Beta-secretase 1) is a binary classification dataset for binding results for
+  inhibitors of human β-secretase 1 (BACE-1).
+
+parameters:
+  DATASET_NAME: "bace"
+  DATASET_NAME_ID: "bace"
+  DATASET_TYPE: "binary"
+  NUM_TEST: 0.1
+  EMBEDDING_SIZE: 2048
+  NUM_LAYERS: 2

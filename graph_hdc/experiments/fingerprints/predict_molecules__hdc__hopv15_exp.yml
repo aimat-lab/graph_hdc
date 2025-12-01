@@ -1,0 +1,18 @@
+# PyComex configuration file for BBBP dataset HDC experiments
+pycomex: true
+
+extend: predict_molecules__hdc.py
+
+name: hdc_hopv15_exp
+
+description: |
+  Harvard Organic Photovoltaic Dataset (HOPV15) experimental set
+
+parameters:
+  DATASET_NAME: "hopv15_exp"
+  DATASET_NAME_ID: "hopv15_exp"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 0.1
+  EMBEDDING_SIZE: 2048
+  NUM_LAYERS: 2
+  TARGET_INDEX: 5

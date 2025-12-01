@@ -9,13 +9,14 @@ from rich.pretty import pprint
 from graph_hdc.special.molecules import graph_dict_from_mol
 from graph_hdc.special.molecules import AtomEncoder
 from graph_hdc.special.molecules import make_molecule_node_encoder_map
-from graph_hdc.special.molecules import make_molecule_graph_encoder_map
+from graph_hdc.special.molecules import make_molecule_graph_encoder_map_cont
 from graph_hdc.utils import ContinuousEncoder
 from graph_hdc.models import HyperNet
 import networkx as nx
 import matplotlib.pyplot as plt
 from torch_geometric.loader import DataLoader
 from graph_hdc.graph import data_list_from_graph_dicts
+from graph_hdc.graph import data_from_graph_dict
 from .utils import ARTIFACTS_PATH
 
 
@@ -256,7 +257,7 @@ class TestMoleculeEncoding():
         # Setup HyperNet with molecule-specific node encoder map (using atoms available in the molecule)
         dim = 10_000
         node_encoder_map = make_molecule_node_encoder_map(dim=dim, atoms=['C', 'N', 'O'])
-        graph_encoder_map = make_molecule_graph_encoder_map(
+        graph_encoder_map = make_molecule_graph_encoder_map_cont(
             dim=dim,
             max_graph_size=20.0,
             max_graph_diameter=10.0,
@@ -481,7 +482,7 @@ class TestMakeMoleculeGraphEncoderMap():
         and encoder types when given basic parameters.
         """
         dim = 100
-        encoder_map = make_molecule_graph_encoder_map(dim=dim)
+        encoder_map = make_molecule_graph_encoder_map_cont(dim=dim)
         
         # Check that it returns a dictionary
         assert isinstance(encoder_map, dict)
@@ -506,7 +507,7 @@ class TestMakeMoleculeGraphEncoderMap():
         max_graph_size = 200.0
         max_graph_diameter = 30.0
         
-        encoder_map = make_molecule_graph_encoder_map(
+        encoder_map = make_molecule_graph_encoder_map_cont(
             dim=dim,
             max_graph_size=max_graph_size,
             max_graph_diameter=max_graph_diameter
@@ -532,7 +533,7 @@ class TestMakeMoleculeGraphEncoderMap():
         
         # Test with small max_graph_size (should use minimum bandwidth)
         small_size = 10.0
-        encoder_map = make_molecule_graph_encoder_map(
+        encoder_map = make_molecule_graph_encoder_map_cont(
             dim=dim,
             max_graph_size=small_size
         )
@@ -540,7 +541,7 @@ class TestMakeMoleculeGraphEncoderMap():
         
         # Test with large max_graph_size
         large_size = 500.0
-        encoder_map = make_molecule_graph_encoder_map(
+        encoder_map = make_molecule_graph_encoder_map_cont(
             dim=dim,
             max_graph_size=large_size
         )
@@ -548,7 +549,7 @@ class TestMakeMoleculeGraphEncoderMap():
         
         # Test with small max_graph_diameter (should use minimum bandwidth)
         small_diameter = 5.0
-        encoder_map = make_molecule_graph_encoder_map(
+        encoder_map = make_molecule_graph_encoder_map_cont(
             dim=dim,
             max_graph_diameter=small_diameter
         )
@@ -556,7 +557,7 @@ class TestMakeMoleculeGraphEncoderMap():
         
         # Test with large max_graph_diameter
         large_diameter = 70.0
-        encoder_map = make_molecule_graph_encoder_map(
+        encoder_map = make_molecule_graph_encoder_map_cont(
             dim=dim,
             max_graph_diameter=large_diameter
         )
@@ -570,8 +571,8 @@ class TestMakeMoleculeGraphEncoderMap():
         seed = 42
         
         # Create two encoder maps with the same seed
-        encoder_map1 = make_molecule_graph_encoder_map(dim=dim, seed=seed)
-        encoder_map2 = make_molecule_graph_encoder_map(dim=dim, seed=seed)
+        encoder_map1 = make_molecule_graph_encoder_map_cont(dim=dim, seed=seed)
+        encoder_map2 = make_molecule_graph_encoder_map_cont(dim=dim, seed=seed)
         
         # Check that graph_size encoders are identical
         size_encoder1 = encoder_map1['graph_size']
@@ -590,8 +591,8 @@ class TestMakeMoleculeGraphEncoderMap():
         dim = 100
         
         # Create two encoder maps with different seeds
-        encoder_map1 = make_molecule_graph_encoder_map(dim=dim, seed=42)
-        encoder_map2 = make_molecule_graph_encoder_map(dim=dim, seed=123)
+        encoder_map1 = make_molecule_graph_encoder_map_cont(dim=dim, seed=42)
+        encoder_map2 = make_molecule_graph_encoder_map_cont(dim=dim, seed=123)
         
         # Check that at least one of the encoders is different
         size_encoder1 = encoder_map1['graph_size']
@@ -609,7 +610,7 @@ class TestMakeMoleculeGraphEncoderMap():
         Test that the encoders in the map can actually encode values.
         """
         dim = 100
-        encoder_map = make_molecule_graph_encoder_map(dim=dim)
+        encoder_map = make_molecule_graph_encoder_map_cont(dim=dim)
         
         # Test graph_size encoding
         size_encoder = encoder_map['graph_size']
@@ -632,7 +633,7 @@ class TestMakeMoleculeGraphEncoderMap():
         Test that None seed produces functional encoders.
         """
         dim = 100
-        encoder_map = make_molecule_graph_encoder_map(dim=dim, seed=None)
+        encoder_map = make_molecule_graph_encoder_map_cont(dim=dim, seed=None)
         
         # Check that encoders are created successfully
         assert isinstance(encoder_map['graph_size'], ContinuousEncoder)
@@ -652,7 +653,7 @@ class TestMakeMoleculeGraphEncoderMap():
         Test that default parameter values are correctly applied.
         """
         dim = 100
-        encoder_map = make_molecule_graph_encoder_map(dim=dim)
+        encoder_map = make_molecule_graph_encoder_map_cont(dim=dim)
         
         # Check default max_graph_size (130.0)
         size_encoder = encoder_map['graph_size']
@@ -663,3 +664,203 @@ class TestMakeMoleculeGraphEncoderMap():
         diameter_encoder = encoder_map['graph_diameter']
         assert diameter_encoder.size == dim  # Size is set to dim
         assert diameter_encoder.bandwidth == max(2.0, 20.0 / 7.0)  # Should be ~2.86
+
+
+class TestEdgeDirectionality():
+    """
+    Test cases to verify that edges in the mol -> graph -> torch data conversion pipeline
+    are directional and not duplicated in both directions.
+    """
+
+    def test_graph_dict_from_mol_edges_not_bidirectional(self):
+        """
+        Verify that after converting a mol object to graph dict, edges are not duplicated
+        in both directions. For each edge pair, only one direction (i,j) OR (j,i) should
+        exist, not both.
+        """
+        # Test with ethanol (simple linear molecule)
+        mol = Chem.MolFromSmiles('CCO')
+        graph = graph_dict_from_mol(mol)
+
+        edge_indices = graph['edge_indices']
+
+        # Check that no edge pair (i,j) and (j,i) exists simultaneously
+        edge_set = set()
+        bidirectional_edges = []
+
+        for i, j in edge_indices:
+            edge = (int(i), int(j))
+            reverse_edge = (int(j), int(i))
+
+            if reverse_edge in edge_set:
+                bidirectional_edges.append((edge, reverse_edge))
+
+            edge_set.add(edge)
+
+        # Should not have any bidirectional duplicate edges
+        assert len(bidirectional_edges) == 0, \
+            f"Found bidirectional edge duplicates: {bidirectional_edges}"
+
+        # For ethanol (CCO), we expect 2 bonds (C-C and C-O), so 2 edges total
+        # (not 4 if they were bidirectional)
+        assert len(edge_indices) == 2, \
+            f"Expected 2 edges for ethanol, got {len(edge_indices)}"
+
+    def test_graph_dict_from_mol_edges_not_bidirectional_cyclic(self):
+        """
+        Test edge directionality with a cyclic molecule (cyclohexane).
+        """
+        # Cyclohexane has 6 carbon atoms in a ring
+        mol = Chem.MolFromSmiles('C1CCCCC1')
+        graph = graph_dict_from_mol(mol)
+
+        edge_indices = graph['edge_indices']
+
+        # Check that no edge pair (i,j) and (j,i) exists simultaneously
+        edge_set = set()
+        bidirectional_edges = []
+
+        for i, j in edge_indices:
+            edge = (int(i), int(j))
+            reverse_edge = (int(j), int(i))
+
+            if reverse_edge in edge_set:
+                bidirectional_edges.append((edge, reverse_edge))
+
+            edge_set.add(edge)
+
+        # Should not have any bidirectional duplicate edges
+        assert len(bidirectional_edges) == 0, \
+            f"Found bidirectional edge duplicates: {bidirectional_edges}"
+
+        # Cyclohexane has 6 bonds, so we expect 6 edges (not 12 if bidirectional)
+        assert len(edge_indices) == 6, \
+            f"Expected 6 edges for cyclohexane, got {len(edge_indices)}"
+
+    def test_graph_dict_from_mol_edges_not_bidirectional_branched(self):
+        """
+        Test edge directionality with a branched molecule (isobutane).
+        """
+        # Isobutane: central carbon with 3 methyl groups
+        mol = Chem.MolFromSmiles('CC(C)C')
+        graph = graph_dict_from_mol(mol)
+
+        edge_indices = graph['edge_indices']
+
+        # Check that no edge pair (i,j) and (j,i) exists simultaneously
+        edge_set = set()
+        bidirectional_edges = []
+
+        for i, j in edge_indices:
+            edge = (int(i), int(j))
+            reverse_edge = (int(j), int(i))
+
+            if reverse_edge in edge_set:
+                bidirectional_edges.append((edge, reverse_edge))
+
+            edge_set.add(edge)
+
+        # Should not have any bidirectional duplicate edges
+        assert len(bidirectional_edges) == 0, \
+            f"Found bidirectional edge duplicates: {bidirectional_edges}"
+
+        # Isobutane has 3 bonds (C-C-C with one branch), so 3 edges expected
+        assert len(edge_indices) == 3, \
+            f"Expected 3 edges for isobutane, got {len(edge_indices)}"
+
+    def test_data_from_graph_dict_edges_not_bidirectional(self):
+        """
+        Verify that after converting graph dict to PyTorch Geometric Data object,
+        edges remain directional and are not duplicated in both directions.
+        """
+        # Create a simple graph dict without bidirectional edges
+        graph = {
+            'node_indices': np.array([0, 1, 2], dtype=int),
+            'node_attributes': np.array([[1.0], [2.0], [3.0]], dtype=float),
+            'edge_indices': np.array([[0, 1], [1, 2]], dtype=int),  # Only one direction
+            'edge_attributes': np.array([[1.0], [1.0]], dtype=float),
+        }
+
+        data = data_from_graph_dict(graph)
+
+        # Check that edge_index doesn't have bidirectional duplicates
+        edge_index = data.edge_index.T.numpy()  # Convert back to (num_edges, 2) format
+
+        edge_set = set()
+        bidirectional_edges = []
+
+        for i, j in edge_index:
+            edge = (int(i), int(j))
+            reverse_edge = (int(j), int(i))
+
+            if reverse_edge in edge_set:
+                bidirectional_edges.append((edge, reverse_edge))
+
+            edge_set.add(edge)
+
+        # Should not have any bidirectional duplicate edges
+        assert len(bidirectional_edges) == 0, \
+            f"Found bidirectional edge duplicates in Data object: {bidirectional_edges}"
+
+        # Should have exactly 2 edges
+        assert edge_index.shape[0] == 2, \
+            f"Expected 2 edges, got {edge_index.shape[0]}"
+
+    def test_mol_to_data_pipeline_edges_not_bidirectional(self):
+        """
+        End-to-end test: Verify that the full mol -> graph -> data conversion pipeline
+        produces directional edges without bidirectional duplicates.
+        """
+        # Test with multiple molecules
+        test_molecules = [
+            ('CCO', 2),           # Ethanol: 2 bonds
+            ('C1CCCCC1', 6),      # Cyclohexane: 6 bonds
+            ('CC(C)C', 3),        # Isobutane: 3 bonds
+            ('c1ccccc1', 6),      # Benzene: 6 bonds
+            ('CC(=O)O', 3),       # Acetic acid: 3 bonds
+        ]
+
+        for smiles, expected_edge_count in test_molecules:
+            mol = Chem.MolFromSmiles(smiles)
+            graph = graph_dict_from_mol(mol)
+            data = data_from_graph_dict(graph)
+
+            # Check graph dict edges
+            edge_indices = graph['edge_indices']
+            edge_set = set()
+            bidirectional_in_graph = []
+
+            for i, j in edge_indices:
+                edge = (int(i), int(j))
+                reverse_edge = (int(j), int(i))
+
+                if reverse_edge in edge_set:
+                    bidirectional_in_graph.append((edge, reverse_edge))
+
+                edge_set.add(edge)
+
+            assert len(bidirectional_in_graph) == 0, \
+                f"Molecule {smiles}: Found bidirectional edges in graph dict: {bidirectional_in_graph}"
+
+            # Check Data object edges
+            edge_index = data.edge_index.T.numpy()
+            data_edge_set = set()
+            bidirectional_in_data = []
+
+            for i, j in edge_index:
+                edge = (int(i), int(j))
+                reverse_edge = (int(j), int(i))
+
+                if reverse_edge in data_edge_set:
+                    bidirectional_in_data.append((edge, reverse_edge))
+
+                data_edge_set.add(edge)
+
+            assert len(bidirectional_in_data) == 0, \
+                f"Molecule {smiles}: Found bidirectional edges in Data object: {bidirectional_in_data}"
+
+            # Verify edge count matches expected
+            assert len(edge_indices) == expected_edge_count, \
+                f"Molecule {smiles}: Expected {expected_edge_count} edges, got {len(edge_indices)}"
+            assert edge_index.shape[0] == expected_edge_count, \
+                f"Molecule {smiles}: Expected {expected_edge_count} edges in Data object, got {edge_index.shape[0]}"

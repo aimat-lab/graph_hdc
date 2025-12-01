@@ -1,0 +1,18 @@
+# PyComex configuration file for AqSolDB dataset GNN experiments
+pycomex: true
+
+extend: predict_molecules__gnn.py
+
+name: gnn_aqsoldb
+
+description: |
+  GNN-based molecular property prediction on the AqSolDB dataset.
+
+  AqSolDB is a regression dataset for predicting aqueous solubility of molecules.
+
+parameters:
+  DATASET_NAME: "aqsoldb"
+  DATASET_NAME_ID: "aqsoldb"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 0.1
+  MODELS: ["gatv2"]

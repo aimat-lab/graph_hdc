@@ -1,0 +1,18 @@
+# PyComex configuration file for BBBP dataset GNN experiments
+pycomex: true
+
+extend: predict_molecules__gnn.py
+
+name: gnn_bbbp
+
+description: |
+  GNN-based molecular property prediction on the BBBP dataset.
+
+  BBBP (Blood-Brain Barrier Penetration) is a classification dataset for
+  predicting whether a compound can penetrate the blood-brain barrier.
+
+parameters:
+  DATASET_NAME: "bbbp"
+  DATASET_NAME_ID: "bbbp"
+  DATASET_TYPE: "classification"
+  NUM_TEST: 100

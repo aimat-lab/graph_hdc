@@ -156,12 +156,23 @@ def data_from_graph_dict(graph: dict) -> Data:
     
     graph = copy.deepcopy(graph)
     if 'edge_indices' in graph and isinstance(graph['edge_indices'], list):
-        graph['edge_indices'] = np.array(graph['edge_indices'], dtype=int)
+        if len(graph['edge_indices']) == 0:
+            # Empty edge list - create proper shape for empty edges
+            graph['edge_indices'] = np.array([], dtype=int).reshape(0, 2)
+        else:
+            graph['edge_indices'] = np.array(graph['edge_indices'], dtype=int)
     
     # Use placeholder values if required keys are missing
     node_attrs = graph.get('node_attributes', np.array([[]]))
-    edge_indices = graph.get('edge_indices', np.array([[0], [0]]))
-    edge_attrs = graph.get('edge_attributes', np.array([[]]))
+    edge_indices = graph.get('edge_indices', np.array([], dtype=int).reshape(0, 2))
+    edge_attrs = graph.get('edge_attributes', np.array([]))
+
+    # Handle empty edge attributes properly
+    if isinstance(edge_attrs, list) and len(edge_attrs) == 0:
+        edge_attrs = np.array([], dtype=float).reshape(0, 1)
+    elif isinstance(edge_attrs, np.ndarray) and edge_attrs.shape[0] == 0:
+        if edge_attrs.ndim == 1:
+            edge_attrs = edge_attrs.reshape(0, 1)
 
     data = Data(
         x=torch.tensor(node_attrs, dtype=torch.float),

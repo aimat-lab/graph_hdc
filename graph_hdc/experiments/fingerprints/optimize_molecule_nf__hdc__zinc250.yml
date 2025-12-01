@@ -1,0 +1,82 @@
+# PyComex configuration file for ZINC250k optimization using HDC with Normalizing Flow
+pycomex: true
+
+extend: optimize_molecule_nf__hdc.py
+
+name: optimize_nf_hdc_zinc250
+
+description: |
+  HDC-based molecular representation optimization with normalizing flow constraints
+  on ZINC250k dataset.
+
+  ZINC250k is a large-scale molecular dataset with logP (partition coefficient)
+  values as the target property. This experiment uses a single neural network
+  model with normalizing flow constraints and gradient balancing to optimize
+  molecular representations toward target property values.
+
+  Key features:
+  - Single model (no ensemble) for faster training
+  - No PCA optimization (works in original 2048D space)
+  - Normalizing flow constraint to keep optimization in-distribution
+  - Gradient balancing to prevent loss term dominance
+  - Explicit norm projection for HDC embeddings on unit sphere
+
+parameters:
+  SEED: 782072201
+  __CACHING__: true
+
+  DATASET_NAME: "zinc250k"
+  DATASET_NAME_ID: "zinc250k_nf"
+
+  # Target property
+  TARGET_INDEX: 0  # logP (partition coefficient)
+  TARGET_VALUE: 5.0
+  TARGET_RELATIVE: false
+
+  # HDC parameters
+  EMBEDDING_SIZE: 2048
+  NUM_LAYERS: 2
+  ENCODING_MODE: "continuous"
+  DEVICE: "cpu"
+  BATCH_SIZE: 600
+
+  # Model parameters (single model, no ensemble)
+  HIDDEN_UNITS: [256, 256, 128]
+  LEARNING_RATE: 0.001
+  MAX_EPOCHS: 100
+  BATCH_SIZE: 256
+  USE_BEST_MODEL_RESTORER: true
+
+  # Normalizing flow parameters
+  USE_FLOW_CONSTRAINT: true
+  FLOW_WEIGHT: 0.5
+  FLOW_TYPE: "realnvp"
+  FLOW_NUM_LAYERS: 8
+  FLOW_HIDDEN_UNITS: 128
+  FLOW_HIDDEN_LAYERS: 2
+  FLOW_LEARNING_RATE: 0.0001
+  FLOW_EPOCHS: 50
+  FLOW_BATCH_SIZE: 256
+  FLOW_BASE_DIST: "gaussian"
+
+  # Use explicit norm projection (hard constraint) rather than implicit regularization
+  USE_NORM_PROJECTION: false
+
+  # Optimization parameters (no PCA)
+  NUM_OPTIMIZATION_SAMPLES: 10
+  OPTIMIZATION_EPOCHS: 500
+  OPTIMIZATION_LEARNING_RATE: 0.0001
+  OPTIMIZATION_LEARNING_RATE_REDUCTION: 0.1
+  ORIGINAL_DISTANCE_WEIGHT: 0.0
+  DISTANCE_METRIC: "cosine"
+  ENABLE_GRADIENT_CLIPPING: true
+  TRAJECTORY_SAMPLING_INTERVAL: 10
+
+  # Dataset splits
+  NUM_TEST: 0.5
+  NUM_TRAIN: 1.0
+  NUM_VAL: 0.1
+
+  # Visualization
+  PLOT_INDIVIDUAL_TRAJECTORIES: true
+  TRAJECTORY_FIGURE_SIZE: [28, 6]

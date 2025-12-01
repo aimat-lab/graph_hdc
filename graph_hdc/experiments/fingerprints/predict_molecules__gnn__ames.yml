@@ -1,0 +1,17 @@
+# PyComex configuration file for Ames dataset GNN experiments
+pycomex: true
+
+extend: predict_molecules__gnn.py
+
+name: gnn_ames
+
+description: |
+  GNN-based molecular property prediction on the Ames dataset.
+
+  Ames is a classification dataset for mutagenicity testing.
+
+parameters:
+  DATASET_NAME: "ames"
+  DATASET_NAME_ID: "ames"
+  DATASET_TYPE: "classification"
+  NUM_TEST: 100

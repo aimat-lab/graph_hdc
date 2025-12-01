@@ -1,0 +1,20 @@
+# PyComex configuration file for MCF-7 dataset fingerprint experiments
+pycomex: true
+
+extend: predict_molecules__fp.py
+
+name: fp_MCF_7
+
+description: |
+  Fingerprint-based molecular property prediction on the MCF-7 dataset.
+
+  MCF-7 is a binary classification dataset for anticancer activity prediction
+  against the MCF-7 breast cancer cell line.
+
+parameters:
+  DATASET_NAME: "MCF_7"
+  DATASET_NAME_ID: "MCF_7"
+  DATASET_TYPE: "binary"
+  NUM_TEST: 0.1
+  FINGERPRINT_SIZE: 2048
+  FINGERPRINT_RADIUS: 2

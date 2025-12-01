@@ -1,0 +1,22 @@
+# PyComex configuration file for COMPAS 3x dataset fingerprint experiments
+pycomex: true
+
+extend: predict_molecules__fp.py
+
+name: fp_compas
+
+description: |
+  Fingerprint-based molecular property prediction on the COMPAS 3x dataset.
+
+  COMPAS is a multi-target regression dataset. This configuration predicts the
+  HOMO-LUMO gap using TARGET_INDEX=2.
+
+parameters:
+  DATASET_NAME: "compas_3x"
+  DATASET_NAME_ID: "compas_3x"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 1000
+  NUM_DATA: 1.0
+  TARGET_INDEX: 2
+  FINGERPRINT_SIZE: 2048
+  FINGERPRINT_RADIUS: 2

@@ -1,0 +1,28 @@
+pycomex: true
+extend: predict_bioactivity__fp.py
+name: fp_maccs_bioactivity_bl_chembl
+parameters:
+  # Dataset parameters
+  DATASET_NAME: "bl_chembl_cls"
+  DATASET_NAME_ID: "bl_chembl_cls"
+  NUM_DATA: null  # Use full dataset (set to 1000 for quick testing)
+  SEED: 1
+
+  # Evaluation parameters
+  NUM_QUERY_ACTIVES: 5        # Number of active queries per repetition
+  NUM_REPETITIONS: 50          # Statistical repetitions per target
+  MIN_ACTIVES_PER_TARGET: 10   # Minimum actives required per target
+
+  # Metric parameters
+  BEDROC_ALPHA: 20.0          # Standard α=20 for virtual screening
+  EF_PERCENTAGES: [0.01, 0.05]  # EF at 1% and 5%
+
+  # Fingerprint parameters
+  FP_TYPE: "maccs"            # MACCS structural keys
+  # FP_SIZE and FP_RADIUS not used for MACCS (fixed 166 bits)
+
+  # Visualization
+  NUM_EXAMPLE_TARGETS: 3
+  FIGURE_DPI: 300
+
+  NOTE: "MACCS keys baseline for bioactivity prediction on BL ChEMBL with 35 targets"

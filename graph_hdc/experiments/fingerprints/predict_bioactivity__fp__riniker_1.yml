@@ -1,0 +1,30 @@
+pycomex: true
+extend: predict_bioactivity__fp.py
+name: fp_ecfp4_bioactivity_riniker_1
+parameters:
+  # Dataset parameters
+  DATASET_NAME: "riniker_1"
+  DATASET_NAME_ID: "riniker_1"
+  NUM_DATA: null  # Use full dataset (168,326 molecules)
+  SEED: 1
+
+  # Evaluation parameters
+  NUM_QUERY_ACTIVES: 3        # Fewer queries due to limited actives (~30 per target)
+  NUM_REPETITIONS: 50          # Statistical repetitions per target
+  MIN_ACTIVES_PER_TARGET: 10   # Most targets have ~30 actives
+
+  # Metric parameters
+  BEDROC_ALPHA: 20.0          # Standard α=20 for virtual screening
+  EF_PERCENTAGES: [0.01, 0.05]  # EF at 1% and 5%
+
+  # Fingerprint parameters
+  FP_TYPE: "ecfp4"            # ECFP4 (Morgan radius=2)
+  FP_SIZE: 2048               # 2048 bits
+  FP_RADIUS: 2                # Radius for Morgan fingerprint
+  USE_COUNTS: false           # Binary fingerprint
+
+  # Visualization
+  NUM_EXAMPLE_TARGETS: 3
+  FIGURE_DPI: 300
+
+  NOTE: "ECFP4 baseline for bioactivity prediction on Riniker dataset 1 with 88 targets and ~15k decoys per target"

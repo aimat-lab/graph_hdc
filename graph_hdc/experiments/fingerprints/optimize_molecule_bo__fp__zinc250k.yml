@@ -1,0 +1,86 @@
+# PyComex configuration file for ZINC250k QED optimization using Morgan Fingerprints with Bayesian Optimization
+pycomex: true
+
+extend: optimize_molecule_bo__fp.py
+
+name: optimize_bo_fp_zinc250k_qed
+
+description: |
+  Fingerprint-based Bayesian Optimization for molecular search on ZINC250k QED property.
+
+  This experiment uses the ZINC250k dataset which contains ~250k drug-like molecules
+  with multiple computed properties. The target property is QED (Quantitative Estimate
+  of Drug-likeness) at index 1, which ranges from 0 to 1 with higher values indicating
+  more drug-like molecules.
+
+  Key features:
+  - Morgan (ECFP4) fingerprints for molecular representation
+  - Bayesian Optimization with Gaussian Process models from BotTorch
+  - Multiple independent trials for robust performance evaluation
+  - Efficient search through discrete molecular space
+  - Fast computation (no GPU required)
+
+  QED is a composite score based on molecular properties like molecular weight,
+  logP, number of hydrogen bond donors/acceptors, etc. Values close to 1.0 indicate
+  highly drug-like molecules.
+
+  Note: ZINC250k is a large dataset. We subsample to make BO tractable.
+
+  Bayesian Optimization approach:
+  1. Start with random initial samples to build GP surrogate
+  2. Iteratively: Train GP -> Compute acquisition -> Select molecules -> Observe values
+  3. Track best molecules found over rounds
+  4. Average performance across multiple trials
+
+  This provides a baseline for comparison with HDC-based representations.
+
+parameters:
+  SEED: 1
+
+  # Dataset configuration
+  DATASET_NAME: "zinc250k"
+  DATASET_NAME_ID: "zinc250k_qed_bo_fp"
+  NUM_DATA: null  # Subsample for tractable BO (full dataset is ~250k)
+  NUM_HOLDOUT: 0.0  # Hold out 10% for final evaluation
+
+  # Target property - QED (Quantitative Estimate of Drug-likeness)
+  TARGET_INDEX: 1  # QED property
+  TARGET_VALUE: 0.2  # Target high drug-likeness
+  TARGET_MODE: "minimize_distance"  # Minimize distance to target value
+
+  # Fingerprint parameters
+  FINGERPRINT_TYPE: "morgan"  # Morgan/ECFP fingerprints (recommended)
+  FINGERPRINT_SIZE: 64  # Standard fingerprint size
+  FINGERPRINT_RADIUS: 2  # Radius 2 = ECFP4
+
+  # Bayesian Optimization parameters
+  NUM_INITIAL_SAMPLES: 20  # Random molecules to start with
+  NUM_BO_ROUNDS: 25  # Number of BO iterations
+  NUM_SAMPLES_PER_ROUND: 3  # Molecules to select each round
+  NUM_TRIALS: 10  # Independent runs for averaging
+
+  # Acquisition function configuration
+  ACQUISITION_FUNCTION: "EI"  # Expected Improvement (or "UCB", "PI")
+  UCB_BETA: 2.0  # Exploration parameter for UCB (only used if ACQUISITION_FUNCTION="UCB")
+
+  # GP configuration
+  GP_NOISE_CONSTRAINT: 0.0001  # Lower bound for observation noise
+  NORMALIZE_REPRESENTATIONS: true  # Standardize features for better GP fitting
+  NORMALIZE_OUTPUTS: true  # Standardize y values for better GP fitting
+  USE_PCA_COMPRESSION: false  # No PCA compression (2048D is manageable)
+  PCA_COMPONENTS: 50  # Only used if USE_PCA_COMPRESSION=true
+
+  # Comparison metrics
+  METRICS_THRESHOLD: 0.05  # Threshold for "rounds to threshold" metric (QED units)
+
+  # Visualization
+  PLOT_INDIVIDUAL_TRIALS: true  # Plot each trial's trajectory
+  PLOT_GP_POSTERIOR: false  # Skip GP posterior plots (can be slow)
+  NUM_BEST_MOLECULES_TO_SHOW: 5  # Number of best molecules to visualize
+
+  # Note for experiment tracking
+  NOTE: |
+    Bayesian Optimization experiment for ZINC250k QED (drug-likeness) molecular search
+    using Morgan fingerprints (ECFP4). Expected Improvement acquisition function with 20
+    initial samples and 25 BO rounds. Target QED of 0.9 represents highly drug-like molecules.
+    Baseline comparison for HDC-based representations.

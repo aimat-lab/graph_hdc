@@ -1,0 +1,19 @@
+# PyComex configuration file for Lipophilicity dataset GNN experiments
+pycomex: true
+
+extend: predict_molecules__gnn.py
+
+name: gnn_lipop
+
+description: |
+  GNN-based molecular property prediction on the Lipophilicity dataset.
+
+  Lipophilicity is a regression dataset for predicting the lipophilicity (logD)
+  of molecules at physiological pH.
+
+parameters:
+  DATASET_NAME: "lipophilicity"
+  DATASET_NAME_ID: "lipophilicity"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 0.1
+  MODELS: ["gatv2"]

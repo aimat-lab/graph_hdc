@@ -1,0 +1,36 @@
+extend: molecule_similarity__hdc.py
+
+parameters:
+  # Dataset configuration
+  DATASET_NAME: "zinc250k"
+  DATASET_NAME_ID: "zinc250k"
+
+  # Subsampling (optional - comment out to use full dataset)
+  # NUM_DATA: 1000
+
+  # Similarity search configuration
+  NUM_SAMPLES: 20          # Number of query molecules to analyze
+  NUM_NEIGHBORS: 5         # Number of nearest neighbors to find per query
+  FIND_DISSIMILAR: true    # Also find most dissimilar molecules
+
+  # GED correlation analysis configuration
+  ENABLE_GED_ANALYSIS: true      # Enable graph edit distance correlation analysis
+  NUM_HOPS: 10                    # Maximum hop distance for neighborhood generation
+  NUM_NEIGHBOR_BRANCHES: 10       # Number of neighbors to sample per branch
+  NUM_NEIGHBOR_TOTAL: 100         # Total neighbors per hop level
+  GED_NUM_SAMPLES: 25            # Number of query molecules for GED analysis
+
+  # HDC encoding configuration
+  EMBEDDING_SIZE: 2048     # Dimensionality of HDC vectors
+  NUM_LAYERS: 2            # Message passing depth
+  ENCODING_MODE: "continuous"  # Use continuous encodings for better performance
+
+  # Visualization configuration
+  MOLECULE_IMAGE_SIZE: [300, 300]  # Size of molecule images in pixels
+  GRID_COLS: 3             # Number of columns in neighbor grid
+
+  # Reproducibility
+  SEED: 1
+
+  # Experiment metadata
+  NOTE: "Molecular similarity and GED correlation analysis using HDC encoding on ZINC250 dataset"

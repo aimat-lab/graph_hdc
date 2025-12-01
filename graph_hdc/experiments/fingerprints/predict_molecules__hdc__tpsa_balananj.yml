@@ -1,0 +1,29 @@
+# PyComex configuration file for TPSA-BalabanJ synthetic property HDC experiments
+pycomex: true
+
+extend: predict_molecules__hdc.py
+
+include: mixin_tpsa_balananj.py
+
+name: hdc_tpsa_balananj
+
+description: |
+  HDC-based molecular property prediction for TPSA-BalabanJ synthetic property.
+
+  This experiment uses the AqSolDB dataset structure but replaces the labels with
+  a composite regression target that combines the Balaban J index (a global topological
+  descriptor based on distance matrices) with TPSA (Topological Polar Surface Area).
+  The mixin calculates BalabanJ × (1 + TPSA/100) to create a synthetic property that
+  tests the model's ability to capture global molecular features requiring large
+  message passing radii.
+
+parameters:
+  __CACHING__: false
+  DATASET_NAME: "aqsoldb"
+  DATASET_NAME_ID: "tpsa_balananj"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 0.1
+  DATASET_NOISE: 0.0
+  EMBEDDING_SIZE: 2048
+  NUM_LAYERS: 3
+  MODELS: ['neural_net2']

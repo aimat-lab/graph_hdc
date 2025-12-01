@@ -1,0 +1,85 @@
+# PyComex configuration file for QM9 GAP optimization using Random Baseline with Bayesian Optimization
+pycomex: true
+
+extend: optimize_molecule_bo__random.py
+
+name: optimize_bo_random_qm9_gap
+
+description: |
+  Random Baseline for Bayesian Optimization molecular search on QM9 HOMO-LUMO gap.
+
+  This experiment uses the QM9 dataset which contains quantum mechanical properties
+  for ~134k small organic molecules. The target property is the HOMO-LUMO gap (index 7),
+  which represents the energy difference between the highest occupied and lowest
+  unoccupied molecular orbitals.
+
+  Random Baseline Purpose:
+  - Each molecule is assigned a random vector (no structural information)
+  - Provides lower bound for comparison with HDC/fingerprint methods
+  - If structured methods perform similarly to random, they're not learning
+  - AUC difference quantifies value of molecular representations
+
+  Key features:
+  - Random Gaussian N(0,1) vectors for molecular representation
+  - Same dimensionality as HDC/fingerprints (2048D) for fair comparison
+  - Bayesian Optimization with Gaussian Process models from BotTorch
+  - Multiple independent trials for robust performance evaluation
+  - Identical BO configuration to other methods
+
+  The HOMO-LUMO gap values range from ~0.02 to ~0.62 eV (mean ~0.25 eV).
+
+  Note: QM9 is a large dataset (133k molecules). We subsample to make BO tractable.
+
+  Expected Outcome:
+  - Random baseline should converge slower than structured representations
+  - If random performs well, it suggests the dataset is too easy or GP is overfitting
+  - Comparison quantifies how much molecular structure helps BO
+
+parameters:
+  SEED: 3
+
+  # Dataset configuration
+  DATASET_NAME: "qm9_smiles"
+  DATASET_NAME_ID: "qm9_gap_bo_random"
+  NUM_DATA: null # Subsample for tractable BO (full dataset is 133k)
+  NUM_HOLDOUT: 0.0  # Hold out 10% for final evaluation
+
+  # Target property - HOMO-LUMO gap (eV)
+  TARGET_INDEX: 7  # GAP property
+  TARGET_VALUE: 0.1  # Target gap value to search for (moderately large gap)
+  TARGET_MODE: "minimize_distance"  # Minimize distance to target value
+
+  # Random representation parameters
+  RANDOM_DIM: 64  # Match HDC/fingerprint dimensionality for fair comparison
+  RANDOM_SEED: null  # Use main experiment seed
+  RANDOM_DISTRIBUTION: "normal"  # Gaussian N(0,1)
+
+  # Bayesian Optimization parameters
+  NUM_INITIAL_SAMPLES: 10  # Random molecules to start with
+  NUM_BO_ROUNDS: 25  # Number of BO iterations
+  NUM_SAMPLES_PER_ROUND: 2  # Molecules to select each round
+  NUM_TRIALS: 10  # Independent runs for averaging
+
+  # Acquisition function configuration
+  ACQUISITION_FUNCTION: "UCB"  # Expected Improvement (or "UCB", "PI")
+  UCB_BETA: 4.0  # Exploration parameter for UCB (only used if ACQUISITION_FUNCTION="UCB")
+
+  # GP configuration
+  GP_NOISE_CONSTRAINT: 0.1  # Lower bound for observation noise
+  NORMALIZE_REPRESENTATIONS: true  # Standardize features for better GP fitting
+  USE_PCA_COMPRESSION: false  # No PCA compression needed
+  PCA_COMPONENTS: 50  # Only used if USE_PCA_COMPRESSION=true
+
+  # Comparison metrics
+  METRICS_THRESHOLD: 0.05  # Threshold for "rounds to threshold" metric (eV)
+
+  # Visualization
+  PLOT_INDIVIDUAL_TRIALS: true  # Plot each trial's trajectory
+  PLOT_GP_POSTERIOR: false  # Skip GP posterior plots (can be slow)
+  NUM_BEST_MOLECULES_TO_SHOW: 5  # Number of best molecules to visualize
+
+  # Note for experiment tracking
+  NOTE: |
+    Random baseline experiment for QM9 HOMO-LUMO gap molecular search.
+    Uses random Gaussian vectors (2048D) to establish performance lower bound.
+    Compare AUC with HDC/fingerprint methods to quantify representation value.

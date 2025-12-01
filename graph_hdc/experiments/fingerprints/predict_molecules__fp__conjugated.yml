@@ -1,0 +1,23 @@
+# PyComex configuration file for conjugated system detection fingerprint experiments
+pycomex: true
+
+extend: predict_molecules__fp.py
+
+include: conjugated_mixin.py
+
+name: fp_conjugated
+
+description: |
+  Fingerprint-based molecular property prediction for conjugated system detection.
+
+  This experiment uses the AqSolDB dataset structure but replaces the labels with
+  a binary classification of whether the molecule is fully conjugated. The mixin
+  analyzes the molecular structure to determine conjugation status.
+
+parameters:
+  DATASET_NAME: "aqsoldb"
+  DATASET_NAME_ID: "conjugated"
+  DATASET_TYPE: "binary"
+  NUM_TEST: 0.1
+  FINGERPRINT_SIZE: 2048
+  FINGERPRINT_RADIUS: 3

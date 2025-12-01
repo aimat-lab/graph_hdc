@@ -1,0 +1,22 @@
+# PyComex configuration file for ZINC250k dataset fingerprint experiments
+pycomex: true
+
+extend: predict_molecules__fp.py
+
+name: fp_zinc250
+
+description: |
+  Fingerprint-based molecular property prediction on the ZINC250k dataset.
+
+  ZINC250k is a large-scale multi-target regression dataset. This configuration
+  predicts the QED (Quantitative Estimate of Drug-likeness) property using TARGET_INDEX=1.
+
+parameters:
+  DATASET_NAME: "zinc250k"
+  DATASET_NAME_ID: "zinc250k"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 1000
+  NUM_DATA: 1.0
+  TARGET_INDEX: 1
+  FINGERPRINT_SIZE: 8
+  FINGERPRINT_RADIUS: 2

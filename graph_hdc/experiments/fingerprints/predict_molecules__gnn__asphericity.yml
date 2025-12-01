@@ -1,0 +1,24 @@
+# PyComex configuration file for Asphericity-Weighted Graph Complexity GNN experiments
+pycomex: true
+
+extend: predict_molecules__gnn.py
+
+include: mixin_asphericity.py
+
+name: gnn_asphericity
+
+description: |
+  GNN-based molecular property prediction for Asphericity-Weighted Graph Complexity.
+
+  This experiment uses the AqSolDB dataset structure but replaces the labels with
+  a composite regression target that combines 3D molecular shape (asphericity) with
+  2D graph complexity (Bertz index). The mixin calculates the product of these two
+  global molecular descriptors to test the model's ability to capture both geometric
+  and topological features that require large message passing radii.
+
+parameters:
+  DATASET_NAME: "aqsoldb"
+  DATASET_NAME_ID: "asphericity"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 0.1
+  MODELS: ["gatv2"]

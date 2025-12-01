@@ -1,0 +1,23 @@
+# PyComex configuration file for QM9 SMILES dataset HDC experiments
+pycomex: true
+
+extend: predict_molecules__hdc.py
+
+name: hdc_qm9_smiles
+
+description: |
+  HDC-based molecular property prediction on the QM9 SMILES dataset.
+
+  QM9 is a multi-target regression dataset with quantum mechanical properties.
+  This configuration predicts the HOMO-LUMO gap using TARGET_INDEX=7.
+
+parameters:
+  DATASET_NAME: "qm9_smiles"
+  DATASET_NAME_ID: "qm9_smiles"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 100
+  NUM_DATA: 1.0
+  TARGET_INDEX: 7
+  EMBEDDING_SIZE: 4096
+  NUM_LAYERS: 2
+  MODELS: ["neural_net2"]

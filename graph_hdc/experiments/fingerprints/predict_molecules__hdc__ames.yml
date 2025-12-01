@@ -1,0 +1,19 @@
+# PyComex configuration file for AMES dataset HDC experiments
+pycomex: true
+
+extend: predict_molecules__hdc.py
+
+name: hdc_ames
+
+description: |
+  HDC-based molecular property prediction on the AMES dataset.
+
+  AMES is a binary classification dataset for mutagenicity prediction.
+
+parameters:
+  DATASET_NAME: "ames"
+  DATASET_NAME_ID: "ames"
+  DATASET_TYPE: "binary"
+  NUM_TEST: 0.1
+  EMBEDDING_SIZE: 2048
+  NUM_LAYERS: 2

@@ -1,0 +1,58 @@
+# PyComex configuration file for CLogP optimization on AqSolDB using HDC
+pycomex: true
+
+extend: optimize_molecule__hdc.py
+
+include: mixin_clogp.py
+
+description: |
+  HDC-based molecular representation optimization for CLogP prediction on AqSolDB.
+
+  This experiment uses the AqSolDB dataset structure but optimizes for CLogP
+  (calculated LogP) values computed via RDKits Crippen method instead of the
+  default logS (aqueous solubility) values.
+
+  The mixin_clogp.py calculates CLogP values for all molecules and replaces the
+  graph_labels, which are then used as the target property for optimization.
+
+parameters:
+  SEED: null
+
+  DATASET_NAME: "aqsoldb"
+  DATASET_NAME_ID: "aqsoldb_clogp"
+
+  # Target property
+  TARGET_INDEX: 0  # First (and only) target after mixin replaces labels with CLogP
+  TARGET_VALUE: 7.0
+  TARGET_RELATIVE: false
+
+  # HDC parameters
+  EMBEDDING_SIZE: 2048
+  NUM_LAYERS: 3
+  ENCODING_MODE: "continuous"
+
+  # Ensemble parameters
+  ENSEMBLE_SIZE: 20
+  BOOTSTRAP_FRACTION: 0.5
+  MAX_EPOCHS: 100
+  USE_BEST_MODEL_RESTORER: false
+
+  # Optimization parameters
+  NUM_OPTIMIZATION_SAMPLES: 100
+  OPTIMIZATION_EPOCHS: 200
+  OPTIMIZATION_LEARNING_RATE: 0.1
+  OPTIMIZATION_LEARNING_RATE_REDUCTION: 0.1
+  PCA_OPTIMIZATION_COMPONENTS: 64
+  UNCERTAINTY_WEIGHT: 0.1
+  ENABLE_GRADIENT_CLIPPING: true
+  TRAJECTORY_SAMPLING_INTERVAL: 10
+  ORIGINAL_DISTANCE_WEIGHT: 0.0
+  DISTANCE_METRIC: "cosine"
+
+  # Dataset splits
+  NUM_TEST: 0.5
+  NUM_TRAIN: 1.0
+  NUM_VAL: 0.1
+
+  # Other
+  PLOT_INDIVIDUAL_TRAJECTORIES: true

@@ -1,0 +1,20 @@
+# PyComex configuration file for MCF-7 dataset HDC experiments
+pycomex: true
+
+extend: predict_molecules__hdc.py
+
+name: hdc_MCF_7
+
+description: |
+  HDC-based molecular property prediction on the MCF-7 dataset.
+
+  MCF-7 is a binary classification dataset for anticancer activity prediction
+  against the MCF-7 breast cancer cell line.
+
+parameters:
+  DATASET_NAME: "MCF_7"
+  DATASET_NAME_ID: "MCF_7"
+  DATASET_TYPE: "binary"
+  NUM_TEST: 0.1
+  EMBEDDING_SIZE: 8192
+  NUM_LAYERS: 2

@@ -1,0 +1,83 @@
+# PyComex configuration file for FreeSolv optimization using HDC with Bayesian Optimization
+pycomex: true
+
+extend: optimize_molecule_bo__hdc.py
+
+name: optimize_bo_hdc_freesolv
+
+description: |
+  HDC-based Bayesian Optimization for molecular search on FreeSolv dataset.
+
+  This experiment uses the FreeSolv dataset which contains experimental hydration
+  free energies for small molecules. The dataset contains 639 molecules with measured
+  solvation free energies in water (kcal/mol).
+
+  Key features:
+  - Hyperdimensional computing (HDC) representations via HyperNet encoder
+  - Bayesian Optimization with Gaussian Process models from BotTorch
+  - Multiple independent trials for robust performance evaluation
+  - Efficient search through discrete molecular space
+  - Acquisition function-guided exploration-exploitation trade-off
+
+  The target property is the experimental hydration free energy (index 0), which
+  represents the free energy change when a molecule is transferred from gas phase
+  to aqueous solution. Values are typically negative (favorable solvation) ranging
+  roughly from -25 to +4 kcal/mol.
+
+  Bayesian Optimization approach:
+  1. Start with random initial samples to build GP surrogate
+  2. Iteratively: Train GP -> Compute acquisition -> Select molecules -> Observe values
+  3. Track best molecules found over rounds
+  4. Average performance across multiple trials
+
+parameters:
+  SEED: 1
+
+  # Dataset configuration
+  DATASET_NAME: "freesolv"
+  DATASET_NAME_ID: "freesolv_bo"
+  NUM_DATA: null  # Use full dataset (639 molecules)
+  NUM_HOLDOUT: 0.1  # Hold out 10% for final evaluation
+
+  # Target property - experimental hydration free energy (kcal/mol)
+  TARGET_INDEX: 0  # First target: experimental value
+  TARGET_VALUE: +2.5  # Target hydration free energy to search for
+  TARGET_MODE: "minimize_distance"  # Minimize distance to target value
+
+  # HDC parameters
+  EMBEDDING_SIZE: 64  # Moderate size for good GP performance
+  NUM_LAYERS: 2
+  ENCODING_MODE: "continuous"  # Better for regression and GP modeling
+  DEVICE: "cpu"
+  BATCH_SIZE: 200  # For HyperNet forward pass
+
+  # Bayesian Optimization parameters
+  NUM_INITIAL_SAMPLES: 10  # Random molecules to start with (smaller dataset)
+  NUM_BO_ROUNDS: 20  # Number of BO iterations
+  NUM_SAMPLES_PER_ROUND: 3  # Molecules to select each round
+  NUM_TRIALS: 25  # Independent runs for averaging
+
+  # Acquisition function configuration
+  ACQUISITION_FUNCTION: "EI"  # Expected Improvement (or "UCB", "PI")
+  UCB_BETA: 2.0  # Exploration parameter for UCB (only used if ACQUISITION_FUNCTION="UCB")
+
+  # GP configuration
+  GP_NOISE_CONSTRAINT: 0.0001  # Lower bound for observation noise
+  NORMALIZE_REPRESENTATIONS: true  # Standardize features for better GP fitting
+  USE_PCA_COMPRESSION: false  # No PCA compression (2048D is manageable)
+  PCA_COMPONENTS: 50  # Only used if USE_PCA_COMPRESSION=true
+
+  # Comparison metrics
+  METRICS_THRESHOLD: 1.0  # Threshold for "rounds to threshold" metric (kcal/mol)
+
+  # Visualization
+  PLOT_INDIVIDUAL_TRIALS: true  # Plot each trial's trajectory
+  PLOT_GP_POSTERIOR: false  # Skip GP posterior plots (can be slow)
+  NUM_BEST_MOLECULES_TO_SHOW: 5  # Number of best molecules to visualize
+
+  # Note for experiment tracking
+  NOTE: |
+    Bayesian Optimization experiment for FreeSolv (hydration free energy) molecular search
+    using HDC representations. Expected Improvement acquisition function with 15 initial
+    samples and 20 BO rounds. Target value of -10.0 kcal/mol represents a moderately
+    hydrophilic molecule. Dataset has 639 molecules with experimental solvation data.

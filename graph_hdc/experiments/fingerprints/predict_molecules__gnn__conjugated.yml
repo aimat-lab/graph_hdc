@@ -1,0 +1,26 @@
+# PyComex configuration file for conjugated system detection experiment
+# This extends the base GNN experiment and adds custom conjugation detection logic
+
+# Extend the base GNN experiment
+extend: predict_molecules__gnn.py
+
+# Include the mixin that provides the conjugation detection hooks
+include: mixin_conjugated.py
+
+# Dataset parameters
+parameters:
+  # The name of the dataset to download from ChemMatData file share
+  DATASET_NAME: 'aqsoldb'
+
+  # The identification name for this specific experiment variant
+  # (using aqsoldb data but detecting conjugated systems as targets)
+  DATASET_NAME_ID: 'conjugated'
+
+  # Dataset type determines evaluation metrics
+  DATASET_TYPE: 'classification'
+
+  # Number of test samples for evaluation (10% of the dataset)
+  NUM_TEST: 0.1
+
+  # Limit to only GIN model for this experiment
+  MODELS: ['gin']

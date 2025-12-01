@@ -1,0 +1,19 @@
+# PyComex configuration file for AMES dataset fingerprint experiments
+pycomex: true
+
+extend: predict_molecules__fp.py
+
+name: fp_ames
+
+description: |
+  Fingerprint-based molecular property prediction on the AMES dataset.
+
+  AMES is a binary classification dataset for mutagenicity prediction.
+
+parameters:
+  DATASET_NAME: "ames"
+  DATASET_NAME_ID: "ames"
+  DATASET_TYPE: "binary"
+  NUM_TEST: 0.1
+  FINGERPRINT_SIZE: 2048
+  FINGERPRINT_RADIUS: 2

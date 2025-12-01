@@ -1,0 +1,29 @@
+{
+  "mcpServers": {
+    "paper-search": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/home/jonas/Private/paper-search-mcp",
+        "-m",
+        "paper_search_mcp.server"
+      ],
+      "env": {}
+    },
+    "zotero": {
+      "command": "zotero-mcp",
+      "env": {
+        "ZOTERO_LOCAL": "true"
+      }
+    },
+    "pycomex Docs": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://gitmcp.io/the16thpythonist/pycomex"
+      ]
+    }
+  }
+}

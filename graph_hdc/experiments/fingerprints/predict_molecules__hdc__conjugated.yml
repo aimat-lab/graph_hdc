@@ -1,0 +1,24 @@
+# PyComex configuration file for conjugated system detection HDC experiments
+pycomex: true
+
+extend: predict_molecules__hdc.py
+
+include: mixin_conjugated.py
+
+name: hdc_conjugated
+
+description: |
+  HDC-based molecular property prediction for conjugated system detection.
+
+  This experiment uses the AqSolDB dataset structure but replaces the labels with
+  a binary classification of whether the molecule is fully conjugated. The mixin
+  analyzes the molecular structure to determine conjugation status.
+
+parameters:
+  DATASET_NAME: "aqsoldb"
+  DATASET_NAME_ID: "conjugated"
+  DATASET_TYPE: "binary"
+  NUM_TEST: 0.1
+  DATASET_NOISE: 0.0
+  EMBEDDING_SIZE: 8192
+  NUM_LAYERS: 3

@@ -57,9 +57,9 @@ class ColorEncoder(AbstractEncoder):
         self.embeddings: torch.Tensor = torch.tensor(random.normal(
             # This scaling is important to have normalized base vectors
             loc=0.0,
-            scale=(1.0 / np.sqrt(dim)), 
+            scale=(1.0 / np.sqrt(dim)),
             size=(self.num_categories, dim)
-        ).astype(np.float32))
+        ).astype(np.float64))
         
     def normalize(self, value: Any) -> np.ndarray:
         

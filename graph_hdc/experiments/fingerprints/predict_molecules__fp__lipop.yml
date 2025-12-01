@@ -1,0 +1,20 @@
+# PyComex configuration file for Lipophilicity dataset fingerprint experiments
+pycomex: true
+
+extend: predict_molecules__fp.py
+
+name: fp_lipop
+
+description: |
+  Fingerprint-based molecular property prediction on the Lipophilicity dataset.
+
+  Lipophilicity is a regression dataset for octanol/water distribution coefficient
+  (logD at pH 7.4) prediction.
+
+parameters:
+  DATASET_NAME: "lipophilicity"
+  DATASET_NAME_ID: "lipophilicity"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 1000
+  FINGERPRINT_SIZE: 2048
+  FINGERPRINT_RADIUS: 2

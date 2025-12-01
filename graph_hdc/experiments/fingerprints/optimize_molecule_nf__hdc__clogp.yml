@@ -1,0 +1,90 @@
+# PyComex configuration file for CLogP optimization on AqSolDB using HDC with Normalizing Flow
+pycomex: true
+
+extend: optimize_molecule_nf__hdc.py
+
+include: mixin_clogp.py
+
+name: optimize_nf_hdc_aqsoldb_clogp
+
+description: |
+  HDC-based molecular representation optimization with normalizing flow constraints
+  for CLogP prediction on AqSolDB.
+
+  This experiment uses the AqSolDB dataset structure but optimizes for CLogP
+  (calculated LogP) values computed via RDKit's Crippen method instead of the
+  default logS (aqueous solubility) values.
+
+  Key differences from optimize_molecule__hdc.py:
+  - Single model (no ensemble) for faster training
+  - No PCA optimization (works in original 4096D space)
+  - Normalizing flow constraint to keep optimization in-distribution
+  - Simpler architecture focused on flow-guided optimization
+
+  This configuration uses EXPLICIT norm projection (USE_NORM_PROJECTION=true)
+  to guarantee representations stay on the unit sphere. This is the safer approach
+  when FLOW_WEIGHT is small (0.1). For comparison with implicit regularization,
+  see optimize_molecule_nf__hdc__clogp_implicit.yml which uses higher flow weight
+  and no explicit projection.
+
+  The mixin_clogp.py calculates CLogP values for all molecules and replaces the
+  graph_labels, which are then used as the target property for optimization.
+
+parameters:
+  SEED: null
+
+  DATASET_NAME: "aqsoldb"
+  DATASET_NAME_ID: "aqsoldb_clogp_nf"
+
+  # Target property
+  TARGET_INDEX: 0  # First (and only) target after mixin replaces labels with CLogP
+  TARGET_VALUE: 7.0
+  TARGET_RELATIVE: false
+
+  # HDC parameters
+  EMBEDDING_SIZE: 2048
+  NUM_LAYERS: 2
+  ENCODING_MODE: "continuous"
+  DEVICE: "cpu"
+  BATCH_SIZE: 600
+
+  # Model parameters (single model, no ensemble)
+  HIDDEN_UNITS: [256, 256, 128]
+  LEARNING_RATE: 0.001
+  MAX_EPOCHS: 100
+  BATCH_SIZE: 256
+  USE_BEST_MODEL_RESTORER: true
+
+  # Normalizing flow parameters
+  USE_FLOW_CONSTRAINT: true
+  FLOW_WEIGHT: 0.1  # Small weight; explicit projection ensures norm constraint
+  FLOW_TYPE: "realnvp"
+  FLOW_NUM_LAYERS: 8
+  FLOW_HIDDEN_UNITS: 128
+  FLOW_HIDDEN_LAYERS: 2
+  FLOW_LEARNING_RATE: 0.001
+  FLOW_EPOCHS: 150
+  FLOW_BATCH_SIZE: 256
+  FLOW_BASE_DIST: "gaussian"
+
+  # Use explicit norm projection (hard constraint) rather than implicit regularization
+  USE_NORM_PROJECTION: false
+
+  # Optimization parameters (no PCA)
+  NUM_OPTIMIZATION_SAMPLES: 10
+  OPTIMIZATION_EPOCHS: 1000
+  OPTIMIZATION_LEARNING_RATE: 0.0005
+  OPTIMIZATION_LEARNING_RATE_REDUCTION: 0.1
+  ORIGINAL_DISTANCE_WEIGHT: 0.0
+  DISTANCE_METRIC: "cosine"
+  ENABLE_GRADIENT_CLIPPING: true
+  TRAJECTORY_SAMPLING_INTERVAL: 10
+
+  # Dataset splits
+  NUM_TEST: 0.5
+  NUM_TRAIN: 1.0
+  NUM_VAL: 0.1
+
+  # Visualization
+  PLOT_INDIVIDUAL_TRAJECTORIES: true
+  TRAJECTORY_FIGURE_SIZE: [21, 6]

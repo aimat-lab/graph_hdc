@@ -1,0 +1,18 @@
+# PyComex configuration file for BACE dataset GNN experiments
+pycomex: true
+
+extend: predict_molecules__gnn.py
+
+name: gnn_bace
+
+description: |
+  GNN-based molecular property prediction on the BACE dataset.
+
+  BACE (Beta-secretase 1) is a classification dataset for binding results for
+  inhibitors of human β-secretase 1 (BACE-1).
+
+parameters:
+  DATASET_NAME: "bace"
+  DATASET_NAME_ID: "bace"
+  DATASET_TYPE: "classification"
+  NUM_TEST: 100

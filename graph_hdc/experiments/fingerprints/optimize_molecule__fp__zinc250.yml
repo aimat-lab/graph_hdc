@@ -1,0 +1,51 @@
+# PyComex configuration file for ZINC250k optimization using Fingerprints
+pycomex: true
+
+extend: optimize_molecule__fp.py
+
+name: optimize_fp_zinc250
+
+description: |
+  Fingerprint-based molecular representation optimization on ZINC250k dataset.
+
+  ZINC250k is a large-scale multi-target regression dataset. This configuration
+  optimizes for the property at TARGET_INDEX=0.
+
+parameters:
+  DATASET_NAME: "zinc250k"
+  DATASET_NAME_ID: "zinc250"
+
+  # Target property
+  TARGET_INDEX: 0
+  TARGET_VALUE: 6.0
+
+  # Fingerprint parameters
+  FINGERPRINT_TYPE: "morgan"
+  FINGERPRINT_SIZE: 4096
+  FINGERPRINT_RADIUS: 2
+
+  # Ensemble parameters
+  ENSEMBLE_SIZE: 10
+  BOOTSTRAP_FRACTION: 0.8
+  MAX_EPOCHS: 100
+  USE_BEST_MODEL_RESTORER: false
+
+  # Optimization parameters
+  NUM_OPTIMIZATION_SAMPLES: 50
+  OPTIMIZATION_EPOCHS: 200
+  OPTIMIZATION_LEARNING_RATE: 0.01
+  OPTIMIZATION_LEARNING_RATE_REDUCTION: 0.1
+  PCA_OPTIMIZATION_COMPONENTS: 3
+  UNCERTAINTY_WEIGHT: 0.5
+  ENABLE_GRADIENT_CLIPPING: true
+  TRAJECTORY_SAMPLING_INTERVAL: 10
+  ORIGINAL_DISTANCE_WEIGHT: 1.0
+  DISTANCE_METRIC: "cosine"
+
+  # Dataset splits
+  NUM_TEST: 0.5
+  NUM_TRAIN: 1.0
+  NUM_VAL: 0.1
+
+  # Other
+  PLOT_INDIVIDUAL_TRAJECTORIES: true

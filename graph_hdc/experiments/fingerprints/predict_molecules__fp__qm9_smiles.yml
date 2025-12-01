@@ -1,0 +1,22 @@
+# PyComex configuration file for QM9 SMILES dataset fingerprint experiments
+pycomex: true
+
+extend: predict_molecules__fp.py
+
+name: fp_qm9_smiles
+
+description: |
+  Fingerprint-based molecular property prediction on the QM9 SMILES dataset.
+
+  QM9 is a multi-target regression dataset with quantum mechanical properties.
+  This configuration predicts the HOMO-LUMO gap using TARGET_INDEX=7.
+
+parameters:
+  DATASET_NAME: "qm9_smiles"
+  DATASET_NAME_ID: "qm9_smiles"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 1000
+  NUM_DATA: 1.0
+  TARGET_INDEX: 7
+  FINGERPRINT_SIZE: 2048
+  FINGERPRINT_RADIUS: 2

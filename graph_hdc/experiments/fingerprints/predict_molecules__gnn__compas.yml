@@ -1,0 +1,21 @@
+# PyComex configuration file for COMPAS 3x dataset GNN experiments
+pycomex: true
+
+extend: predict_molecules__gnn.py
+
+name: gnn_compas
+
+description: |
+  GNN-based molecular property prediction on the COMPAS 3x dataset.
+
+  COMPAS 3x is a regression dataset. This configuration predicts a specific
+  property using TARGET_INDEX=2 (GAP).
+
+parameters:
+  DATASET_NAME: "compas_3x"
+  DATASET_NAME_ID: "compas_3x"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 100
+  TARGET_INDEX: 2
+  NUM_DATA: 1.0
+  NUM_TRAIN: 1.0

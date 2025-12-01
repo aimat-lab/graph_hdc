@@ -43,10 +43,10 @@ ENCODING_PARAMETER_MAP: dict[str, dict[str, list]] = {
     #     'FINGERPRINT_TYPE': ['atom'],
     #     'FINGERPRINT_SIZE': [1024, 2048, 4096, 8192],
     # },
-    ('hdc', 'hdc'): {
-        'EMBEDDING_SIZE': [1024, 2048, 4096, 8192],
-        'NUM_LAYERS': [1, 2, 3],
-    },
+    # ('hdc', 'hdc'): {
+    #     'EMBEDDING_SIZE': [1024, 2048, 4096, 8192],
+    #     'NUM_LAYERS': [1, 2, 3],
+    # },
 }
 
 # This is a data structure which maps each possible model name to a dictionary of the 
@@ -154,14 +154,41 @@ DATASET_PARAMETER_TUPLES: list[tuple[str, dict]] = [
     #         'TARGET_INDEX': 7,  # GAP
     #     },
     # ),
+    # (
+    #     'qm9_smiles', 
+    #     {
+    #         'NUM_DATA': 0.1,
+    #         'NOTE': 'qm9_energy',
+    #         'TARGET_INDEX': 10,  # U0
+    #     },
+    # ),
     (
-        'qm9_smiles', 
+        'freesolv',
         {
-            'NUM_DATA': 0.1,
-            'NOTE': 'qm9_energy',
-            'TARGET_INDEX': 10,  # U0
-        },
+            'NOTE': 'freesolv',
+            'DATASET_NAME': 'freesolv',
+            'DATASET_TYPE': 'regression',
+            'TARGET_INDEX': 0,
+        }
     ),
+    (
+        'lipophilicity',
+        {
+            'NOTE': 'lipophilicity',
+            'DATASET_NAME': 'lipophilicity',
+            'DATASET_TYPE': 'regression',
+            'TARGET_INDEX': 0,
+        }
+    ),
+    (
+        'bace_reg',
+        {
+            'NOTE': 'bace_reg',
+            'DATASET_NAME': 'bace_reg',
+            'DATASET_TYPE': 'regression',
+            'TARGET_INDEX': 0,
+        }
+    )
 ]
 
 
@@ -178,8 +205,19 @@ if __name__ == "__main__":
                 if model not in ENCODING_MODEL_MAP[encoding]:
                     continue
                 
-                experiment_module = f'predict_molecules__{encoding}__{dataset}.py'
+                # Try dataset-specific YAML config first
+                experiment_module = f'predict_molecules__{encoding}__{dataset}.yml'
                 experiment_path = os.path.join(PATH, experiment_module)
+
+                # If YAML doesn't exist, try dataset-specific Python file
+                if not os.path.exists(experiment_path):
+                    experiment_module = f'predict_molecules__{encoding}__{dataset}.py'
+                    experiment_path = os.path.join(PATH, experiment_module)
+
+                # If dataset-specific Python file doesn't exist, fall back to base encoding module
+                if not os.path.exists(experiment_path):
+                    experiment_module = f'predict_molecules__{encoding}.py'
+                    experiment_path = os.path.join(PATH, experiment_module)
                 
                 # assert os.path.exists(experiment_module), (
                 #     f'Experiment path "{experiment_path}" does not exist.'

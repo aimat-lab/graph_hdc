@@ -1,0 +1,21 @@
+# PyComex configuration file for ZINC250k dataset GNN experiments
+pycomex: true
+
+extend: predict_molecules__gnn.py
+
+name: gnn_zinc250
+
+description: |
+  GNN-based molecular property prediction on the ZINC250k dataset.
+
+  ZINC250k is a large-scale regression dataset. This configuration predicts
+  the logP (partition coefficient) property using TARGET_INDEX=0.
+
+parameters:
+  DATASET_NAME: "zinc250k"
+  DATASET_NAME_ID: "zinc250k"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 1000
+  TARGET_INDEX: 0
+  NUM_DATA: 1.0
+  NUM_TRAIN: 100000

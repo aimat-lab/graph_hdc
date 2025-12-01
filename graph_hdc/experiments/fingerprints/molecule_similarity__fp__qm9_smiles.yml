@@ -1,0 +1,37 @@
+extend: molecule_similarity__fp.py
+
+parameters:
+  # Dataset configuration
+  DATASET_NAME: "qm9_smiles"
+  DATASET_NAME_ID: "qm9_smiles"
+
+  # Subsampling (optional - comment out to use full dataset)
+  # NUM_DATA: 1000
+
+  # Similarity search configuration
+  NUM_SAMPLES: 10          # Number of query molecules to analyze
+  NUM_NEIGHBORS: 5         # Number of nearest neighbors to find per query
+  FIND_DISSIMILAR: true    # Also find most dissimilar molecules
+
+  # GED correlation analysis configuration
+  ENABLE_GED_ANALYSIS: true      # Enable graph edit distance correlation analysis
+  NUM_HOPS: 10                    # Maximum hop distance for neighborhood generation
+  NUM_NEIGHBOR_BRANCHES: 10       # Number of neighbors to sample per branch
+  NUM_NEIGHBOR_TOTAL: 100         # Total neighbors per hop level
+  GED_NUM_SAMPLES: 25            # Number of query molecules for GED analysis
+
+  # Fingerprint configuration
+  FINGERPRINT_TYPE: "morgan"   # Options: "morgan", "rdkit", "atom_pair", "torsion"
+  FINGERPRINT_SIZE: 2048       # Number of bits in fingerprint
+  FINGERPRINT_RADIUS: 2        # Morgan fingerprint radius (ECFP4)
+  USE_COUNTS: false            # Use binary fingerprints (not count fingerprints)
+
+  # Visualization configuration
+  MOLECULE_IMAGE_SIZE: [300, 300]  # Size of molecule images in pixels
+  GRID_COLS: 3             # Number of columns in neighbor grid
+
+  # Reproducibility
+  SEED: 1
+
+  # Experiment metadata
+  NOTE: "Molecular similarity and GED correlation analysis using Morgan fingerprints on QM9 dataset"

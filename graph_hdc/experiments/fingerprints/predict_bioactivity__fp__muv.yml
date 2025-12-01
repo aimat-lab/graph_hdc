@@ -1,0 +1,30 @@
+pycomex: true
+extend: predict_bioactivity__fp.py
+name: fp_ecfp4_bioactivity_muv
+parameters:
+  # Dataset parameters
+  DATASET_NAME: "muv"
+  DATASET_NAME_ID: "muv"
+  NUM_DATA: null  # Use full dataset (93,087 molecules)
+  SEED: 1
+
+  # Evaluation parameters
+  NUM_QUERY_ACTIVES: 3        # Fewer queries due to very limited actives (~24-30 per target)
+  NUM_REPETITIONS: 50          # Statistical repetitions per target
+  MIN_ACTIVES_PER_TARGET: 10   # Most targets have ~24-30 actives
+
+  # Metric parameters
+  BEDROC_ALPHA: 20.0          # Standard α=20 for virtual screening
+  EF_PERCENTAGES: [0.01, 0.05]  # EF at 1% and 5%
+
+  # Fingerprint parameters
+  FP_TYPE: "ecfp4"            # ECFP4 (Morgan radius=2)
+  FP_SIZE: 2048               # 2048 bits
+  FP_RADIUS: 2                # Radius for Morgan fingerprint
+  USE_COUNTS: false           # Binary fingerprint
+
+  # Visualization
+  NUM_EXAMPLE_TARGETS: 3
+  FIGURE_DPI: 300
+
+  NOTE: "ECFP4 baseline for bioactivity prediction on MUV (Maximum Unbiased Validation) dataset with 17 targets and ~93k decoys per target - highly challenging benchmark"

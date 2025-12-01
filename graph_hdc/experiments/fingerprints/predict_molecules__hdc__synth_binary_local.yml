@@ -1,0 +1,19 @@
+# PyComex configuration file for synthetic binary local dataset HDC experiments
+pycomex: true
+
+extend: predict_molecules__hdc.py
+
+name: hdc_synth_binary_local
+
+description: |
+  HDC-based molecular property prediction on the synthetic binary local dataset.
+
+  This is a synthetic classification dataset for testing and development purposes.
+
+parameters:
+  DATASET_NAME: "synth_binary_local"
+  DATASET_NAME_ID: "synth_binary_local"
+  DATASET_TYPE: "classification"
+  NUM_TEST: 1000
+  EMBEDDING_SIZE: 2048
+  NUM_LAYERS: 2

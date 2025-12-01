@@ -1,0 +1,23 @@
+# PyComex configuration file for CLogP prediction experiment
+# This extends the base GNN experiment and adds custom CLogP calculation logic
+
+# Extend the base GNN experiment
+extend: predict_molecules__gnn.py
+
+# Include the mixin that provides the CLogP calculation hook
+include: mixin_clogp.py
+
+# Dataset parameters
+parameters:
+  # The name of the dataset to download from ChemMatData file share
+  DATASET_NAME: 'aqsoldb'
+
+  # The identification name for this specific experiment variant
+  # (using aqsoldb data but calculating CLogP as targets)
+  DATASET_NAME_ID: 'clogp'
+
+  # Dataset type determines evaluation metrics
+  DATASET_TYPE: 'regression'
+
+  # Number of test samples for evaluation
+  NUM_TEST: 1000

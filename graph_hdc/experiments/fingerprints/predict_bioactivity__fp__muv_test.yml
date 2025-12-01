@@ -1,0 +1,30 @@
+pycomex: true
+extend: predict_bioactivity__fp.py
+name: fp_ecfp4_bioactivity_muv_test
+parameters:
+  # Dataset parameters
+  DATASET_NAME: "muv"
+  DATASET_NAME_ID: "muv_test"
+  NUM_DATA: 5000  # Small subset for quick testing
+  SEED: 1
+
+  # Evaluation parameters (reduced for testing)
+  NUM_QUERY_ACTIVES: 2        # Fewer queries for faster testing
+  NUM_REPETITIONS: 3           # Fewer repetitions for faster testing
+  MIN_ACTIVES_PER_TARGET: 5    # Lower threshold for testing
+
+  # Metric parameters
+  BEDROC_ALPHA: 20.0
+  EF_PERCENTAGES: [0.01, 0.05]
+
+  # Fingerprint parameters
+  FP_TYPE: "ecfp4"
+  FP_SIZE: 2048
+  FP_RADIUS: 2
+  USE_COUNTS: false
+
+  # Visualization
+  NUM_EXAMPLE_TARGETS: 3
+  FIGURE_DPI: 150  # Lower DPI for faster testing
+
+  NOTE: "Quick test run with subset of MUV data for validation"

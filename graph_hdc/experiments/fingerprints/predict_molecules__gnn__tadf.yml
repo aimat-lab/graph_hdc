@@ -1,0 +1,26 @@
+# PyComex configuration file for TADF dataset GNN experiments
+pycomex: true
+
+extend: predict_molecules__gnn.py
+
+name: gnn_tadf
+
+description: |
+  GNN-based molecular property prediction on the TADF dataset.
+
+  TADF (Thermally Activated Delayed Fluorescence) is a regression dataset.
+  This configuration predicts the TADF rate using TARGET_INDEX=0.
+
+  Available targets:
+  - 0: TADF rate
+  - 1: Singlet-triplet energy
+  - 2: Oscillator strength
+
+parameters:
+  DATASET_NAME: "tadf"
+  DATASET_NAME_ID: "tadf"
+  DATASET_TYPE: "regression"
+  NUM_TEST: 100
+  TARGET_INDEX: 0
+  NUM_DATA: 1.0
+  NUM_TRAIN: 1.0
