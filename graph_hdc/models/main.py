@@ -43,6 +43,7 @@ class HyperNet(AbstractHyperNet):
                  unbind_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = 'circular_correlation_fft',
                  pooling: str = 'sum',
                  normalize_all: bool = False,
+                 layer_normalize: bool = True,
                  bidirectional: bool = False,
                  seed: Optional[int] = None,
                  device: str = 'cpu',
@@ -57,6 +58,7 @@ class HyperNet(AbstractHyperNet):
         self.unbind_fn = resolve_function(unbind_fn)
         self.pooling = pooling
         self.normalize_all = normalize_all
+        self.layer_normalize = layer_normalize
         self.bidirectional = bidirectional
         self.seed = seed
 
@@ -199,13 +201,15 @@ class HyperNet(AbstractHyperNet):
     @property
     def uses_graph_properties(self) -> bool:
         """
-        A simple utility function that returns True if the self.graph_encoder_map contains any entries 
+        A simple utility function that returns True if the self.graph_encoder_map contains any entries
         and therefore the encoding of graph properties is used.
         """
         return bool(len(self.graph_encoder_map) > 0)
-    
+
     def forward(self,
                 data: Data,
+                bidirectional: bool = True,
+                return_node_hv_stack: bool = False,
                 ) -> dict:
         """
         Performs a forward pass on the given PyG ``data`` object which represents a batch of graphs. Primarily
@@ -281,7 +285,8 @@ class HyperNet(AbstractHyperNet):
             messages = node_hv_layers[layer_index][dsts] * sigmoid(edge_weight)
             aggregated = scatter(messages, srcs, reduce='sum', dim_size=data.node_hv.size(0))
             #print(node_hv_layers[layer_index].shape, aggregated.shape)
-            next_layer = normalize(self.bind_fn(node_hv_layers[layer_index], aggregated))
+            raw = self.bind_fn(node_hv_layers[layer_index], aggregated)
+            next_layer = normalize(raw) if self.layer_normalize else raw
             #next_layer = normalize(_circular_convolution_fft(torch.stack([node_hv_layers[0], aggregated])))
             node_hv_layers.append(next_layer)
 
@@ -327,29 +332,300 @@ class HyperNet(AbstractHyperNet):
             )
         
         
-        return {
-            
-            # This the main result of the forward pass which is the individual graph embedding vectors of the 
+        result = {
+            # This the main result of the forward pass which is the individual graph embedding vectors of the
             # input graphs.
             # graph_embedding: (batch_size, hidden_dim)
             'graph_embedding': embedding,
-            
+        }
+
+        if return_node_hv_stack:
             # As additional information that might be useful we also pass the stack of the node embeddings across
             # the various convolutional depths.
             # node_hv_stack: (batch_size * num_nodes, num_layers + 1, hidden_dim)
-            #'node_hv_stack': node_hv_stack.transpose(0, 1),
-            
-            # graph hv stack is supposed to contain the graph hypervectors for each of the graphs in the 
-            # batch at the different message passing depths. Whcih means that the different layers 
+            result['node_hv_stack'] = node_hv_stack.transpose(0, 1)
+
+            # graph hv stack is supposed to contain the graph hypervectors for each of the graphs in the
+            # batch at the different message passing depths. Whcih means that the different layers
             # will have to be aggregated with scatter individually.
             # graph_hv_stack: (batch_size, num_layers +1, hidden_dim)
-            'graph_hv_stack': graph_hv_stack,
+            result['graph_hv_stack'] = graph_hv_stack
+
+        return result
+
+    def forward_masked(self,
+                       data: Data,
+                       node_mask: torch.Tensor,
+                       bidirectional: bool = True,
+                       return_node_hv_stack: bool = False,
+                       ) -> dict:
+        """
+        Forward pass with causal node-level masking. Masked nodes
+        (``node_mask[i] == 0``) are explicitly zeroed at every layer so they
+        never contribute to the graph embedding or send messages to neighbors.
+
+        This method is intended for single-graph inputs (no batching).
+
+        :param data: A PyG Data object representing a single graph.
+        :param node_mask: A tensor of shape ``(num_nodes,)`` with binary values.
+            ``node_mask[i] = 0`` forces node ``i`` to the zero vector at every
+            layer.
+        :param bidirectional: Whether to use bidirectional edges.
+        :param return_node_hv_stack: If True, include ``'node_hv_stack'`` of
+            shape ``(depth+1, num_nodes, hidden_dim)`` in the result.
+
+        :returns: A dict with ``'graph_embedding'`` of shape ``(1, hidden_dim)``.
+        """
+        node_dim = data.x.size(0)
+
+        data = self.encode_properties(data)
+
+        if hasattr(data, 'edge_weight') and data.edge_weight is not None:
+            edge_weight = data.edge_weight
+        else:
+            edge_weight = 100 * torch.ones(data.edge_index.shape[1], 1, device=self.device)
+
+        if bidirectional:
+            edge_index = torch.cat([data.edge_index, data.edge_index[[1, 0]]], dim=1)
+            edge_weight = torch.cat([edge_weight, edge_weight], dim=0)
+        else:
+            edge_index = data.edge_index
+            edge_weight = edge_weight
+
+        srcs, dsts = edge_index
+        mask_expanded = node_mask.unsqueeze(-1)
+
+        node_hv_stack: torch.Tensor = torch.zeros(
+            size=(self.depth + 1, node_dim, self.hidden_dim),
+            device=self.device
+        )
+        node_hv_stack[0] = data.node_hv * mask_expanded
+
+        for layer_index in range(self.depth):
+            messages = node_hv_stack[layer_index][dsts] * sigmoid(edge_weight)
+            aggregated = scatter(messages, srcs, reduce='sum')
+            raw = self.bind_fn(node_hv_stack[layer_index], aggregated)
+            if self.layer_normalize:
+                norm = torch.norm(raw, dim=-1, keepdim=True).clamp(min=1e-8)
+                raw = raw / norm
+            node_hv_stack[layer_index + 1] = raw * mask_expanded
+
+        node_hv = node_hv_stack.sum(dim=0)
+        readout = scatter(node_hv, data.batch, reduce=self.pooling)
+
+        result = {
+            'graph_embedding': readout,
         }
-        
+        if return_node_hv_stack:
+            result['node_hv_stack'] = node_hv_stack
+
+        return result
+
+    def forward_masked_at_layer(self,
+                                data: Data,
+                                node_mask: torch.Tensor,
+                                mask_layer: int,
+                                bidirectional: bool = True,
+                                ) -> dict:
+        """
+        Forward pass where the node mask is applied starting at ``mask_layer``.
+
+        Layers ``0`` to ``mask_layer - 1`` run normally (all nodes active).
+        From ``mask_layer`` onward, masked nodes (``node_mask[i] == 0``) are
+        explicitly zeroed so they stop contributing and sending messages.
+
+        :param data: A PyG Data object representing a single graph.
+        :param node_mask: Tensor of shape ``(num_nodes,)`` with binary values.
+        :param mask_layer: The first layer index at which the mask is applied.
+        :param bidirectional: Whether to use bidirectional edges.
+
+        :returns: A dict with ``'graph_embedding'`` of shape ``(1, hidden_dim)``.
+        """
+        node_dim = data.x.size(0)
+
+        data = self.encode_properties(data)
+
+        if hasattr(data, 'edge_weight') and data.edge_weight is not None:
+            edge_weight = data.edge_weight
+        else:
+            edge_weight = 100 * torch.ones(data.edge_index.shape[1], 1, device=self.device)
+
+        if bidirectional:
+            edge_index = torch.cat([data.edge_index, data.edge_index[[1, 0]]], dim=1)
+            edge_weight = torch.cat([edge_weight, edge_weight], dim=0)
+        else:
+            edge_index = data.edge_index
+            edge_weight = edge_weight
+
+        srcs, dsts = edge_index
+        mask_expanded = node_mask.unsqueeze(-1)
+
+        node_hv_stack: torch.Tensor = torch.zeros(
+            size=(self.depth + 1, node_dim, self.hidden_dim),
+            device=self.device
+        )
+        if mask_layer <= 0:
+            node_hv_stack[0] = data.node_hv * mask_expanded
+        else:
+            node_hv_stack[0] = data.node_hv
+
+        for layer_index in range(self.depth):
+            messages = node_hv_stack[layer_index][dsts] * sigmoid(edge_weight)
+            aggregated = scatter(messages, srcs, reduce='sum')
+            raw = self.bind_fn(node_hv_stack[layer_index], aggregated)
+            if self.layer_normalize:
+                norm = torch.norm(raw, dim=-1, keepdim=True).clamp(min=1e-8)
+                raw = raw / norm
+            result = raw
+
+            if layer_index + 1 >= mask_layer:
+                result = result * mask_expanded
+
+            node_hv_stack[layer_index + 1] = result
+
+        node_hv = node_hv_stack.sum(dim=0)
+        readout = scatter(node_hv, data.batch, reduce=self.pooling)
+
+        return {
+            'graph_embedding': readout,
+        }
+
+    def forward_full_with_norms(self,
+                                data: Data,
+                                bidirectional: bool = True,
+                                ) -> dict:
+        """
+        Full forward pass that also returns the per-node normalization factors
+        at each layer. These can be passed to :meth:`forward_masked_frozen_norms`
+        to perform causal masking without normalization artifacts.
+
+        :param data: A PyG Data object representing a single graph.
+        :param bidirectional: Whether to use bidirectional edges.
+
+        :returns: A dict with ``'graph_embedding'``, ``'node_hv_stack'``
+            (shape ``(depth+1, num_nodes, hidden_dim)``), and ``'norms'``
+            (list of tensors, one per layer, each of shape
+            ``(num_nodes, 1)``).
+        """
+        node_dim = data.x.size(0)
+
+        data = self.encode_properties(data)
+
+        if hasattr(data, 'edge_weight') and data.edge_weight is not None:
+            edge_weight = data.edge_weight
+        else:
+            edge_weight = 100 * torch.ones(data.edge_index.shape[1], 1, device=self.device)
+
+        if bidirectional:
+            edge_index = torch.cat([data.edge_index, data.edge_index[[1, 0]]], dim=1)
+            edge_weight = torch.cat([edge_weight, edge_weight], dim=0)
+        else:
+            edge_index = data.edge_index
+            edge_weight = edge_weight
+
+        srcs, dsts = edge_index
+
+        node_hv_stack: torch.Tensor = torch.zeros(
+            size=(self.depth + 1, node_dim, self.hidden_dim),
+            device=self.device
+        )
+        node_hv_stack[0] = data.node_hv
+
+        norms = []
+        for layer_index in range(self.depth):
+            messages = node_hv_stack[layer_index][dsts] * sigmoid(edge_weight)
+            aggregated = scatter(messages, srcs, reduce='sum')
+            raw = self.bind_fn(node_hv_stack[layer_index], aggregated)
+            norm = torch.norm(raw, dim=-1, keepdim=True).clamp(min=1e-8)
+            norms.append(norm)
+            node_hv_stack[layer_index + 1] = raw / norm if self.layer_normalize else raw
+
+        node_hv = node_hv_stack.sum(dim=0)
+        readout = scatter(node_hv, data.batch, reduce=self.pooling)
+
+        return {
+            'graph_embedding': readout,
+            'node_hv_stack': node_hv_stack,
+            'norms': norms,
+        }
+
+    def forward_masked_frozen_norms(self,
+                                    data: Data,
+                                    node_mask: torch.Tensor,
+                                    mask_layer: int,
+                                    frozen_norms: list,
+                                    bidirectional: bool = True,
+                                    ) -> dict:
+        """
+        Forward pass with causal node masking and frozen normalization.
+
+        Like :meth:`forward_masked_at_layer`, but instead of recomputing the
+        L2 norm at each layer, uses the ``frozen_norms`` from a prior full
+        forward pass. This prevents the normalization step from artificially
+        rotating remaining nodes' embeddings when a node is masked.
+
+        :param data: A PyG Data object representing a single graph.
+        :param node_mask: Tensor of shape ``(num_nodes,)`` with binary values.
+        :param mask_layer: The first layer index at which the mask is applied.
+        :param frozen_norms: List of norm tensors from
+            :meth:`forward_full_with_norms`, one per layer.
+        :param bidirectional: Whether to use bidirectional edges.
+
+        :returns: A dict with ``'graph_embedding'`` of shape ``(1, hidden_dim)``.
+        """
+        node_dim = data.x.size(0)
+
+        data = self.encode_properties(data)
+
+        if hasattr(data, 'edge_weight') and data.edge_weight is not None:
+            edge_weight = data.edge_weight
+        else:
+            edge_weight = 100 * torch.ones(data.edge_index.shape[1], 1, device=self.device)
+
+        if bidirectional:
+            edge_index = torch.cat([data.edge_index, data.edge_index[[1, 0]]], dim=1)
+            edge_weight = torch.cat([edge_weight, edge_weight], dim=0)
+        else:
+            edge_index = data.edge_index
+            edge_weight = edge_weight
+
+        srcs, dsts = edge_index
+        mask_expanded = node_mask.unsqueeze(-1)
+
+        node_hv_stack: torch.Tensor = torch.zeros(
+            size=(self.depth + 1, node_dim, self.hidden_dim),
+            device=self.device
+        )
+        if mask_layer <= 0:
+            node_hv_stack[0] = data.node_hv * mask_expanded
+        else:
+            node_hv_stack[0] = data.node_hv
+
+        for layer_index in range(self.depth):
+            messages = node_hv_stack[layer_index][dsts] * sigmoid(edge_weight)
+            aggregated = scatter(messages, srcs, reduce='sum')
+            raw = self.bind_fn(node_hv_stack[layer_index], aggregated)
+            # Use frozen norms from the full forward pass instead of
+            # recomputing — this avoids normalization-induced rotation
+            # when nodes are masked.
+            result = raw / frozen_norms[layer_index] if self.layer_normalize else raw
+
+            if layer_index + 1 >= mask_layer:
+                result = result * mask_expanded
+
+            node_hv_stack[layer_index + 1] = result
+
+        node_hv = node_hv_stack.sum(dim=0)
+        readout = scatter(node_hv, data.batch, reduce=self.pooling)
+
+        return {
+            'graph_embedding': readout,
+        }
+
     # --- decoding ---
-    # These methods handle the inverse operation -> The decoding of the graph embedding vectors back into 
+    # These methods handle the inverse operation -> The decoding of the graph embedding vectors back into
     # the original graph structure.
-        
+
     def extract_distance_embedding(self, embedding: torch.Tensor) -> torch.Tensor:
         """
         Extracts the component of the embedding to use for distance calculations.
@@ -873,6 +1149,7 @@ class HyperNet(AbstractHyperNet):
                 'depth': self.depth,
                 'seed': self.seed,
                 'pooling': self.pooling,
+                'layer_normalize': self.layer_normalize,
                 'bidirectional': self.bidirectional,
             },
             'node_encoder_map': self.node_encoder_map,

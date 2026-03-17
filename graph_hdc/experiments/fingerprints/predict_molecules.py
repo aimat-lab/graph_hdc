@@ -110,6 +110,7 @@ MODELS: List[str] = [
     'k_neighbors',
     # 'gaussian_process',
     'neural_net',
+    'neural_net2',
     'linear',
     #'support_vector',
 ]
@@ -142,6 +143,13 @@ KN_WEIGHTS: str = 'uniform'
 NN_HIDDEN_LAYER_SIZES: Tuple[int] = (100, 100, 100)
 NN_ALPHA: float = 0.0001
 NN_LEARNING_RATE_INIT: float = 0.001
+
+# :param NN2_USE_BATCHNORM:
+#       Whether to use BatchNorm1d in the hidden layers of the neural_net2
+#       (PyTorch Lightning) model. Set to False to disable batch normalization,
+#       which can improve explanation quality by removing distribution shift
+#       between full-graph embeddings and partial coalition embeddings.
+NN2_USE_BATCHNORM: bool = True
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -250,29 +258,37 @@ class NeuralNet(pl.LightningModule):
     on tabular input of fixed size.
     """
     
-    def __init__(self, 
-                 input_dim: int, 
+    def __init__(self,
+                 input_dim: int,
                  output_dim: int,
                  hidden_units: list[int] = [100, 100, 100],
                  learning_rate: float = 1e-5,
                  loss_function: str = 'mse', # or 'bce'
+                 use_batchnorm: bool = True,
                  ) -> None:
         super().__init__()
-        
+
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.hidden_units = hidden_units
         self.learning_rate = learning_rate
         self.loss_function = loss_function
-        
+        self.use_batchnorm = use_batchnorm
+
         self.layers = nn.ModuleList()
         prev_units = self.input_dim
         for units in self.hidden_units:
-            self.layers.append(nn.Sequential(
-                nn.Linear(prev_units, units),
-                nn.BatchNorm1d(units),
-                nn.ReLU(),
-            ))
+            if self.use_batchnorm:
+                self.layers.append(nn.Sequential(
+                    nn.Linear(prev_units, units),
+                    nn.BatchNorm1d(units),
+                    nn.ReLU(),
+                ))
+            else:
+                self.layers.append(nn.Sequential(
+                    nn.Linear(prev_units, units),
+                    nn.ReLU(),
+                ))
             prev_units = units
             
         self.layers.append(nn.Linear(prev_units, self.output_dim))
@@ -896,6 +912,7 @@ def train_model__neural_net2(e: Experiment,
         hidden_units=e.NN_HIDDEN_LAYER_SIZES,
         learning_rate=e.NN_LEARNING_RATE_INIT,
         loss_function='mse' if e.DATASET_TYPE == 'regression' else 'bce',
+        use_batchnorm=e.NN2_USE_BATCHNORM,
     )
     
     # This callback will monitor the validation loss and restore the model weights 

@@ -21,6 +21,7 @@ class AbstractHyperNet(pl.LightningModule):
     def forward_graphs(self,
                        graphs: List[dict],
                        batch_size: int = 600,
+                       **forward_kwargs,
                        ) -> List[Dict[str, np.ndarray]]:
         """
         Given a list of ``graphs`` this method will run the hypernet "forward" pass on all of the graphs
@@ -30,6 +31,7 @@ class AbstractHyperNet(pl.LightningModule):
         :param graphs: A list of graph dict representations where each dict contains the information
             about the nodes, edges, and properties of the graph.
         :param batch_size: The batch size to use for the forward pass internally.
+        :param forward_kwargs: Additional keyword arguments passed through to the ``forward`` method.
 
         :returns: A list of result dictionaries where each dict contains the same string keys as the
             result of the "forward" method.
@@ -50,7 +52,7 @@ class AbstractHyperNet(pl.LightningModule):
             # The problem here is that the "data" object yielded by the data loader contains multiple
             # batched graphs but to return the results we would like to disentangle this information
             # back to the individual graphs.
-            result: Dict[str, torch.Tensor] = self.forward(data)
+            result: Dict[str, torch.Tensor] = self.forward(data, **forward_kwargs)
 
             # The "extract_graph_results" method will take the batched results and disentangle them
             # into a list of dictionaries with the same string keys as the batched results but where

@@ -191,7 +191,7 @@ def make_molecule_node_encoder_map(
     atoms: List[str] = ['C', 'O', 'N', 'S', 'P', 'F', 'Cl', 'Br', 'I', 'Si', 'Ge', 'Be', 'Sn', 'B', 'As', 'Se', 'Na', 'Mg', 'Ca', 'Fe', 'Al', 'Cu', 'Zn', 'K', 'Zr', 'Hg'],
     #atoms: List[str] = ['C', 'O', 'N', 'S', 'P', 'F', 'Cl', 'Br', 'I'],
     #atoms: List[str] = [1.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 13.0, 14.0, 15.0, 16.0, 17.0, 20.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 32.0, 33.0, 34.0, 35.0, 38.0, 39.0, 40.0, 41.0, 42.0, 48.0, 50.0, 51.0, 52.0, 53.0, 58.0, 74.0, 80.0, 82.0, 83.0],
-    seed: int = None,
+    seed: int = 0,
 ) -> dict:
     """
     This function returns a dictionary that will act as a "node_encoder_map" that can be supplied to a HyperNet encoder

@@ -63,6 +63,12 @@ DEVICE: str = "cpu"
 #       only uses categorical encodings for the node and graph features. The continuous mode is the newer 
 #       version of the encoder that encodes certain features with the FHRR continuous encodings. 
 ENCODING_MODE: Literal['categorical', 'continuous'] = 'continuous'
+# :param HYPER_NET_LAYER_NORMALIZE:
+#       Whether to apply L2 normalization to node embeddings after each
+#       message-passing layer. Set to False to disable, which preserves the
+#       additive decomposition ``g = Σ_i c_i`` and can improve explanation
+#       quality. Independent of ``normalize_all`` (post-summation normalization).
+HYPER_NET_LAYER_NORMALIZE: bool = True
 
 # == VISUALIZATION PARAMETERS ==
 
@@ -164,6 +170,7 @@ def process_dataset(
     e.log(f' * EMBEDDING_SIZE: {e.EMBEDDING_SIZE}')
     e.log(f' * NUM_LAYERS: {e.NUM_LAYERS}')
     e.log(f' * ENCODING_MODE: {e.ENCODING_MODE}')
+    e.log(f' * HYPER_NET_LAYER_NORMALIZE: {e.HYPER_NET_LAYER_NORMALIZE}')
     
     hyper_net = HyperNet(
         hidden_dim=e.EMBEDDING_SIZE,
@@ -173,6 +180,7 @@ def process_dataset(
         graph_encoder_map=graph_encoder_map,
         seed=e.SEED,
         normalize_all=True,
+        layer_normalize=e.HYPER_NET_LAYER_NORMALIZE,
     )
     
     e.log('saving HyperNet encoder to disk...')
