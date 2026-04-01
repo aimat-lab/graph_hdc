@@ -1,6 +1,5 @@
 pycomex: true
 extend: predict_bioactivity__fp.py
-name: fp_ecfp4_bioactivity_riniker_2
 parameters:
   # Dataset parameters
   DATASET_NAME: "riniker_2"

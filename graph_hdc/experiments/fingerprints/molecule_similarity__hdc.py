@@ -125,7 +125,10 @@ def process_dataset(
     # We need to determine the maximum graph size and diameter for the dataset
     # because the continuous encoding requires these values. This information is
     # cached to avoid recomputation.
-    @experiment.cache.cached(name=f'stats_{e.DATASET_NAME}')
+    # Cache key includes dataset name and the actual number of samples to avoid
+    # returning stale stats when NUM_DATA or SEED changes the dataset composition
+    num_samples = len(index_data_map)
+    @experiment.cache.cached(name=f'stats_{e.DATASET_NAME}_n{num_samples}')
     def dataset_statistics() -> dict:
 
         e.log('computing dataset statistics...')
@@ -313,6 +316,7 @@ def encode_molecule(e: Experiment,
 
     except Exception as ex:
         # Log error but don't crash - return None to indicate failure
+        e.log(f'WARNING: Failed to encode molecule "{smiles[:50]}...": {ex}')
         return None
 
 

@@ -1,6 +1,7 @@
 extend: molecule_similarity__hdc.py
 
 parameters:
+
   # Dataset configuration
   DATASET_NAME: "zinc250k"
   DATASET_NAME_ID: "zinc250k"
@@ -18,7 +19,7 @@ parameters:
   NUM_HOPS: 10                    # Maximum hop distance for neighborhood generation
   NUM_NEIGHBOR_BRANCHES: 10       # Number of neighbors to sample per branch
   NUM_NEIGHBOR_TOTAL: 100         # Total neighbors per hop level
-  GED_NUM_SAMPLES: 25            # Number of query molecules for GED analysis
+  GED_NUM_SAMPLES: 3            # Number of query molecules for GED analysis
 
   # HDC encoding configuration
   EMBEDDING_SIZE: 2048     # Dimensionality of HDC vectors

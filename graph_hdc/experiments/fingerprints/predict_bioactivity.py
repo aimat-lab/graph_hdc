@@ -162,6 +162,7 @@ NOTE: str = ''
 
 __DEBUG__: bool = True
 __NOTIFY__: bool = False
+__CACHING__: bool = False
 
 experiment = Experiment(
     base_path=folder_path(__file__),
@@ -465,16 +466,17 @@ def group_by_target(e: Experiment,
     """
     Group molecules by their target protein for per-target evaluation.
 
-    For bl_chembl_cls dataset, this extracts actives and decoys per target from
-    multi-label classification format where:
-    - labels[target_idx] = 0: not active/not tested
+    This function extracts actives and decoys per target from the multi-label
+    classification format where:
+
+    - labels[target_idx] = 0: not tested/not relevant for this target (ignored)
     - labels[target_idx] = 1: active for this target
     - labels[target_idx] = 2: decoy for this target
 
     :param e: The experiment instance.
     :param index_data_map: Dictionary of all molecules in the dataset.
 
-    :return: Dictionary mapping target indices (0-34) to lists of molecules
+    :return: Dictionary mapping target indices to lists of molecules
         (both actives and decoys for that target). Each molecule dict contains:
         index, smiles, features, is_active, target_idx, target_name
     """
@@ -521,49 +523,34 @@ def group_by_target(e: Experiment,
 
     target_groups = defaultdict(list)
 
-    # Determine number of targets and dataset version from first molecule
+    # Determine number of targets from first molecule
     first_graph = next(iter(index_data_map.values()))
-    num_label_elements = len(first_graph['graph_labels'])
-    e.log(f'detected {num_label_elements} elements in label vector')
-
-    # Detect dataset format by checking for value=2 in the dataset
-    has_value_2 = any(2 in graph['graph_labels'] for graph in list(index_data_map.values())[:100])
-
-    # Check if we're using old format (36 elements) or newer formats
-    if num_label_elements == 36:
-        # Old format: position 35 is decoy indicator, positions 0-34 are targets
-        e.log('using OLD dataset format: position 35 = decoy indicator (bl_chembl_cls old)')
-        num_targets = 35
-        use_decoy_field = True  # Use labels[35] or graph_is_decoy field
-        use_value_2_decoys = False
-    elif has_value_2:
-        # New format with value=2: all positions are targets, value=2 indicates decoy
-        e.log('using NEW dataset format: value=2 indicates per-target decoys (riniker/bl_chembl_cls)')
-        num_targets = num_label_elements
-        use_decoy_field = False
-        use_value_2_decoys = True
-    else:
-        # MUV-style format: value=0 means inactive/decoy, value=1 means active
-        e.log('using MUV-style format: value=0 treated as decoy, value=1 as active')
-        num_targets = num_label_elements
-        use_decoy_field = False
-        use_value_2_decoys = False
+    num_targets = len(first_graph['graph_labels'])
+    e.log(f'detected {num_targets} targets in label vector')
 
     for index, graph in index_data_map.items():
         smiles = graph['graph_repr']
         features = graph['graph_features']
         labels = graph['graph_labels']
 
-        # Check if this molecule is a shared decoy (old format only)
-        if use_decoy_field:
-            # Old format: check graph_is_decoy field
-            is_shared_decoy = graph.get('graph_is_decoy', 0) == 1
-        else:
-            is_shared_decoy = False
+        # Process each target
+        for target_idx in range(num_targets):
+            label_value = labels[target_idx]
 
-        if is_shared_decoy:
-            # Old format: Shared decoy molecule, add to all targets as decoy
-            for target_idx in range(num_targets):
+            if label_value == 1:
+                # Active for this target
+                molecule_info = {
+                    'index': index,
+                    'smiles': smiles,
+                    'features': features,
+                    'is_active': True,
+                    'target_idx': target_idx,
+                    'target_name': target_names.get(target_idx, f'Target {target_idx}'),
+                }
+                target_groups[target_idx].append(molecule_info)
+
+            elif label_value == 2:
+                # Decoy for this target
                 molecule_info = {
                     'index': index,
                     'smiles': smiles,
@@ -573,46 +560,7 @@ def group_by_target(e: Experiment,
                     'target_name': target_names.get(target_idx, f'Target {target_idx}'),
                 }
                 target_groups[target_idx].append(molecule_info)
-        else:
-            # Per-target processing: add molecule to each target based on its label
-            for target_idx in range(num_targets):
-                label_value = labels[target_idx]
-
-                if label_value == 1:
-                    # Active for this target
-                    molecule_info = {
-                        'index': index,
-                        'smiles': smiles,
-                        'features': features,
-                        'is_active': True,
-                        'target_idx': target_idx,
-                        'target_name': target_names.get(target_idx, f'Target {target_idx}'),
-                    }
-                    target_groups[target_idx].append(molecule_info)
-
-                elif label_value == 2 and use_value_2_decoys:
-                    # Decoy for this target (riniker/bl_chembl_cls format)
-                    molecule_info = {
-                        'index': index,
-                        'smiles': smiles,
-                        'features': features,
-                        'is_active': False,
-                        'target_idx': target_idx,
-                        'target_name': target_names.get(target_idx, f'Target {target_idx}'),
-                    }
-                    target_groups[target_idx].append(molecule_info)
-
-                elif label_value == 0 and not use_value_2_decoys and not use_decoy_field:
-                    # Inactive/decoy for this target (MUV-style format)
-                    molecule_info = {
-                        'index': index,
-                        'smiles': smiles,
-                        'features': features,
-                        'is_active': False,
-                        'target_idx': target_idx,
-                        'target_name': target_names.get(target_idx, f'Target {target_idx}'),
-                    }
-                    target_groups[target_idx].append(molecule_info)
+            # label_value == 0 means not tested/not relevant, so we skip it
 
     e.log(f'grouped molecules into {len(target_groups)} targets')
 
@@ -1380,6 +1328,17 @@ def main(e: Experiment):
     e.log('\n=== LOADING DATASET ===')
     index_data_map: dict[int, GraphDict] = e.apply_hook('load_dataset')
     e.log(f'loaded dataset size: {len(index_data_map)}')
+
+    # Log label value distribution
+    label_counts = {0: 0, 1: 0, 2: 0}
+    for graph in index_data_map.values():
+        for label in graph['graph_labels']:
+            if label in label_counts:
+                label_counts[label] += 1
+    total_labels = sum(label_counts.values())
+    e.log(f'label distribution: 0 (not tested): {label_counts[0]} ({100*label_counts[0]/total_labels:.1f}%), '
+          f'1 (active): {label_counts[1]} ({100*label_counts[1]/total_labels:.1f}%), '
+          f'2 (decoy): {label_counts[2]} ({100*label_counts[2]/total_labels:.1f}%)')
 
     # == DATASET FILTERING ==
 
