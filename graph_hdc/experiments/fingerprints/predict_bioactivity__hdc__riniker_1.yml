@@ -20,7 +20,7 @@ parameters:
   # HDC encoding parameters
   EMBEDDING_SIZE: 2048         # Hypervector dimensionality
   NUM_LAYERS: 2                # Message passing steps
-  BATCH_SIZE: 600
+  BATCH_SIZE: 64
   DEVICE: "cpu"                # or "cuda:0" for GPU
   ENCODING_MODE: "continuous"  # or "categorical"
 

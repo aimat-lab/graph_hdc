@@ -3,8 +3,6 @@ pycomex: true
 
 extend: optimize_molecule_bo__hdc.py
 
-name: optimize_bo_hdc_zinc250k_qed
-
 description: |
   HDC-based Bayesian Optimization for molecular search on ZINC250k QED property.
 
@@ -56,10 +54,10 @@ parameters:
   BATCH_SIZE: 500  # For HyperNet forward pass
 
   # Bayesian Optimization parameters
-  NUM_INITIAL_SAMPLES: 10  # Random molecules to start with
+  NUM_INITIAL_SAMPLES: 20  # Random molecules to start with
   NUM_BO_ROUNDS: 25  # Number of BO iterations
   NUM_SAMPLES_PER_ROUND: 3  # Molecules to select each round
-  NUM_TRIALS: 2  # Independent runs for averaging
+  NUM_TRIALS: 25  # Independent runs for averaging
 
   # Acquisition function configuration
   ACQUISITION_FUNCTION: "EI"  # Expected Improvement (or "UCB", "PI")

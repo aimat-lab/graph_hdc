@@ -86,7 +86,7 @@ AUTOSLURM_CONFIG = 'euler'
 
 # The prefix for the experiment archives so that they can be easily identified later on.
 # All generated experiment archives will start with this prefix.
-PREFIX: str = 'ex_07_c'
+PREFIX: str = 'ex_07_g'
 
 # Base random seed for reproducibility. Each experiment uses this seed, with trial
 # variation handled internally by NUM_TRIALS parameter (not via seed loop).
@@ -106,12 +106,12 @@ DATASET_NAME: str = 'zinc250k'
 # Can be empty list if no mixins needed, or contain multiple mixin files.
 # Example: ['mixin_clogp.py'] for CLogP calculation
 # Example: ['mixin_clogp.py', 'mixin_conjugated.py'] for multiple properties
-DATASET_MIXINS: list[str] = ['/media/ssd2/Programming/graph_hdc/graph_hdc/experiments/fingerprints/mixin_clogp.py']
+#DATASET_MIXINS: list[str] = ['/media/ssd2/Programming/graph_hdc/graph_hdc/experiments/fingerprints/mixin_clogp.py']
 DATASET_MIXINS = []
 
 # Target property configuration for molecular optimization
-TARGET_INDEX: int = 1           # Property index after mixin replaces labels
-TARGET_VALUE: float = 0.2      # Target CLogP value to search for
+TARGET_INDEX: int = 1           # Property index (zinc250k native labels)
+TARGET_VALUE: float = 0.2      # Target value to search for
 TARGET_MODE: str = 'minimize_distance'  # Optimization objective
 
 # Fixed dataset parameters that apply to all experiments
@@ -133,13 +133,13 @@ FIXED_PARAMETERS: dict = {
 # optimization process for all experiments.
 
 # Number of random molecules to observe before starting BO
-NUM_INITIAL_SAMPLES: int = 10
+NUM_INITIAL_SAMPLES: int = 20
 
 # Number of Bayesian Optimization iterations to perform
-NUM_BO_ROUNDS: int = 25
+NUM_BO_ROUNDS: int = 150
 
 # Number of molecules to select per BO round
-NUM_SAMPLES_PER_ROUND: int = 3
+NUM_SAMPLES_PER_ROUND: int = 1
 
 # Number of independent BO trials to run per experiment (for statistical averaging)
 # This replaces the seed loop used in other _slurm_ex_*.py files
@@ -185,7 +185,8 @@ EMBEDDING_SIZE_SWEEP: list[int] = [
     32,     # Small dimensional
     64,     # Medium dimensional
     128,    # Standard dimensional
-    2048,   # 
+    512,    # High dimensional
+    1024,   # Very high dimensional
 ]
 
 

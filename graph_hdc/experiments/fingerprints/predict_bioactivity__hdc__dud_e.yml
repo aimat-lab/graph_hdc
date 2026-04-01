@@ -2,15 +2,15 @@ pycomex: true
 extend: predict_bioactivity__hdc.py
 parameters:
   # Dataset parameters
-  DATASET_NAME: "riniker_2"
-  DATASET_NAME_ID: "riniker_2"
-  NUM_DATA: null  # Use full dataset (20,922 molecules)
+  DATASET_NAME: "dud_e"
+  DATASET_NAME_ID: "dud_e"
+  NUM_DATA: null  # Use full dataset
   SEED: 1
 
   # Evaluation parameters
-  NUM_QUERY_ACTIVES: 5        # Number of active queries per repetition
+  NUM_QUERY_ACTIVES: 5        # Standard 5 queries per repetition
   NUM_REPETITIONS: 50          # Statistical repetitions per target
-  MIN_ACTIVES_PER_TARGET: 10   # Targets have 79-445 actives
+  MIN_ACTIVES_PER_TARGET: 10   # Skip targets with fewer actives
 
   # Metric parameters
   BEDROC_ALPHA: 20.0          # Standard α=20 for virtual screening
@@ -19,7 +19,7 @@ parameters:
   # HDC encoding parameters
   EMBEDDING_SIZE: 2048         # Hypervector dimensionality
   NUM_LAYERS: 2                # Message passing steps
-  BATCH_SIZE: 600
+  BATCH_SIZE: 64
   DEVICE: "cpu"                # or "cuda:0" for GPU
   ENCODING_MODE: "continuous"  # or "categorical"
 
@@ -27,4 +27,4 @@ parameters:
   NUM_EXAMPLE_TARGETS: 3
   FIGURE_DPI: 300
 
-  NOTE: "HDC-based bioactivity prediction on Riniker dataset 2 with 37 targets and 10k decoys per target"
+  NOTE: "HDC-based bioactivity prediction on DUD-E (Directory of Useful Decoys, Enhanced) dataset with 102 targets - standard virtual screening benchmark"

@@ -1,0 +1,16 @@
+
+\begin{table}[htbp]
+\centering
+\caption{GED-Similarity Correlation by Embedding Size (ZINC250k, n=100 queries per configuration). Higher $|r|$ indicates better structural discrimination.}
+\label{tab:ged_correlation}
+\begin{tabular}{rcccc}
+\toprule
+\textbf{Emb. Size} & \textbf{FP $|r|$} & \textbf{FP R$^2$} & \textbf{HDC $|r|$} & \textbf{HDC R$^2$} \\
+\midrule
+32 & 0.529 $\pm$ 0.135 & 0.299 $\pm$ 0.134 & 0.831 $\pm$ 0.137 & 0.710 $\pm$ 0.189 \\
+128 & 0.747 $\pm$ 0.084 & 0.564 $\pm$ 0.121 & 0.830 $\pm$ 0.137 & 0.709 $\pm$ 0.188 \\
+512 & 0.783 $\pm$ 0.079 & 0.619 $\pm$ 0.120 & 0.847 $\pm$ 0.118 & 0.731 $\pm$ 0.174 \\
+2048 & 0.790 $\pm$ 0.078 & 0.630 $\pm$ 0.119 & 0.848 $\pm$ 0.121 & 0.733 $\pm$ 0.176 \\
+\bottomrule
+\end{tabular}
+\end{table}

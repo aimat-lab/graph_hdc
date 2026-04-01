@@ -85,15 +85,10 @@ from chem_mat_data._typing import GraphDict
 from chem_mat_data.main import load_graph_dataset
 
 # GED correlation analysis imports
-from scipy.stats import pearsonr, spearmanr
+from scipy.stats import pearsonr, linregress
 from sklearn.metrics import r2_score
 from sklearn.linear_model import LinearRegression
 import seaborn as sns
-
-# vgd_counterfactuals for neighborhood generation
-import sys
-sys.path.insert(0, '/tmp/vgd_counterfactuals')
-from vgd_counterfactuals.generate.molecules import get_neighborhood
 
 # == DATASET PARAMETERS ==
 
@@ -198,6 +193,7 @@ NUM_NEIGHBOR_TOTAL: int = 20
 #       and GED analysis.
 GED_NUM_SAMPLES: int = 10
 
+
 # == EXPERIMENT PARAMETERS ==
 
 # :param NOTE:
@@ -205,6 +201,7 @@ GED_NUM_SAMPLES: int = 10
 NOTE: str = ''
 
 __DEBUG__: bool = True
+__CACHING__: bool = False
 __NOTIFY__: bool = False
 
 experiment = Experiment(
@@ -435,6 +432,9 @@ def find_neighbors(e: Experiment,
     This hook computes distances from the query molecule to all candidate
     molecules and returns the K nearest neighbors sorted by distance.
 
+    The query molecule itself is excluded from results unless
+    USE_FULL_DATASET_FOR_SEARCH is True.
+
     :param e: The experiment instance.
     :param query_idx: Index of the query molecule.
     :param query_features: Feature vector of the query molecule.
@@ -447,8 +447,9 @@ def find_neighbors(e: Experiment,
     distances = []
 
     for candidate_idx in candidate_indices:
-        if candidate_idx == query_idx:
-            continue  # Skip self
+        # Skip self unless USE_FULL_DATASET_FOR_SEARCH is True
+        if candidate_idx == query_idx and not e.USE_FULL_DATASET_FOR_SEARCH:
+            continue
 
         candidate_features = index_data_map[candidate_idx]['graph_features']
 
@@ -481,6 +482,9 @@ def find_dissimilar_neighbors(e: Experiment,
     in descending order. This helps identify molecules that are maximally
     different from the query molecule according to the distance metric.
 
+    The query molecule itself is excluded from results unless
+    USE_FULL_DATASET_FOR_SEARCH is True.
+
     :param e: The experiment instance.
     :param query_idx: Index of the query molecule.
     :param query_features: Feature vector of the query molecule.
@@ -493,8 +497,9 @@ def find_dissimilar_neighbors(e: Experiment,
     distances = []
 
     for candidate_idx in candidate_indices:
-        if candidate_idx == query_idx:
-            continue  # Skip self
+        # Skip self unless USE_FULL_DATASET_FOR_SEARCH is True
+        if candidate_idx == query_idx and not e.USE_FULL_DATASET_FOR_SEARCH:
+            continue
 
         candidate_features = index_data_map[candidate_idx]['graph_features']
 
@@ -547,10 +552,10 @@ def visualize_neighbors(e: Experiment,
     # Plot query in first row, centered
     query_smiles = index_data_map[query_idx]['graph_repr']
     query_mol = Chem.MolFromSmiles(query_smiles)
+    center_col = e.GRID_COLS // 2
 
     if query_mol is not None:
         query_img = Draw.MolToImage(query_mol, size=e.MOLECULE_IMAGE_SIZE)
-        center_col = e.GRID_COLS // 2
 
         axes[0, center_col].imshow(query_img)
         truncated_smiles = (query_smiles[:e.SMILES_TRUNCATE_LENGTH] + '...'
@@ -562,10 +567,14 @@ def visualize_neighbors(e: Experiment,
             fontweight='bold'
         )
         axes[0, center_col].axis('off')
+    else:
+        e.log(f'WARNING: Failed to parse query SMILES: {query_smiles[:50]}...')
+        axes[0, center_col].set_title('Query (parse failed)', fontsize=12)
+        axes[0, center_col].axis('off')
 
     # Hide unused query row axes
     for col in range(e.GRID_COLS):
-        if col != e.GRID_COLS // 2:
+        if col != center_col:
             axes[0, col].axis('off')
 
     # Plot neighbors in subsequent rows
@@ -589,11 +598,15 @@ def visualize_neighbors(e: Experiment,
                 fontsize=10
             )
             axes[row, col].axis('off')
+        else:
+            e.log(f'WARNING: Failed to parse neighbor SMILES: {neighbor_smiles[:50]}...')
+            axes[row, col].set_title(f'Neighbor {i + 1} (parse failed)', fontsize=10)
+            axes[row, col].axis('off')
 
-    # Hide unused axes in the last row
-    total_plots = 1 + n_neighbors  # query + neighbors
-    for i in range(total_plots, n_rows * e.GRID_COLS):
-        row = i // e.GRID_COLS
+    # Hide unused axes in neighbor rows (row 1+)
+    # Neighbors are plotted with row = (i // GRID_COLS) + 1, so we use the same formula
+    for i in range(n_neighbors, (n_rows - 1) * e.GRID_COLS):
+        row = (i // e.GRID_COLS) + 1
         col = i % e.GRID_COLS
         if row < n_rows:
             axes[row, col].axis('off')
@@ -638,10 +651,10 @@ def visualize_dissimilar_neighbors(e: Experiment,
     # Plot query in first row, centered
     query_smiles = index_data_map[query_idx]['graph_repr']
     query_mol = Chem.MolFromSmiles(query_smiles)
+    center_col = e.GRID_COLS // 2
 
     if query_mol is not None:
         query_img = Draw.MolToImage(query_mol, size=e.MOLECULE_IMAGE_SIZE)
-        center_col = e.GRID_COLS // 2
 
         axes[0, center_col].imshow(query_img)
         truncated_smiles = (query_smiles[:e.SMILES_TRUNCATE_LENGTH] + '...'
@@ -653,10 +666,14 @@ def visualize_dissimilar_neighbors(e: Experiment,
             fontweight='bold'
         )
         axes[0, center_col].axis('off')
+    else:
+        e.log(f'WARNING: Failed to parse query SMILES: {query_smiles[:50]}...')
+        axes[0, center_col].set_title('Query (parse failed)', fontsize=12)
+        axes[0, center_col].axis('off')
 
     # Hide unused query row axes
     for col in range(e.GRID_COLS):
-        if col != e.GRID_COLS // 2:
+        if col != center_col:
             axes[0, col].axis('off')
 
     # Plot dissimilar molecules in subsequent rows
@@ -680,11 +697,15 @@ def visualize_dissimilar_neighbors(e: Experiment,
                 fontsize=10
             )
             axes[row, col].axis('off')
+        else:
+            e.log(f'WARNING: Failed to parse dissimilar SMILES: {dissimilar_smiles[:50]}...')
+            axes[row, col].set_title(f'Dissimilar {i + 1} (parse failed)', fontsize=10)
+            axes[row, col].axis('off')
 
-    # Hide unused axes in the last row
-    total_plots = 1 + n_dissimilar  # query + dissimilar molecules
-    for i in range(total_plots, n_rows * e.GRID_COLS):
-        row = i // e.GRID_COLS
+    # Hide unused axes in dissimilar molecule rows (row 1+)
+    # Dissimilar molecules are plotted with row = (i // GRID_COLS) + 1, so we use the same formula
+    for i in range(n_dissimilar, (n_rows - 1) * e.GRID_COLS):
+        row = (i // e.GRID_COLS) + 1
         col = i % e.GRID_COLS
         if row < n_rows:
             axes[row, col].axis('off')
@@ -717,7 +738,19 @@ def calculate_n_hop_neighborhood(e: Experiment,
 
     :return: List of tuples (smiles, ged) where ged is the hop distance (1, 2, 3, ...).
     """
+    # Lazy import of vgd_counterfactuals (must be installed via pip)
+    try:
+        from vgd_counterfactuals.generate.molecules import get_neighborhood
+    except ImportError as err:
+        raise ImportError(
+            "Could not import vgd_counterfactuals. Please install the package: "
+            "pip install vgd_counterfactuals"
+        ) from err
+
     e.log(f'calculating {e.NUM_HOPS}-hop neighborhood for query molecule...')
+
+    # Set seed for reproducibility
+    random.seed(e.SEED)
 
     # Track all neighbors with their GED
     all_neighbors = []
@@ -794,10 +827,8 @@ def calculate_n_hop_neighborhood(e: Experiment,
 
 @experiment.hook('compute_ged_similarity_correlation', replace=False, default=True)
 def compute_ged_similarity_correlation(e: Experiment,
-                                      query_idx: int,
                                       query_features: np.ndarray,
                                       neighbors_with_ged: List[Tuple[str, int]],
-                                      index_data_map: dict[int, GraphDict]
                                       ) -> Tuple[float, float, float, np.ndarray, np.ndarray]:
     """
     Compute correlation between graph edit distance and embedding similarity.
@@ -809,10 +840,8 @@ def compute_ged_similarity_correlation(e: Experiment,
     4. Calculates R² score using linear regression
 
     :param e: The experiment instance.
-    :param query_idx: Index of the query molecule.
     :param query_features: Feature vector of the query molecule.
     :param neighbors_with_ged: List of (smiles, ged) tuples for all neighbors.
-    :param index_data_map: Dictionary of all molecules in the dataset.
 
     :return: Tuple of (r2_score, correlation, p_value, ged_array, similarity_array).
     """
@@ -881,6 +910,14 @@ def compute_ged_similarity_correlation(e: Experiment,
 
     ged_array = np.array(ged_values)
     similarity_array = np.array(similarity_values)
+
+    # Check for zero variance (would cause NaN in correlation)
+    ged_std = np.std(ged_array)
+    similarity_std = np.std(similarity_array)
+    if ged_std < 1e-10 or similarity_std < 1e-10:
+        e.log(f'    WARNING: Zero variance in data (GED std={ged_std:.2e}, '
+              f'similarity std={similarity_std:.2e}), correlation undefined')
+        return 0.0, 0.0, 1.0, ged_array, similarity_array
 
     # Calculate Pearson correlation
     correlation, p_value = pearsonr(ged_array, similarity_array)
@@ -1016,6 +1053,13 @@ def main(e: Experiment):
     e.apply_hook('filter_dataset', index_data_map=index_data_map)
     e.log(f'filtered dataset size: {len(index_data_map)}')
 
+    # Early exit if dataset is empty after filtering
+    if len(index_data_map) == 0:
+        e.log('ERROR: Dataset is empty after filtering. No valid molecules remain.')
+        e.log('This may happen if all molecules have invalid SMILES, are disconnected, ')
+        e.log('or have fewer than 2 atoms. Check dataset quality or filtering criteria.')
+        raise RuntimeError('Dataset is empty after filtering - no valid molecules to process')
+
     # == DATASET PROCESSING ==
 
     e.log('\n=== PROCESSING DATASET ===')
@@ -1050,13 +1094,13 @@ def main(e: Experiment):
     e.log('\n=== PERFORMING SIMILARITY SEARCH ===')
 
     # Determine candidate indices for neighbor search
+    # Note: Query exclusion happens inside find_neighbors/find_dissimilar_neighbors hooks
+    candidate_indices = list(index_data_map.keys())
     if e.USE_FULL_DATASET_FOR_SEARCH:
-        candidate_indices = list(index_data_map.keys())
         e.log(f'searching across full dataset ({len(candidate_indices)} molecules)')
     else:
-        candidate_indices = list(index_data_map.keys())
-        e.log(f'searching across dataset excluding query '
-              f'({len(candidate_indices)} molecules)')
+        e.log(f'searching across dataset ({len(candidate_indices)} molecules, '
+              f'query excluded during search)')
 
     # Store results
     all_results = []
@@ -1292,6 +1336,11 @@ def main(e: Experiment):
 
         # Store results for all queries
         ged_results = []
+        successful_query_idx = 0  # Counter for successful queries (used for consistent indexing)
+
+        # Accumulate all GED and similarity values for aggregate diagnostic
+        all_ged_values = []
+        all_similarity_values = []
 
         for i, query_idx in enumerate(ged_query_indices):
             e.log(f'\nprocessing GED query {i + 1}/{len(ged_query_indices)} (index={query_idx})...')
@@ -1319,10 +1368,8 @@ def main(e: Experiment):
             time_start = time.time()
             r2, correlation, p_value, ged_array, similarity_array = e.apply_hook(
                 'compute_ged_similarity_correlation',
-                query_idx=query_idx,
                 query_features=query_features,
                 neighbors_with_ged=neighbors_with_ged,
-                index_data_map=index_data_map
             )
             time_end = time.time()
 
@@ -1332,8 +1379,13 @@ def main(e: Experiment):
                 e.log(f' * WARNING: Insufficient valid neighbors for correlation, skipping')
                 continue
 
-            # Store results
+            # Accumulate for aggregate diagnostic
+            all_ged_values.extend(ged_array.tolist())
+            all_similarity_values.extend(similarity_array.tolist())
+
+            # Store results (include successful_query_idx for consistent CSV/storage indexing)
             ged_result = {
+                'query_id': successful_query_idx,
                 'query_idx': query_idx,
                 'query_smiles': query_smiles,
                 'r2': r2,
@@ -1345,13 +1397,13 @@ def main(e: Experiment):
             }
             ged_results.append(ged_result)
 
-            # Store in experiment storage
-            e[f'ged_analysis/query_{i}/index'] = query_idx
-            e[f'ged_analysis/query_{i}/smiles'] = query_smiles
-            e[f'ged_analysis/query_{i}/r2'] = float(r2)
-            e[f'ged_analysis/query_{i}/correlation'] = float(correlation)
-            e[f'ged_analysis/query_{i}/p_value'] = float(p_value)
-            e[f'ged_analysis/query_{i}/n_neighbors'] = len(ged_array)
+            # Store in experiment storage using successful_query_idx for consistency with CSV
+            e[f'ged_analysis/query_{successful_query_idx}/index'] = query_idx
+            e[f'ged_analysis/query_{successful_query_idx}/smiles'] = query_smiles
+            e[f'ged_analysis/query_{successful_query_idx}/r2'] = float(r2)
+            e[f'ged_analysis/query_{successful_query_idx}/correlation'] = float(correlation)
+            e[f'ged_analysis/query_{successful_query_idx}/p_value'] = float(p_value)
+            e[f'ged_analysis/query_{successful_query_idx}/n_neighbors'] = len(ged_array)
 
             # Create regression visualization
             e.log(f' * creating regression plot...')
@@ -1365,11 +1417,14 @@ def main(e: Experiment):
                 p_value=p_value
             )
 
-            # Generate safe filename
+            # Generate safe filename using successful_query_idx for consistency
             smiles_hash = hashlib.md5(query_smiles.encode()).hexdigest()[:8]
-            filename = f'ged_regression_query_{i}_{smiles_hash}.png'
+            filename = f'ged_regression_query_{successful_query_idx}_{smiles_hash}.png'
             e.commit_fig(filename, fig)
             e.log(f' * saved regression plot to {filename}')
+
+            # Increment counter for next successful query
+            successful_query_idx += 1
 
             plt.close(fig)
 
@@ -1395,10 +1450,10 @@ def main(e: Experiment):
             e['ged_analysis/num_queries'] = len(ged_results)
 
             # Save summary CSV
-            summary_rows = []
-            for i, result in enumerate(ged_results):
-                summary_rows.append({
-                    'query_id': i,
+            ged_summary_rows = []
+            for result in ged_results:
+                ged_summary_rows.append({
+                    'query_id': result['query_id'],
                     'query_idx': result['query_idx'],
                     'query_smiles': result['query_smiles'],
                     'r2': result['r2'],
@@ -1412,7 +1467,7 @@ def main(e: Experiment):
                 })
 
             # Add aggregate row
-            summary_rows.append({
+            ged_summary_rows.append({
                 'query_id': 'AGGREGATE',
                 'query_idx': '',
                 'query_smiles': '',
@@ -1426,16 +1481,97 @@ def main(e: Experiment):
                 'similarity_max': '',
             })
 
-            ged_summary_df = pd.DataFrame(summary_rows)
+            ged_summary_df = pd.DataFrame(ged_summary_rows)
             ged_summary_path = os.path.join(e.path, 'ged_correlation_summary.csv')
             ged_summary_df.to_csv(ged_summary_path, index=False)
             e.log(f'saved GED correlation summary to {ged_summary_path}')
 
             # Log detailed results
             e.log('\nPer-query GED correlation results:')
-            for i, result in enumerate(ged_results):
-                e.log(f'  Query {i}: R²={result["r2"]:.4f}, r={result["correlation"]:.4f}, '
+            for result in ged_results:
+                e.log(f'  Query {result["query_id"]}: R²={result["r2"]:.4f}, r={result["correlation"]:.4f}, '
                       f'n={result["n_neighbors"]}, SMILES={result["query_smiles"][:40]}...')
+
+            # == CONCENTRATION DIAGNOSTIC FIGURE ==
+            # This figure helps diagnose whether high-dimensional concentration of measure
+            # is affecting the quality of similarity-based GED correlation analysis.
+
+            if len(all_ged_values) > 10:
+                e.log('\n=== GENERATING CONCENTRATION DIAGNOSTIC ===')
+
+                all_ged_arr = np.array(all_ged_values)
+                all_sim_arr = np.array(all_similarity_values)
+
+                # Compute diagnostic metrics
+                sim_mean = np.mean(all_sim_arr)
+                sim_std = np.std(all_sim_arr)
+                sim_p5 = np.percentile(all_sim_arr, 5)
+                sim_p95 = np.percentile(all_sim_arr, 95)
+                dynamic_range = sim_p95 - sim_p5
+
+                e.log(f'Similarity distribution: mean={sim_mean:.4f}, std={sim_std:.4f}')
+                e.log(f'Dynamic range (5-95 percentile): {dynamic_range:.4f}')
+
+                # Store metrics
+                e['ged_analysis/concentration/similarity_mean'] = float(sim_mean)
+                e['ged_analysis/concentration/similarity_std'] = float(sim_std)
+                e['ged_analysis/concentration/similarity_p5'] = float(sim_p5)
+                e['ged_analysis/concentration/similarity_p95'] = float(sim_p95)
+                e['ged_analysis/concentration/dynamic_range'] = float(dynamic_range)
+
+                # Create 3-panel diagnostic figure
+                fig_diag, axes_diag = plt.subplots(1, 3, figsize=(15, 5))
+                fig_diag.suptitle('Concentration of Measure Diagnostic', fontsize=14, fontweight='bold')
+
+                # Panel 1: Similarity distribution
+                ax1 = axes_diag[0]
+                ax1.hist(all_sim_arr, bins=50, density=True, alpha=0.7, color='steelblue', edgecolor='white')
+                ax1.axvline(sim_p5, color='orange', linestyle='--', linewidth=2, label=f'5th %ile: {sim_p5:.3f}')
+                ax1.axvline(sim_p95, color='orange', linestyle='--', linewidth=2, label=f'95th %ile: {sim_p95:.3f}')
+                ax1.axvline(sim_mean, color='green', linestyle='-', linewidth=2, label=f'Mean: {sim_mean:.3f}')
+                ax1.set_xlabel('Cosine Similarity', fontsize=11)
+                ax1.set_ylabel('Density', fontsize=11)
+                ax1.set_title(f'Similarity Distribution\n(dynamic range = {dynamic_range:.4f})', fontsize=11)
+                ax1.legend(fontsize=9)
+                ax1.grid(True, alpha=0.3)
+
+                # Panel 2: GED vs Similarity scatter
+                ax2 = axes_diag[1]
+                jitter = np.random.normal(0, 0.1, len(all_ged_arr))
+                ax2.scatter(all_ged_arr + jitter, all_sim_arr, alpha=0.4, s=20, c=all_ged_arr, cmap='viridis')
+                # Add regression line
+                slope, intercept, r_val, p_val, _ = linregress(all_ged_arr, all_sim_arr)
+                x_line = np.array([all_ged_arr.min(), all_ged_arr.max()])
+                ax2.plot(x_line, slope * x_line + intercept, 'r-', linewidth=2,
+                         label=f'r={r_val:.3f}')
+                # Show the concentration band
+                ax2.axhspan(sim_p5, sim_p95, alpha=0.15, color='red', label='5-95% band')
+                ax2.set_xlabel('Graph Edit Distance (GED)', fontsize=11)
+                ax2.set_ylabel('Cosine Similarity', fontsize=11)
+                ax2.set_title('GED vs Similarity\n(vertical spread = discrimination)', fontsize=11)
+                ax2.legend(fontsize=9)
+                ax2.grid(True, alpha=0.3)
+
+                # Panel 3: Boxplots by GED level
+                ax3 = axes_diag[2]
+                unique_geds = sorted(np.unique(all_ged_arr))
+                boxplot_data = [all_sim_arr[all_ged_arr == g] for g in unique_geds]
+                bp = ax3.boxplot(boxplot_data, labels=[str(int(g)) for g in unique_geds],
+                                 patch_artist=True, showmeans=True,
+                                 meanprops=dict(marker='D', markerfacecolor='red', markersize=5))
+                colors = plt.cm.viridis(np.linspace(0, 1, len(unique_geds)))
+                for patch, color in zip(bp['boxes'], colors):
+                    patch.set_facecolor(color)
+                    patch.set_alpha(0.7)
+                ax3.set_xlabel('Graph Edit Distance (GED)', fontsize=11)
+                ax3.set_ylabel('Cosine Similarity', fontsize=11)
+                ax3.set_title('Discrimination by GED Level\n(overlapping boxes = poor)', fontsize=11)
+                ax3.grid(True, alpha=0.3, axis='y')
+
+                plt.tight_layout()
+                e.commit_fig('ged_concentration_diagnostic.png', fig_diag)
+                e.log('saved concentration diagnostic to ged_concentration_diagnostic.png')
+                plt.close(fig_diag)
 
         else:
             e.log('\nWARNING: No valid GED results were generated')

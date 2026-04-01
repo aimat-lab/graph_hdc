@@ -2,15 +2,15 @@ pycomex: true
 extend: predict_bioactivity__fp.py
 parameters:
   # Dataset parameters
-  DATASET_NAME: "muv"
-  DATASET_NAME_ID: "muv"
-  NUM_DATA: null  # Use full dataset (93,087 molecules)
+  DATASET_NAME: "dud_e"
+  DATASET_NAME_ID: "dud_e"
+  NUM_DATA: null  # Use full dataset
   SEED: 1
 
   # Evaluation parameters
-  NUM_QUERY_ACTIVES: 3        # Fewer queries due to very limited actives (~24-30 per target)
+  NUM_QUERY_ACTIVES: 5        # Standard 5 queries per repetition
   NUM_REPETITIONS: 50          # Statistical repetitions per target
-  MIN_ACTIVES_PER_TARGET: 10   # Most targets have ~24-30 actives
+  MIN_ACTIVES_PER_TARGET: 10   # Skip targets with fewer actives
 
   # Metric parameters
   BEDROC_ALPHA: 20.0          # Standard α=20 for virtual screening
@@ -26,4 +26,4 @@ parameters:
   NUM_EXAMPLE_TARGETS: 3
   FIGURE_DPI: 300
 
-  NOTE: "ECFP4 baseline for bioactivity prediction on MUV (Maximum Unbiased Validation) dataset with 17 targets and ~93k decoys per target - highly challenging benchmark"
+  NOTE: "ECFP4 baseline for bioactivity prediction on DUD-E (Directory of Useful Decoys, Enhanced) dataset with 102 targets - standard virtual screening benchmark"

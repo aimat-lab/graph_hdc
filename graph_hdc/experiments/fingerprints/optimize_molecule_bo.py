@@ -261,15 +261,20 @@ def compute_acquisition_function(
     y_best: float,
     acq_type: str = "EI",
     beta: float = 2.0,
+    batch_size: int = 10000,
 ) -> torch.Tensor:
     """
-    Compute acquisition function values for candidate points.
+    Compute acquisition function values for candidate points in batches.
+
+    Evaluates candidates in chunks of ``batch_size`` to avoid excessive peak
+    memory usage when the candidate pool is large (e.g. 200k+ molecules).
 
     :param gp_model: Trained BotTorch SingleTaskGP model.
     :param X_candidates: Candidate points tensor (n_candidates, n_features).
     :param y_best: Best observed value so far (for EI/PI).
     :param acq_type: Type of acquisition function ("EI", "UCB", "PI").
     :param beta: Exploration parameter for UCB.
+    :param batch_size: Number of candidates to evaluate at once.
 
     :return: Acquisition values for each candidate (n_candidates,).
     """
@@ -284,11 +289,16 @@ def compute_acquisition_function(
     else:
         raise ValueError(f"Unknown acquisition function: {acq_type}")
 
-    # Compute acquisition values
+    # Compute acquisition values in batches to limit peak memory
+    n_candidates = X_candidates.shape[0]
+    acq_chunks = []
     with torch.no_grad():
-        acq_values = acq_fn(X_candidates.unsqueeze(-2))  # Add batch dimension
+        for start in range(0, n_candidates, batch_size):
+            end = min(start + batch_size, n_candidates)
+            chunk = acq_fn(X_candidates[start:end].unsqueeze(-2))
+            acq_chunks.append(chunk)
 
-    return acq_values.squeeze()
+    return torch.cat(acq_chunks, dim=0).squeeze()
 
 
 def select_top_k_candidates(
@@ -1018,6 +1028,10 @@ def main(e: Experiment):
     X_candidates_tensor = torch.tensor(X_candidates_processed, dtype=torch.float32)
     y_candidates_tensor = torch.tensor(y_candidates, dtype=torch.float32).unsqueeze(-1)
 
+    # Free large numpy arrays that are no longer needed (data lives in tensors now)
+    del X_candidates, X_candidates_processed, y_candidates
+    gc.collect()
+
     # == RUN BAYESIAN OPTIMIZATION TRIALS ==
 
     e.log(f'\n=== RUNNING {e.NUM_TRIALS} BO TRIALS ===')
@@ -1190,6 +1204,10 @@ def main(e: Experiment):
             )
 
             e.log(f'selected {len(selected_positions)} new samples')
+
+            # Free GP model and MLL to reclaim memory before next round
+            del gp, mll, acq_values
+            gc.collect()
 
             # == OBSERVE NEW SAMPLES ==
 
