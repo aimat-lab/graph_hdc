@@ -1,0 +1,20 @@
+# PyComex configuration file for tmQMg HOMO-LUMO gap HDC experiment
+pycomex: true
+
+extend: predict_tmcs__hdc.py
+
+name: hdc_tmqmg_gap
+
+description: |
+  HDC-based property prediction on the tmQMg transition metal complex dataset,
+  targeting the HOMO-LUMO gap (tzvp_homo_lumo_gap, target index 2).
+
+parameters:
+  DATASET_NAME: "tmqmg"
+  DATASET_NAME_ID: "tmqmg"
+  DATASET_TYPE: "regression"
+  TARGET_INDEX: 2
+  NUM_TEST: 0.1
+  EMBEDDING_SIZE: 2048
+  NUM_LAYERS: 2
+  MODELS: ["random_forest", "grad_boost", "neural_net"]
