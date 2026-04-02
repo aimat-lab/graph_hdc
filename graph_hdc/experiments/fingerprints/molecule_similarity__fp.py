@@ -126,15 +126,27 @@ def process_dataset(e: Experiment,
             fpSize=e.FINGERPRINT_SIZE,
         )
 
+    elif e.FINGERPRINT_TYPE == 'map4':
+        from map4 import MAP4
+        map4_calc = MAP4(
+            dimensions=e.FINGERPRINT_SIZE,
+            radius=e.FINGERPRINT_RADIUS,
+        )
+
     else:
         raise ValueError(
             f"Unknown FINGERPRINT_TYPE: '{e.FINGERPRINT_TYPE}'. "
-            f"Supported types: 'morgan', 'rdkit', 'atom_pair', 'torsion'"
+            f"Supported types: 'morgan', 'rdkit', 'atom_pair', 'torsion', 'map4'"
         )
 
     # Store generator as private instance attribute (NOT in serializable storage)
     # This prevents JSON serialization errors and ensures proper access
-    e._fp_generator = gen
+    if e.FINGERPRINT_TYPE == 'map4':
+        e._fp_generator = None
+        e._map4_calc = map4_calc
+    else:
+        e._fp_generator = gen
+        e._map4_calc = None
 
     # Generate fingerprints for all molecules
     e.log('generating fingerprints...')
@@ -149,7 +161,9 @@ def process_dataset(e: Experiment,
             continue
 
         # Generate fingerprint
-        if e.USE_COUNTS:
+        if e.FINGERPRINT_TYPE == 'map4':
+            fingerprint = e._map4_calc.calculate(mol)
+        elif e.USE_COUNTS:
             fingerprint = gen.GetCountFingerprint(mol)
         else:
             fingerprint = gen.GetFingerprint(mol)
@@ -179,13 +193,6 @@ def encode_molecule(e: Experiment,
 
     :return: Fingerprint vector as numpy array, or None if encoding fails.
     """
-    # Retrieve the stored fingerprint generator from private instance attribute
-    gen = getattr(e, '_fp_generator', None)
-    if gen is None:
-        raise RuntimeError(
-            "Fingerprint generator not found. Make sure process_dataset was called first."
-        )
-
     try:
         # Convert SMILES to RDKit mol
         mol = Chem.MolFromSmiles(smiles)
@@ -193,10 +200,19 @@ def encode_molecule(e: Experiment,
             return None
 
         # Generate fingerprint
-        if e.USE_COUNTS:
-            fingerprint = gen.GetCountFingerprint(mol)
+        map4_calc = getattr(e, '_map4_calc', None)
+        if map4_calc is not None:
+            fingerprint = map4_calc.calculate(mol)
         else:
-            fingerprint = gen.GetFingerprint(mol)
+            gen = getattr(e, '_fp_generator', None)
+            if gen is None:
+                raise RuntimeError(
+                    "Fingerprint generator not found. Make sure process_dataset was called first."
+                )
+            if e.USE_COUNTS:
+                fingerprint = gen.GetCountFingerprint(mol)
+            else:
+                fingerprint = gen.GetFingerprint(mol)
 
         # Convert to numpy array
         return np.array(fingerprint, dtype=float)

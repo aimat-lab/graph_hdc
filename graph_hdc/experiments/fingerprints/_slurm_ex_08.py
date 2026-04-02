@@ -15,15 +15,15 @@ on the relationship between graph edit distance and embedding similarity.
     4. Optimal embedding sizes for capturing molecular structure
 
 **Parameter Space:**
-    - Representation methods: Morgan fingerprints (ECFP4), HDC
-    - Embedding sizes: 32, 128, 512, 2048 dimensions
+    - Representation methods: Morgan fingerprints (ECFP4), MAP4, HDC
+    - Embedding sizes: 8, 32, 128, 512, 2048 dimensions
     - GED analysis: 100 samples per experiment, 3 hops, 20 neighbors per hop
 
 **Key Features:**
     - Each experiment computes GED correlation statistics over 100 query molecules
     - Generates concentration diagnostic plots for each configuration
     - Computes R² and Pearson correlation between GED and embedding similarity
-    - Total jobs: 8 (4 sizes × 2 methods)
+    - Total jobs: 15 (5 sizes × 3 methods)
 
 **Usage:**
     Before running this script, ensure that:
@@ -100,7 +100,7 @@ DATASET_NAME: str = 'zinc250k'
 # Fixed dataset parameters that apply to all experiments
 FIXED_PARAMETERS: dict = {
     'DATASET_NAME': DATASET_NAME,
-    '__CACHING__': False,        # Disable caching
+    '__CACHING__': True,         # Enable caching to reuse GED neighborhoods across configurations
     '__DEBUG__': False,          # Run on full dataset
     'SEED': SEED,
 }
@@ -166,6 +166,7 @@ FIXED_PARAMETERS.update({
 # Embedding size sweep: the dimensionality of the molecular representation.
 # Testing sizes from small to large to understand scaling behavior.
 EMBEDDING_SIZE_SWEEP: list[int] = [
+    8,      # Very small dimensional - tests extreme compression
     32,     # Small dimensional - tests minimum viable size
     128,    # Medium dimensional
     512,    # Standard dimensional
@@ -189,6 +190,13 @@ ENCODING_PARAMETER_TUPLES: list[tuple[str, dict]] = [
         'USE_COUNTS': False,              # Binary fingerprints
     }),
 
+    # MAP4 fingerprints: MinHashed Atom-Pair fingerprints
+    ('fp_map4', {
+        'FINGERPRINT_TYPE': 'map4',       # MAP4 fingerprints
+        'FINGERPRINT_RADIUS': 2,          # Radius 2
+        'USE_COUNTS': False,              # Binary (folded) fingerprints
+    }),
+
     # Hyperdimensional computing: graph-based hypervector encoding
     ('hdc', {
         'NUM_LAYERS': 2,                  # 2-layer message passing
@@ -201,7 +209,14 @@ ENCODING_PARAMETER_TUPLES: list[tuple[str, dict]] = [
 # "embedding size" into the specific parameter name used by each representation method.
 ENCODING_SIZE_PARAMETER_MAP: dict[str, str] = {
     'fp': 'FINGERPRINT_SIZE',         # For fingerprints: bit vector length
+    'fp_map4': 'FINGERPRINT_SIZE',    # For MAP4: folded fingerprint length
     'hdc': 'EMBEDDING_SIZE',          # For HDC: hypervector dimension
+}
+
+# Mapping from encoding name to experiment module name. Encodings not listed here
+# default to molecule_similarity__{encoding}.py.
+ENCODING_MODULE_MAP: dict[str, str] = {
+    'fp_map4': 'molecule_similarity__fp.py',
 }
 
 
@@ -223,7 +238,7 @@ print(f'  Dataset: {DATASET_NAME}')
 print(f'  GED Samples: {GED_NUM_SAMPLES} query molecules')
 print(f'  GED Hops: {NUM_HOPS} hops, {NUM_NEIGHBOR_TOTAL} neighbors per hop')
 print(f'\nSweep Parameters:')
-print(f'  Representation Methods: {len(ENCODING_PARAMETER_TUPLES)} (fp, hdc)')
+print(f'  Representation Methods: {len(ENCODING_PARAMETER_TUPLES)} (fp, fp_map4, hdc)')
 print(f'  Embedding Sizes: {EMBEDDING_SIZE_SWEEP}')
 print(f'\nJob Statistics:')
 print(f'  Total SLURM Jobs: {num_experiments}')
@@ -266,7 +281,7 @@ with tqdm(total=num_experiments, desc="Scheduling similarity experiments") as pb
             # module with encoding-specific parameters.
 
             # Construct the experiment module filename based on representation method
-            experiment_module = f'molecule_similarity__{encoding}.py'
+            experiment_module = ENCODING_MODULE_MAP.get(encoding, f'molecule_similarity__{encoding}.py')
             experiment_path = os.path.join(PATH, experiment_module)
 
             # Verify that the experiment module exists

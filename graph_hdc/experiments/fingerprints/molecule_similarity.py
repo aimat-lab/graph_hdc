@@ -1350,12 +1350,46 @@ def main(e: Experiment):
 
             e.log(f' * query SMILES: {query_smiles}')
 
-            # Generate N-hop neighborhood with GED tracking
-            time_start = time.time()
-            neighbors_with_ged = e.apply_hook(
-                'calculate_n_hop_neighborhood',
-                query_smiles=query_smiles
+            # Generate N-hop neighborhood with GED tracking.
+            #
+            # The neighborhood computation is expensive (involves repeated calls to
+            # vgd_counterfactuals.get_neighborhood) but depends only on the query
+            # molecule and the neighborhood generation parameters (SEED, NUM_HOPS,
+            # NUM_NEIGHBOR_BRANCHES, NUM_NEIGHBOR_TOTAL). Crucially, it does NOT
+            # depend on the encoding method or embedding size.
+            #
+            # We therefore cache the result using pycomex's @cache.cached decorator,
+            # scoped by the neighborhood parameters. This means that when running
+            # multiple experiment configurations in a sweep (e.g., different embedding
+            # sizes or encoding methods on the same dataset), the neighborhood for
+            # each query molecule is computed only once and reused from the cache for
+            # all subsequent configurations.
+            #
+            # The cache key is built from:
+            #   - name: a hash of the query SMILES (filesystem-safe identifier)
+            #   - scope: a tuple encoding SEED, NUM_HOPS, NUM_NEIGHBOR_BRANCHES,
+            #     and NUM_NEIGHBOR_TOTAL so that different neighborhood parameters
+            #     produce separate cache entries.
+            #
+            # For this to work across parallel SLURM jobs, __CACHING__ must be set
+            # to True. Jobs that finish first will write the cache; later-starting
+            # jobs will read from it instead of recomputing.
+            smiles_hash = hashlib.md5(query_smiles.encode()).hexdigest()[:12]
+            cache_scope = (
+                'ged_neighborhoods',
+                f'seed_{e.SEED}',
+                f'hops_{e.NUM_HOPS}_branches_{e.NUM_NEIGHBOR_BRANCHES}_total_{e.NUM_NEIGHBOR_TOTAL}',
             )
+
+            @experiment.cache.cached(name=f'neighborhood__{smiles_hash}', scope=cache_scope)
+            def _compute_neighborhood():
+                return e.apply_hook(
+                    'calculate_n_hop_neighborhood',
+                    query_smiles=query_smiles,
+                )
+
+            time_start = time.time()
+            neighbors_with_ged = _compute_neighborhood()
             time_end = time.time()
 
             e.log(f' * generated {len(neighbors_with_ged)} neighbors in {time_end - time_start:.2f}s')
