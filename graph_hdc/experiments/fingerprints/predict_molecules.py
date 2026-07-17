@@ -146,6 +146,12 @@ KN_METRIC: str = 'minkowski'
 NN_HIDDEN_LAYER_SIZES: Tuple[int] = (100, 100, 100)
 NN_ALPHA: float = 0.0001
 NN_LEARNING_RATE_INIT: float = 0.001
+# :param NN_NUM_WORKERS:
+#       Number of worker processes for the neural_net2 (PyTorch-Lightning) DataLoaders. Defaults to 0:
+#       the feature vectors live in memory, so workers add little, and when hundreds of experiment tasks
+#       are packed onto a single node (e.g. a JUPITER Booster node), spawning 4 workers per task thrashes
+#       the machine. Increase only for a single-task GPU run on a very large dataset.
+NN_NUM_WORKERS: int = 0
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -860,31 +866,34 @@ def train_model__neural_net2(e: Experiment,
             labels = torch.tensor(self.data_map[data_idx]['graph_labels'], dtype=torch.float32)
             return features, labels
     
+    # DataLoader worker settings. With NN_NUM_WORKERS == 0 (the default, best for dense node packing)
+    # loading happens in the main process; prefetch_factor/persistent_workers are only valid with workers.
+    loader_kwargs = {'num_workers': e.NN_NUM_WORKERS, 'pin_memory': False}
+    if e.NN_NUM_WORKERS and e.NN_NUM_WORKERS > 0:
+        loader_kwargs['prefetch_factor'] = 2
+        loader_kwargs['persistent_workers'] = True
+
     # Create memory-efficient datasets
     train_dataset = LazyDataset(train_indices, index_data_map)
-    
+
     # Create a DataLoader with optimized settings for performance
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, 
-        batch_size=64, 
+        train_dataset,
+        batch_size=64,
         shuffle=True,
         drop_last=True,
-        num_workers=4,
-        prefetch_factor=2,
-        pin_memory=False,
+        **loader_kwargs,
     )
-    
+
     # Create memory-efficient validation dataset
     val_dataset = LazyDataset(val_indices_, index_data_map)
-    
+
     # Create a DataLoader for the validation dataset with optimized settings
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=64,
         shuffle=False,
-        num_workers=4,
-        prefetch_factor=2,
-        pin_memory=False,
+        **loader_kwargs,
     )
     
     ## --- creating the neural network model ---
@@ -1373,7 +1382,23 @@ def experiment(e: Experiment):
             key=f'test_{model_name}',
             scaler=scaler,
         )
-        
+
+        # ~ model evaluation on the held-out validation split
+        # This validation metric is the selection signal for hyperparameter optimization (see
+        # _slurm_ex_13 / analyze_ex_13): the best config per (representation, dataset) is chosen by the
+        # validation metric, never the test metric, to avoid the optimistic bias of tuning on the test
+        # split. The top-level validation split is otherwise unused by the neural-net models (which carve
+        # their own internal validation set from the training indices), so it is a clean, held-out signal.
+        if val_indices:
+            e.apply_hook(
+                'evaluate_model',
+                model=model,
+                index_data_map=index_data_map,
+                indices=val_indices,
+                key=f'val_{model_name}',
+                scaler=scaler,
+            )
+
     # ~ comparison of models
     
     e.log('creating model comparison plots...')
