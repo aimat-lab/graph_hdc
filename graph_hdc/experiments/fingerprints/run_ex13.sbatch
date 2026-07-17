@@ -62,6 +62,8 @@ if [ "$EX13_STAGE" = "hpo" ]; then
     run_cpu "$EX13/warmup_hpo.txt"   # barrier: build shared load__/stats_ caches once
     run_cpu "$EX13/hpo_primer.txt"   # barrier: build each featurization group once (race-free)
     run_cpu "$EX13/hpo_rest.txt"     # all featurization cache hits
+elif [ "$EX13_STAGE" = "retry" ]; then
+    run_cpu "$EX13/hpo_retry.txt"    # re-run the commands that failed in a previous pass
 elif [ "$EX13_STAGE" = "table" ]; then
     run_cpu "$EX13/warmup_table.txt" # barrier: full-data load__/stats_ caches
     run_gpu "$EX13/table_gpu.txt"    # background: COMPAS + QM9 on the 4 GPUs
