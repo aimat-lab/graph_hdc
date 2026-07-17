@@ -138,6 +138,10 @@ LN_FIT_INTERCEPT: bool = True
 
 KN_NUM_NEIGHBORS: int = 5
 KN_WEIGHTS: str = 'uniform'
+# Distance metric passed to sklearn's KNeighborsRegressor / KNeighborsClassifier.
+# Common choices: 'minkowski' (sklearn default, p=2 = Euclidean), 'cosine',
+# 'jaccard' (binary inputs only, equivalent to Tanimoto for Morgan fingerprints).
+KN_METRIC: str = 'minkowski'
 
 NN_HIDDEN_LAYER_SIZES: Tuple[int] = (100, 100, 100)
 NN_ALPHA: float = 0.0001
@@ -692,6 +696,8 @@ def train_model__k_neighbors(e: Experiment,
     kwargs = {
         'n_neighbors': e.KN_NUM_NEIGHBORS,
         'weights': e.KN_WEIGHTS,
+        'metric': e.KN_METRIC,
+        'n_jobs': -1,
     }
     
     time_start = time.time()
@@ -1181,11 +1187,22 @@ def experiment(e: Experiment):
     e.log_parameters()
     
     # --- data loading ---
-    # First of all we need to load the dataset. Since this is a time consuming operation, we wrap this 
-    # as a cached operation so that it only has to be done once per dataset after which the result may just be 
+    # First of all we need to load the dataset. Since this is a time consuming operation, we wrap this
+    # as a cached operation so that it only has to be done once per dataset after which the result may just be
     # loaded from the disk.
-    
-    @experiment.cache.cached(name=f'load__{e.DATASET_NAME}')
+
+    # The cached content is the *subsampled + filtered* dataset, whose molecule set depends on NUM_DATA
+    # (the subsample fraction/count) and — only when actually subsampling — on SEED (which molecules are
+    # drawn, see the load_dataset hook). The cache key must therefore reflect those parameters, otherwise a
+    # subsampled run and a full-data run of the same dataset would collide on the key `load__{DATASET_NAME}`
+    # and silently load each other's molecule set. For full-data runs (NUM_DATA is None or 1.0) the molecule
+    # set is seed-independent, so we keep the original key to stay backward-compatible with existing caches.
+    if e.NUM_DATA is None or e.NUM_DATA == 1.0:
+        load_cache_name = f'load__{e.DATASET_NAME}'
+    else:
+        load_cache_name = f'load__{e.DATASET_NAME}__numdata_{e.NUM_DATA}__seed_{e.SEED}'
+
+    @experiment.cache.cached(name=load_cache_name)
     def load_data():
         # This hook returns a dict whose keys are the unique integer indices of the dataset elements and the values 
         # are the corresponding graph dict representations.

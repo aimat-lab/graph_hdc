@@ -18,3 +18,8 @@ lightning_logs/
 **/experiments/**/*.pdf
 **/experiments/**/*.csv
 **/experiments/**/*.db
+# Sherlock baseline corpus + fitted dictionary (large, not tracked)
+data/sherlock/
+
+# Molecular dataset files (downloaded via chem_mat_data, cached separately — not tracked)
+*.mpack

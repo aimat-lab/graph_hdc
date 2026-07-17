@@ -96,9 +96,17 @@ def process_dataset(
     # In the first step we need to determine the datasets statistics. Primarily we need the information
     # about the maximum graph size and the maximum graph diameter to be known for the dataset because
     # the encoding of the continuous graph features needs to know these values.
-    # Since this is information for which we need to loop through the entire dataset but does not change 
+    # Since this is information for which we need to loop through the entire dataset but does not change
     # for each dataset we obviously want to cache that.
-    @experiment.cache.cached(name=f'stats_{e.DATASET_NAME}')
+    # NOTE: The statistics are computed over the *already-subsampled* index_data_map, so they depend on the
+    # molecule set. When subsampling (NUM_DATA < 1.0) we therefore key the cache by NUM_DATA and SEED to
+    # avoid a subset's (potentially smaller) max size/diameter being reused for a full-data run — which would
+    # miscalibrate the fractional-power encoders. Full-data runs keep the original, seed-independent key.
+    if e.NUM_DATA is None or e.NUM_DATA == 1.0:
+        stats_cache_name = f'stats_{e.DATASET_NAME}'
+    else:
+        stats_cache_name = f'stats_{e.DATASET_NAME}__numdata_{e.NUM_DATA}__seed_{e.SEED}'
+    @experiment.cache.cached(name=stats_cache_name)
     def dataset_statistics() -> dict:
         
         sizes: List[int] = []
@@ -182,7 +190,15 @@ def process_dataset(
     # --- processing dataset ---
     # After having constructed the HyperNet encoder, we can now use it to process the entire dataset
     # and generate the HDC vectors for each of the molecular graphs in the dataset.
-    @experiment.cache.cached(name=f'hdc_{e.DATASET_NAME}__seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}')
+    # The embeddings already depend on SEED (through the random hypervector dictionary) and on
+    # EMBEDDING_SIZE / NUM_LAYERS. When subsampling they additionally depend on which molecules were drawn,
+    # so we add NUM_DATA to the key to prevent a subsampled run from colliding with a full-data run. Full-data
+    # runs keep the original key so existing embedding caches remain valid.
+    if e.NUM_DATA is None or e.NUM_DATA == 1.0:
+        hdc_cache_name = f'hdc_{e.DATASET_NAME}__seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}'
+    else:
+        hdc_cache_name = f'hdc_{e.DATASET_NAME}__numdata_{e.NUM_DATA}__seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}'
+    @experiment.cache.cached(name=hdc_cache_name)
     def process_dataset():
         
         # --- graph representations ---
