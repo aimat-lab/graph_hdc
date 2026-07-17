@@ -33,7 +33,7 @@ OUT = os.path.join(PATH, '_ex13')
 PREFIX_HPO = 'ex_13_hpo'
 PREFIX_TABLE = 'ex_13_table'
 HPO_SEED = 420
-TABLE_SEEDS = [0, 1, 2, 3, 4]
+TABLE_SEEDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]   # 10 eval repetitions for the reported table
 HPO_BIG_NUM_DATA = 0.1          # subsample the big datasets during HPO only
 
 # The 19 regression targets of the main table.
@@ -169,7 +169,10 @@ def build_table(datasets, reps):
             mlp = {k: v for k, v in cfg.items() if k in ('NN_HIDDEN_LAYER_SIZES', 'NN_LEARNING_RATE_INIT')}
             for seed in TABLE_SEEDS:
                 cmd = _command(module, PREFIX_TABLE, seed, 1.0, ds, feat, mlp)
-                (gpu if big else cpu).append(cmd)
+                # Big HDC jobs are RAM-heavy on CPU (full-size embeddings for 40k-134k molecules) but
+                # fit comfortably in 96 GB of HBM -> route them to the 4 GH200s. Big FP jobs are ~6 GB
+                # each and 4x more numerous, so they pack better across the CPU cores than behind 4 GPUs.
+                (gpu if (big and rep == 'hdc') else cpu).append(cmd)
     if missing:
         print(f'WARNING: {len(missing)} (rep,dataset) cells missing from the selection JSON: {missing[:8]}')
     _write('table_cpu.txt', cpu)

@@ -41,8 +41,11 @@ python -c "import torch; print('cuda', torch.cuda.is_available(), 'ndev', torch.
 run_cpu() {  # $1 = command file : GNU-parallel work queue, single-threaded tasks, no GPU
     [ -s "$1" ] || { echo "(skip: empty/missing $1)"; return 0; }
     echo "--- CPU parallel -j $CPU_J over $(wc -l < "$1") cmds from $(basename "$1") $(date) ---"
+    # --memfree gates new task starts on free RAM so the full-size FP jobs on the big datasets
+    # (~6 GB each for 134k molecules at D=8192) cannot collectively OOM the 480 GB node; small jobs
+    # start freely whenever memory is available.
     OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 CUDA_VISIBLE_DEVICES="" \
-        parallel -j "$CPU_J" --halt never --joblog "$EX13/joblog_$(basename "$1" .txt)_${SLURM_JOB_ID}.log" :::: "$1"
+        parallel -j "$CPU_J" --memfree 7G --halt never --joblog "$EX13/joblog_$(basename "$1" .txt)_${SLURM_JOB_ID}.log" :::: "$1"
 }
 
 run_gpu() {  # $1 = command file : split round-robin across the 4 GH200s, each chunk runs sequentially
