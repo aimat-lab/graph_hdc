@@ -13,6 +13,10 @@ lightning_logs/
 **/.aslurm/*
 
 **/_*
+# ...but always keep package __init__.py: the rule above matches names starting with
+# '_', which would otherwise drop __init__.py from git and silently break fresh clones
+# (e.g. graph_hdc/models/__init__.py, which exports HyperNet).
+!**/__init__.py
 
 **/experiments/**/*.png
 **/experiments/**/*.pdf
