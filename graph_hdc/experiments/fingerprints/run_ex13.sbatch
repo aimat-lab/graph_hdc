@@ -2,10 +2,10 @@
 # Whole-node Booster runner for Experiment 13. Packs the ex_13 command files onto one node with
 # GNU parallel: a CPU pool (each task pinned to 1 thread, no GPU) plus, for the table stage, a GPU
 # pool that round-robins the 4 GH200s. Drive it with env vars:
-#     STAGE=hpo|table   (required)
+#     EX13_STAGE=hpo|table   (required)
 #     CPU_J=<n>         (parallel CPU slots, default 220)
 #     TIME/PARTITION    (SBATCH overrides via --time / -p on the sbatch call)
-# Example: sbatch --job-name=ex13hpo --export=ALL,STAGE=hpo run_ex13.sbatch
+# Example: sbatch --job-name=ex13hpo --export=ALL,EX13_STAGE=hpo run_ex13.sbatch
 #SBATCH --job-name=ex13
 #SBATCH --partition=booster
 #SBATCH --gres=gpu:4
@@ -17,7 +17,7 @@
 #SBATCH --error=/e/project1/aimatchem/teufel1/graph_hdc/graph_hdc/experiments/fingerprints/_ex13/slurm_%x_%j.out
 
 set -uo pipefail
-STAGE="${STAGE:?set STAGE=hpo|table}"
+EX13_STAGE="${EX13_STAGE:?set EX13_STAGE=hpo|table}"
 CPU_J="${CPU_J:-220}"
 REPO=/e/project1/aimatchem/teufel1/graph_hdc
 FP="$REPO/graph_hdc/experiments/fingerprints"
@@ -29,7 +29,7 @@ module load parallel 2>/dev/null || true
 source "$REPO/.venv/bin/activate"
 cd "$FP"
 
-echo "=== ex13 STAGE=$STAGE CPU_J=$CPU_J host=$(hostname) $(date) ==="
+echo "=== ex13 EX13_STAGE=$EX13_STAGE CPU_J=$CPU_J host=$(hostname) $(date) ==="
 command -v parallel >/dev/null || { echo "FATAL: GNU parallel not available"; exit 1; }
 python -c "import torch; print('cuda', torch.cuda.is_available(), 'ndev', torch.cuda.device_count())"
 
@@ -50,16 +50,16 @@ run_gpu() {  # $1 = command file : split round-robin across the 4 GH200s, each c
     done
 }
 
-if [ "$STAGE" = "hpo" ]; then
+if [ "$EX13_STAGE" = "hpo" ]; then
     run_cpu "$EX13/warmup_hpo.txt"   # barrier: build shared load__/stats_ caches once
     run_cpu "$EX13/hpo_primer.txt"   # barrier: build each featurization group once (race-free)
     run_cpu "$EX13/hpo_rest.txt"     # all featurization cache hits
-elif [ "$STAGE" = "table" ]; then
+elif [ "$EX13_STAGE" = "table" ]; then
     run_cpu "$EX13/warmup_table.txt" # barrier: full-data load__/stats_ caches
     run_gpu "$EX13/table_gpu.txt"    # background: COMPAS + QM9 on the 4 GPUs
     run_cpu "$EX13/table_cpu.txt"    # foreground: everything else, CPU-packed
     wait                             # for the backgrounded GPU chunks
 else
-    echo "unknown STAGE=$STAGE"; exit 2
+    echo "unknown EX13_STAGE=$EX13_STAGE"; exit 2
 fi
-echo "=== ex13 STAGE=$STAGE DONE $(date) ==="
+echo "=== ex13 EX13_STAGE=$EX13_STAGE DONE $(date) ==="
