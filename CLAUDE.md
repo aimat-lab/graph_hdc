@@ -6,6 +6,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a research project implementing **hyperdimensional computing (HDC)** for graph structures. The project uses message passing networks to encode graphs into high-dimensional hypervectors that can be decoded to recover structural information. It focuses on molecular property prediction and graph generation tasks.
 
+## Paper submission artifact — Code Ocean capsule (`../hdf-experiments`)
+
+The paper **"Hyper-Dimensional Fingerprints as Molecular Representations"** (preprint
+arXiv:2604.27810; target journal **Nature Computational Science**; method package on
+Zenodo `10.5281/zenodo.19373621`) is accompanied by a **separate, standalone git repo**
+that is the reproducibility artifact:
+
+- **Location:** `/media/ssd2/Programming/hdf-experiments` (its own git repo, branch `main`; not a subdir of this repo).
+- **What it is:** a [Code Ocean](https://codeocean.com) *compute capsule* — a curated,
+  self-contained copy of this project holding **only** the experiment families the paper
+  reports (`predict_molecules`, `molecule_similarity`, `optimize_molecule_bo`,
+  `predict_bioactivity`). The `graph_hdc` library is **vendored** into it (not installed).
+- **Layout (Code Ocean convention):**
+  - `code/graph_hdc/` — vendored library · `code/experiments/fingerprints/` — the in-scope
+    experiment scripts + YAML configs + `mixin_clogp.py` · `code/tests/`
+  - `code/run` — the single headless entry point ("Reproducible Run"); tiers
+    `TIER=smoke|demo|full` (demo is the default scaled-down run that fits Code Ocean;
+    full needs a cluster).
+  - `code/collect_outputs.py`, `code/experiments/fingerprints/figure_style.py` +
+    `make_figure_{ged,bo,prediction}.py` — produce a metrics `summary.md` and the **three
+    curated paper figures** (the experiments' own exploratory plots are not surfaced).
+  - `environment/Dockerfile` (+ `postInstall`) — pinned CPU stack (python 3.11, torch,
+    rdkit, pycomex, `chem_mat_database` + `vgd_counterfactuals` git deps). Local image tag: `hdf-artifact`.
+  - `data/` (datasets auto-fetched, nothing committed) · `metadata/metadata.yml`.
+- **Caveat:** the capsule vendors its own copy of `graph_hdc` and the experiment scripts, so
+  edits made *here* do **not** propagate there. If a paper-relevant experiment or the
+  library changes, re-sync the affected files into `../hdf-experiments`.
+
 ## Virtual Environment
 
 This project uses a virtual environment which should be activated before running any command line tools or scripts.
