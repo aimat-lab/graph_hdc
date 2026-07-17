@@ -925,6 +925,10 @@ def train_model__neural_net2(e: Experiment,
         accelerator='auto',
         devices=1,
         logger=False,
+        # Disable Lightning's default ModelCheckpoint. It would write to a shared ./checkpoints/ dir with
+        # epoch/step-based filenames that collide across concurrently-packed tasks (one task deletes another's
+        # checkpoint -> FileNotFoundError). Best-weight restoration is handled in memory by BestModelRestorer.
+        enable_checkpointing=False,
         callbacks=[callback],
         enable_progress_bar=e.__DEBUG__,
     )
