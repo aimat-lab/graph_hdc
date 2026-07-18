@@ -19,6 +19,7 @@
 set -uo pipefail
 EX13_STAGE="${EX13_STAGE:?set EX13_STAGE=hpo|table}"
 CPU_J="${CPU_J:-220}"
+MEMFREE="${MEMFREE:-10G}"   # GNU parallel won't start a task unless this much RAM is free
 REPO=/e/project1/aimatchem/teufel1/graph_hdc
 FP="$REPO/graph_hdc/experiments/fingerprints"
 EX13="$FP/_ex13"
@@ -45,7 +46,7 @@ run_cpu() {  # $1 = command file : GNU-parallel work queue, single-threaded task
     # (~6 GB each for 134k molecules at D=8192) cannot collectively OOM the 480 GB node; small jobs
     # start freely whenever memory is available.
     OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 CUDA_VISIBLE_DEVICES="" \
-        parallel -j "$CPU_J" --memfree 7G --halt never --joblog "$EX13/joblog_$(basename "$1" .txt)_${SLURM_JOB_ID}.log" :::: "$1"
+        parallel -j "$CPU_J" --memfree "$MEMFREE" --halt never --joblog "$EX13/joblog_$(basename "$1" .txt)_${SLURM_JOB_ID}.log" :::: "$1"
 }
 
 run_gpu() {  # $1 = command file : split round-robin across the 4 GH200s, each chunk runs sequentially
@@ -63,7 +64,11 @@ if [ "$EX13_STAGE" = "hpo" ]; then
     run_cpu "$EX13/hpo_primer.txt"   # barrier: build each featurization group once (race-free)
     run_cpu "$EX13/hpo_rest.txt"     # all featurization cache hits
 elif [ "$EX13_STAGE" = "retry" ]; then
-    run_cpu "$EX13/hpo_retry.txt"    # re-run the commands that failed in a previous pass
+    # Re-run commands that failed in a previous pass. RETRY_CPU_FILE / RETRY_GPU_FILE select the lists
+    # (default: the HPO cpu retry file). GPU chunks run concurrently with the CPU pool.
+    run_gpu "${RETRY_GPU_FILE:-/dev/null}"
+    run_cpu "${RETRY_CPU_FILE:-$EX13/hpo_retry.txt}"
+    wait
 elif [ "$EX13_STAGE" = "table" ]; then
     run_cpu "$EX13/warmup_table.txt" # barrier: full-data load__/stats_ caches
     run_gpu "$EX13/table_gpu.txt"    # background: COMPAS + QM9 on the 4 GPUs

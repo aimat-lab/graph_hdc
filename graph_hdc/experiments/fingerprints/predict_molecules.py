@@ -1295,31 +1295,17 @@ def experiment(e: Experiment):
     duration = time_end - time_start
     e.log(f'processed dataset after {duration:.2f} seconds')
     
-    ## --- exporting to CSV ---
-    # Now we export the converted dataset into a CSV file and save that as an artifact
-    
-    # Collect data for DataFrame
-    records = []
-    for index, data in index_data_map.items():
-        smiles: str = data['graph_repr']
-        features: list = data['graph_features']
-        labels: list = data['graph_labels']
-        record = {
-            'index': index,
-            'smiles': smiles,
-            'labels': labels,
-            'features': features,
-        }
-        records.append(record)
-
-    # Convert records to arrays for npz export
-    indices = [record['index'] for record in records]
-    smiles = [record['smiles'] for record in records]
-    labels = np.array([record['labels'] for record in records])
-    features = np.array([record['features'] for record in records])
-
-    # Save dataset to NPZ file
+    ## --- exporting the converted dataset ---
+    # Optionally export the featurized dataset as an NPZ artifact. This is guarded by SAVE_DATASET
+    # (off by default) because materializing the full feature matrix (num_molecules x D) as a single
+    # array is many GB for large datasets at high embedding dimension (e.g. ~4.4 GB for QM9 at D=8192).
+    # Building it unconditionally roughly doubled per-task peak memory and OOM-killed tasks when many
+    # were packed onto one node, so it now only runs when the artifact is actually requested.
     if e.SAVE_DATASET:
+        indices = list(index_data_map.keys())
+        smiles = [index_data_map[i]['graph_repr'] for i in indices]
+        labels = np.array([index_data_map[i]['graph_labels'] for i in indices])
+        features = np.array([index_data_map[i]['graph_features'] for i in indices])
         npz_path = os.path.join(e.path, 'dataset_converted.npz')
         np.savez_compressed(npz_path, indices=indices, smiles=smiles, labels=labels, features=features)
         e.log(f'💾 saved dataset as NPZ @ {npz_path}')
