@@ -99,12 +99,17 @@ def select():
 
 
 def table():
-    # (rep, note) -> list of test MAE (one per seed)
-    maes = defaultdict(list)
+    # Dedup by (rep, dataset, seed): re-runs (e.g. OOM retries) can leave more than one archive for
+    # the same cell+seed; keep a single MAE per seed so a duplicate can't skew the mean.
+    by_seed = {}
     for params, data in _iter_archives('ex_13_table'):
         test = data.get('metrics', {}).get('test_neural_net2', {})
         if 'mae' in test:
-            maes[(_rep_of(params), params['NOTE'])].append(test['mae'])
+            by_seed[(_rep_of(params), params['NOTE'], params.get('SEED'))] = test['mae']
+    # (rep, note) -> list of test MAE (one per seed)
+    maes = defaultdict(list)
+    for (rep, note, _seed), mae in by_seed.items():
+        maes[(rep, note)].append(mae)
 
     # numeric mean-MAE matrix [dataset][rep]
     mean = {d: {} for d in DATASET_ORDER}

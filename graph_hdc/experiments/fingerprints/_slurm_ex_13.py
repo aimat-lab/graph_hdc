@@ -116,7 +116,8 @@ def _command(module: str, prefix: str, seed: int, num_data: float,
 WARMUP_HDC = {'EMBEDDING_SIZE': 1024, 'NUM_LAYERS': 1}
 
 
-def build_warmup(datasets, stage: str):
+def build_warmup(datasets, stage: str, reps=None):
+    reps = reps or {}
     seen, lines = set(), []
     for ds in datasets:
         _note, name, _tidx, _extra, big = ds
@@ -127,6 +128,13 @@ def build_warmup(datasets, stage: str):
         seen.add(key)
         lines.append(_command('hdc', 'ex_13_warmup', HPO_SEED, num_data, ds, WARMUP_HDC,
                               {'NN_LEARNING_RATE_INIT': 0.001}, models=('linear',)))
+        # Sherlock's transform cache is shared across a dataset's seeds/targets (keyed by DATASET_NAME,
+        # not NOTE), so many table tasks would otherwise race to write it. Pre-build it once per dataset
+        # here (distinct keys -> race-free) so the table tasks all hit a warm cache.
+        if 'sherlock' in reps:
+            lines.append(_command('sherlock', 'ex_13_warmup', HPO_SEED, num_data, ds,
+                                  {'FINGERPRINT_SIZE': 16384, 'SHERLOCK_RADIUS': 6, 'SHERLOCK_DICTIONARY_PATH': SHERLOCK_DICT},
+                                  {'NN_LEARNING_RATE_INIT': 0.001}, models=('linear',)))
     _write(f'warmup_{stage}.txt', lines)
 
 
@@ -203,10 +211,10 @@ if __name__ == '__main__':
         reps = {k: REPS[k] for k in reps_arg.split('=', 1)[1].split(',') if k in REPS}
         print(f'[reps filter] {list(reps)}')
     if stage == 'hpo':
-        build_warmup(datasets, 'hpo')
+        build_warmup(datasets, 'hpo', reps)
         build_hpo(datasets, reps)
     elif stage == 'table':
-        build_warmup(datasets, 'table')
+        build_warmup(datasets, 'table', reps)
         build_table(datasets, reps)
     else:
         sys.exit('usage: python _slurm_ex_13.py {hpo|table} [smoke]')
