@@ -20,6 +20,8 @@ set -uo pipefail
 EX13_STAGE="${EX13_STAGE:?set EX13_STAGE=hpo|table}"
 CPU_J="${CPU_J:-220}"
 MEMFREE="${MEMFREE:-10G}"   # GNU parallel won't start a task unless this much RAM is free
+OMP_THREADS="${OMP_THREADS:-1}"   # BLAS/OMP threads per CPU task (1 for dense small-task packing;
+                                   # raise for a small pool of large tasks so idle cores are used)
 REPO=/e/project1/aimatchem/teufel1/graph_hdc
 FP="$REPO/graph_hdc/experiments/fingerprints"
 EX13="$FP/_ex13"
@@ -45,7 +47,7 @@ run_cpu() {  # $1 = command file : GNU-parallel work queue, single-threaded task
     # --memfree gates new task starts on free RAM so the full-size FP jobs on the big datasets
     # (~6 GB each for 134k molecules at D=8192) cannot collectively OOM the 480 GB node; small jobs
     # start freely whenever memory is available.
-    OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 CUDA_VISIBLE_DEVICES="" \
+    OMP_NUM_THREADS="$OMP_THREADS" MKL_NUM_THREADS="$OMP_THREADS" OPENBLAS_NUM_THREADS="$OMP_THREADS" NUMEXPR_NUM_THREADS="$OMP_THREADS" CUDA_VISIBLE_DEVICES="" \
         parallel -j "$CPU_J" --memfree "$MEMFREE" --halt never --joblog "$EX13/joblog_$(basename "$1" .txt)_${SLURM_JOB_ID}.log" :::: "$1"
 }
 
