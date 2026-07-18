@@ -182,10 +182,11 @@ def build_table(datasets, reps):
             mlp = {k: v for k, v in cfg.items() if k in ('NN_HIDDEN_LAYER_SIZES', 'NN_LEARNING_RATE_INIT')}
             for seed in TABLE_SEEDS:
                 cmd = _command(module, PREFIX_TABLE, seed, 1.0, ds, feat, mlp)
-                # Big HDC jobs are RAM-heavy on CPU (full-size embeddings for 40k-134k molecules) but
-                # fit comfortably in 96 GB of HBM -> route them to the 4 GH200s. Big FP jobs are ~6 GB
-                # each and 4x more numerous, so they pack better across the CPU cores than behind 4 GPUs.
-                (gpu if (big and rep in ('hdc', 'sherlock')) else cpu).append(cmd)
+                # Only big Sherlock jobs go to the GPUs. HDC's GPU path is broken here: its message-passing
+                # forward pass initialises CUDA and then PyTorch-Lightning's CUDA re-init fails with a
+                # context error, so HDC (encoding + MLP) runs on CPU on every dataset. Big FP jobs are ~6 GB
+                # each and pack fine across CPU cores.
+                (gpu if (big and rep == 'sherlock') else cpu).append(cmd)
     if missing:
         print(f'WARNING: {len(missing)} (rep,dataset) cells missing from the selection JSON: {missing[:8]}')
     _write('table_cpu.txt', cpu)
