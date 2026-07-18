@@ -33,7 +33,7 @@ cd "$FP"
 # Pre-create the per-module namespace dirs. pycomex's prepare_path does a non-atomic
 # "if not exists: os.mkdir(namespace)", so the first batch of concurrent tasks of a module would
 # otherwise race and one hits FileExistsError. Creating them up front removes the race entirely.
-mkdir -p "$FP/results/predict_molecules__fp" "$FP/results/predict_molecules__hdc"
+mkdir -p "$FP/results/predict_molecules__fp" "$FP/results/predict_molecules__hdc" "$FP/results/predict_molecules__sherlock"
 
 echo "=== ex13 EX13_STAGE=$EX13_STAGE CPU_J=$CPU_J host=$(hostname) $(date) ==="
 command -v parallel >/dev/null || { echo "FATAL: GNU parallel not available"; exit 1; }
