@@ -25,11 +25,13 @@ JSON_OUT = os.path.join(PATH, 'experiment_best_parameters_map__ex13.json')
 # featurization + model params that define a configuration
 FP_KEYS = ('FINGERPRINT_TYPE', 'FINGERPRINT_SIZE', 'FINGERPRINT_RADIUS')
 HDC_KEYS = ('EMBEDDING_SIZE', 'NUM_LAYERS')
+SHERLOCK_KEYS = ('FINGERPRINT_SIZE', 'SHERLOCK_RADIUS', 'SHERLOCK_DICTIONARY_PATH')
 MLP_KEYS = ('NN_HIDDEN_LAYER_SIZES', 'NN_LEARNING_RATE_INIT')
 
 # table layout
-REP_ORDER = ['hdc', 'morgan', 'rdkit', 'torsion', 'atom']
-REP_LABEL = {'hdc': 'HDC', 'morgan': 'Morgan', 'rdkit': 'RDKit', 'torsion': 'Torsion', 'atom': 'AtomPair'}
+REP_ORDER = ['hdc', 'morgan', 'count_morgan', 'rdkit', 'torsion', 'atom', 'sherlock']
+REP_LABEL = {'hdc': 'HDC', 'morgan': 'Morgan', 'count_morgan': 'CountMorgan', 'rdkit': 'RDKit',
+             'torsion': 'Torsion', 'atom': 'AtomPair', 'sherlock': 'Sherlock'}
 DATASET_ORDER = [
     'aqsoldb_logs', 'clogp', 'freesolv_hfe', 'lipophilicity_logD', 'bace_ic50',
     'hopv15_gap', 'hopv15_jsc', 'hopv15_voc', 'hopv15_pce',
@@ -61,11 +63,18 @@ def _iter_archives(prefix: str):
 
 
 def _rep_of(params: dict) -> str:
+    if 'SHERLOCK_RADIUS' in params:
+        return 'sherlock'
     return params['FINGERPRINT_TYPE'] if params.get('FINGERPRINT_TYPE') else 'hdc'
 
 
 def _config_of(params: dict) -> dict:
-    keys = (FP_KEYS if params.get('FINGERPRINT_TYPE') else HDC_KEYS) + MLP_KEYS
+    if 'SHERLOCK_RADIUS' in params:
+        keys = SHERLOCK_KEYS + MLP_KEYS
+    elif params.get('FINGERPRINT_TYPE'):
+        keys = FP_KEYS + MLP_KEYS
+    else:
+        keys = HDC_KEYS + MLP_KEYS
     return {k: params[k] for k in keys if k in params}
 
 

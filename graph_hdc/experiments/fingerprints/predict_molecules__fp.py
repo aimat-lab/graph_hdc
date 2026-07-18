@@ -54,13 +54,24 @@ def process_dataset(e: Experiment,
         gen = rdFingerprintGenerator.GetTopologicalTorsionGenerator(
             fpSize=e.FINGERPRINT_SIZE,
         )
-    
-    e.log('processing molecules into fingerprints...')
-    
+
+    elif e.FINGERPRINT_TYPE == 'count_morgan':
+        # Count-based Morgan: identical substructure hashing to 'morgan', but the output vector holds
+        # the number of times each bit is set (integer counts) instead of a 0/1 presence indicator.
+        gen = rdFingerprintGenerator.GetMorganGenerator(
+            radius=e.FINGERPRINT_RADIUS,
+            fpSize=e.FINGERPRINT_SIZE,
+        )
+
+    count = (e.FINGERPRINT_TYPE == 'count_morgan')
+    e.log(f'processing molecules into {"count " if count else ""}fingerprints...')
+
     for c, (index, graph) in enumerate(index_data_map.items()):
-        smiles: str = graph['graph_repr']
-        fingerprint = gen.GetFingerprint(Chem.MolFromSmiles(smiles))
-        graph['graph_features'] = np.array(fingerprint).astype(float)
+        mol = Chem.MolFromSmiles(graph['graph_repr'])
+        if count:
+            graph['graph_features'] = np.array(gen.GetCountFingerprint(mol).ToList()).astype(float)
+        else:
+            graph['graph_features'] = np.array(gen.GetFingerprint(mol)).astype(float)
 
         if c % 1000 == 0:
             e.log(f' * {c} molecules done')

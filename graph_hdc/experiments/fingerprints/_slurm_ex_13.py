@@ -29,6 +29,8 @@ import itertools
 
 PATH = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(PATH, '_ex13')
+_REPO = os.path.abspath(os.path.join(PATH, os.pardir, os.pardir, os.pardir))
+SHERLOCK_DICT = os.path.join(_REPO, 'data', 'sherlock', 'sherlock_r6_coconut_lotus_dict.pkl')
 
 PREFIX_HPO = 'ex_13_hpo'
 PREFIX_TABLE = 'ex_13_table'
@@ -70,6 +72,9 @@ REPS = {
     'atom':    ('fp',  {'FINGERPRINT_TYPE': ['atom'],    'FINGERPRINT_SIZE': [1024, 2048, 4096, 8192]}),
     'torsion': ('fp',  {'FINGERPRINT_TYPE': ['torsion'], 'FINGERPRINT_SIZE': [1024, 2048, 4096, 8192]}),
     'hdc':     ('hdc', {'EMBEDDING_SIZE': [1024, 2048, 4096, 8192], 'NUM_LAYERS': [1, 2, 3]}),
+    # --- additional baselines (ex_13 second wave), merged into the same table ---
+    'count_morgan': ('fp', {'FINGERPRINT_TYPE': ['count_morgan'], 'FINGERPRINT_SIZE': [1024, 2048, 4096, 8192], 'FINGERPRINT_RADIUS': [1, 2, 3]}),
+    'sherlock':     ('sherlock', {'FINGERPRINT_SIZE': [16384], 'SHERLOCK_RADIUS': [6], 'SHERLOCK_DICTIONARY_PATH': [SHERLOCK_DICT]}),
 }
 MLP_GRID = {
     'NN_HIDDEN_LAYER_SIZES': [(10, 10), (50, 50), (100, 100)],
@@ -165,14 +170,14 @@ def build_table(datasets, reps):
                 missing.append(key)
                 continue
             cfg = best[key]
-            feat = {k: v for k, v in cfg.items() if k in ('FINGERPRINT_TYPE', 'FINGERPRINT_SIZE', 'FINGERPRINT_RADIUS', 'EMBEDDING_SIZE', 'NUM_LAYERS')}
+            feat = {k: v for k, v in cfg.items() if k in ('FINGERPRINT_TYPE', 'FINGERPRINT_SIZE', 'FINGERPRINT_RADIUS', 'EMBEDDING_SIZE', 'NUM_LAYERS', 'SHERLOCK_RADIUS', 'SHERLOCK_DICTIONARY_PATH')}
             mlp = {k: v for k, v in cfg.items() if k in ('NN_HIDDEN_LAYER_SIZES', 'NN_LEARNING_RATE_INIT')}
             for seed in TABLE_SEEDS:
                 cmd = _command(module, PREFIX_TABLE, seed, 1.0, ds, feat, mlp)
                 # Big HDC jobs are RAM-heavy on CPU (full-size embeddings for 40k-134k molecules) but
                 # fit comfortably in 96 GB of HBM -> route them to the 4 GH200s. Big FP jobs are ~6 GB
                 # each and 4x more numerous, so they pack better across the CPU cores than behind 4 GPUs.
-                (gpu if (big and rep == 'hdc') else cpu).append(cmd)
+                (gpu if (big and rep in ('hdc', 'sherlock')) else cpu).append(cmd)
     if missing:
         print(f'WARNING: {len(missing)} (rep,dataset) cells missing from the selection JSON: {missing[:8]}')
     _write('table_cpu.txt', cpu)
@@ -193,6 +198,10 @@ if __name__ == '__main__':
             'hdc':    ('hdc', {'EMBEDDING_SIZE': [1024], 'NUM_LAYERS': [2]}),
         }
         print('[SMOKE] freesolv+aqsoldb, morgan(1024,r2)+hdc(1024,d2) only')
+    reps_arg = next((a for a in sys.argv[2:] if a.startswith('reps=')), None)
+    if reps_arg and not smoke:
+        reps = {k: REPS[k] for k in reps_arg.split('=', 1)[1].split(',') if k in REPS}
+        print(f'[reps filter] {list(reps)}')
     if stage == 'hpo':
         build_warmup(datasets, 'hpo')
         build_hpo(datasets, reps)
