@@ -31,6 +31,9 @@ PATH = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(PATH, '_ex13')
 _REPO = os.path.abspath(os.path.join(PATH, os.pardir, os.pardir, os.pardir))
 SHERLOCK_DICT = os.path.join(_REPO, 'data', 'sherlock', 'sherlock_r6_coconut_lotus_dict.pkl')
+# The FULL artifact (keeps the count table) is required to re-select Sherlock by radius; the lightweight
+# dictionary above is fixed at its fit radius (6). The fixed-config table uses radius 2, so it needs this.
+SHERLOCK_FULL = os.path.join(_REPO, 'data', 'sherlock', 'sherlock_r6_coconut_lotus.pkl')
 
 PREFIX_HPO = 'ex_13_hpo'
 PREFIX_TABLE = 'ex_13_table'
@@ -93,7 +96,7 @@ FIXED_FEAT = {
     'rdkit':        {'FINGERPRINT_TYPE': 'rdkit',        'FINGERPRINT_SIZE': 2048, 'FINGERPRINT_RADIUS': 2},
     'torsion':      {'FINGERPRINT_TYPE': 'torsion',      'FINGERPRINT_SIZE': 2048},
     'atom':         {'FINGERPRINT_TYPE': 'atom',         'FINGERPRINT_SIZE': 2048},
-    'sherlock':     {'FINGERPRINT_SIZE': 2048, 'SHERLOCK_RADIUS': 2, 'SHERLOCK_DICTIONARY_PATH': SHERLOCK_DICT},
+    'sherlock':     {'FINGERPRINT_SIZE': 2048, 'SHERLOCK_RADIUS': 2, 'SHERLOCK_DICTIONARY_PATH': SHERLOCK_FULL},
 }
 
 
