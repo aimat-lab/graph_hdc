@@ -83,6 +83,19 @@ MLP_GRID = {
 # The one MLP config used for the primer pass (its featurization is what gets cached first).
 PRIMER_MLP = {'NN_HIDDEN_LAYER_SIZES': (100, 100), 'NN_LEARNING_RATE_INIT': 0.001}
 
+# --- fixed-configuration table: every method size-matched to 2048 / depth 2, no HPO, 10 seeds ---
+PREFIX_FIXED = 'ex_13_fixed'
+FIXED_MLP = {'NN_HIDDEN_LAYER_SIZES': (100, 100), 'NN_LEARNING_RATE_INIT': 0.001}
+FIXED_FEAT = {
+    'hdc':          {'EMBEDDING_SIZE': 2048, 'NUM_LAYERS': 2},
+    'morgan':       {'FINGERPRINT_TYPE': 'morgan',       'FINGERPRINT_SIZE': 2048, 'FINGERPRINT_RADIUS': 2},
+    'count_morgan': {'FINGERPRINT_TYPE': 'count_morgan', 'FINGERPRINT_SIZE': 2048, 'FINGERPRINT_RADIUS': 2},
+    'rdkit':        {'FINGERPRINT_TYPE': 'rdkit',        'FINGERPRINT_SIZE': 2048, 'FINGERPRINT_RADIUS': 2},
+    'torsion':      {'FINGERPRINT_TYPE': 'torsion',      'FINGERPRINT_SIZE': 2048},
+    'atom':         {'FINGERPRINT_TYPE': 'atom',         'FINGERPRINT_SIZE': 2048},
+    'sherlock':     {'FINGERPRINT_SIZE': 2048, 'SHERLOCK_RADIUS': 2, 'SHERLOCK_DICTIONARY_PATH': SHERLOCK_DICT},
+}
+
 
 def _dict_product(d: dict):
     keys = list(d.keys())
@@ -194,6 +207,32 @@ def build_table(datasets, reps):
     print(f'TABLE total: {len(cpu) + len(gpu)} commands ({len(cpu)} cpu, {len(gpu)} gpu)')
 
 
+def build_fixed(datasets, reps):
+    """Fixed-config, size-matched (2048 / depth 2) table over the eval seeds -- no HPO selection.
+    Everything runs on CPU (2048 is low-memory, and HDC's GPU path is broken). A warmup pre-builds the
+    shared caches race-free: the HDC encoding (per dataset-name and seed) and the Sherlock 2048/r2
+    transform (per dataset-name), both of which a dataset's targets would otherwise race to write."""
+    warm, runs, seen = [], [], set()
+    for ds in datasets:
+        name = ds[1]
+        if name not in seen:
+            seen.add(name)
+            if 'hdc' in reps:
+                for seed in TABLE_SEEDS:
+                    warm.append(_command('hdc', 'ex_13_warmup', seed, 1.0, ds, FIXED_FEAT['hdc'],
+                                        {'NN_LEARNING_RATE_INIT': 0.001}, models=('linear',)))
+            if 'sherlock' in reps:
+                warm.append(_command('sherlock', 'ex_13_warmup', HPO_SEED, 1.0, ds, FIXED_FEAT['sherlock'],
+                                    {'NN_LEARNING_RATE_INIT': 0.001}, models=('linear',)))
+        for rep in reps:
+            for seed in TABLE_SEEDS:
+                runs.append(_command(REPS[rep][0], PREFIX_FIXED, seed, 1.0, ds, FIXED_FEAT[rep], FIXED_MLP))
+    _write('warmup_fixed.txt', warm)
+    _write('fixed_cpu.txt', runs)
+    print(f'FIXED total: {len(runs)} runs ({len(reps)} reps x {len(datasets)} datasets x {len(TABLE_SEEDS)} seeds) '
+          f'+ {len(warm)} warmup')
+
+
 if __name__ == '__main__':
     stage = sys.argv[1] if len(sys.argv) > 1 else 'hpo'
     smoke = 'smoke' in sys.argv[2:]
@@ -217,5 +256,7 @@ if __name__ == '__main__':
     elif stage == 'table':
         build_warmup(datasets, 'table', reps)
         build_table(datasets, reps)
+    elif stage == 'fixed':
+        build_fixed(datasets, reps)
     else:
-        sys.exit('usage: python _slurm_ex_13.py {hpo|table} [smoke]')
+        sys.exit('usage: python _slurm_ex_13.py {hpo|table|fixed} [smoke] [reps=a,b]')

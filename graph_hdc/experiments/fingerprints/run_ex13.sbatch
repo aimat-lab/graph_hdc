@@ -65,6 +65,9 @@ if [ "$EX13_STAGE" = "hpo" ]; then
     run_cpu "$EX13/warmup_hpo.txt"   # barrier: build shared load__/stats_ caches once
     run_cpu "$EX13/hpo_primer.txt"   # barrier: build each featurization group once (race-free)
     run_cpu "$EX13/hpo_rest.txt"     # all featurization cache hits
+elif [ "$EX13_STAGE" = "fixed" ]; then
+    run_cpu "$EX13/warmup_fixed.txt"   # barrier: build shared HDC encodings + Sherlock 2048/r2 caches
+    run_cpu "$EX13/fixed_cpu.txt"       # all cache hits; everything on CPU (low-mem at 2048)
 elif [ "$EX13_STAGE" = "retry" ]; then
     # Re-run commands that failed in a previous pass. RETRY_CPU_FILE / RETRY_GPU_FILE select the lists
     # (default: the HPO cpu retry file). GPU chunks run concurrently with the CPU pool.

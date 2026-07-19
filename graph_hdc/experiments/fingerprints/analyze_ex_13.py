@@ -98,11 +98,11 @@ def select():
     print(f'\nscanned {n} ex_13_hpo archives, selected {len(best)} (rep,dataset) cells -> {JSON_OUT}')
 
 
-def table():
+def table(prefix='ex_13_table'):
     # Dedup by (rep, dataset, seed): re-runs (e.g. OOM retries) can leave more than one archive for
     # the same cell+seed; keep a single MAE per seed so a duplicate can't skew the mean.
     by_seed = {}
-    for params, data in _iter_archives('ex_13_table'):
+    for params, data in _iter_archives(prefix):
         test = data.get('metrics', {}).get('test_neural_net2', {})
         if 'mae' in test:
             by_seed[(_rep_of(params), params['NOTE'], params.get('SEED'))] = test['mae']
@@ -181,7 +181,7 @@ def table():
                 cells.append('--')
         lines.append(f'{d} & MAE & ' + ' & '.join(cells) + r' \\')
     lines += [r'\bottomrule', r'\end{tabular}']
-    tex = os.path.join(PATH, '_ex13', 'dataset_comparison_ex13.tex')
+    tex = os.path.join(PATH, '_ex13', f'dataset_comparison_{prefix}.tex')
     open(tex, 'w').write('\n'.join(lines) + '\n')
     print(f'\nLaTeX table -> {tex}')
 
@@ -191,6 +191,6 @@ if __name__ == '__main__':
     if mode == 'select':
         select()
     elif mode == 'table':
-        table()
+        table(sys.argv[2] if len(sys.argv) > 2 else 'ex_13_table')
     else:
-        sys.exit('usage: python analyze_ex_13.py {select|table}')
+        sys.exit('usage: python analyze_ex_13.py {select|table [prefix]}')
