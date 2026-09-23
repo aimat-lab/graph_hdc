@@ -151,6 +151,8 @@ def train_gnn(e: Experiment,
     e[f'train_time/{name}'] = (best_time if best_time is not None else time.time()) - time_start
     e[f'best_epoch/{name}'] = model.model_restorer.best_epoch
     e[f'epochs/{name}'] = trainer.current_epoch
+    # learning curve: (epoch, validation metric) for every epoch
+    e[f'history/{name}'] = model.model_restorer.history
     e.log(f'trained {name} for {trainer.current_epoch} epochs, best epoch {model.model_restorer.best_epoch}')
 
     model.eval()

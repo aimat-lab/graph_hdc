@@ -57,6 +57,9 @@ def iter_archives(prefix: str):
         # a killed or timed-out run keeps status 'running' (and has_error False), so require 'done'
         if params.get('__PREFIX__') != prefix or meta.get('status') != 'done' or meta.get('has_error'):
             continue
+        # the first round of trained GNNs used early stopping and was replaced by full-length runs
+        if module == 'predict_molecules__gnn' and params.get('EARLY_STOPPING_PATIENCE') is not None:
+            continue
         data_path = os.path.join(os.path.dirname(meta_path), 'experiment_data.json')
         if not os.path.exists(data_path):
             continue
@@ -218,7 +221,7 @@ def cost_table(records: list) -> str:
 
 
 def convergence(records: list) -> str:
-    lines = ['dataset\tarch\tn\tmedian_best_epoch\tmax_best_epoch\tmedian_stop_epoch\tmax_stop_epoch\thit_cap']
+    lines = ['dataset\tarch\tn\tmedian_best_epoch\tmax_best_epoch\tmedian_stop_epoch\tmax_stop_epoch\tbest_after_900']
     for dataset in DATASET_ORDER:
         for a in ARCHS:
             recs = [r for r in records if r['variant'] == 'trained' and r['arch'] == a and r['dataset'] == dataset
@@ -227,8 +230,8 @@ def convergence(records: list) -> str:
                 continue
             best = [r['best_epoch'] for r in recs]
             stop = [r['epochs'] for r in recs]
-            # a run that stops at the epoch cap was still improving -> early stopping did not trigger
-            hit_cap = sum(1 for s in stop if s >= 1000)
+            # best epoch in the last 10% of training: the run might still have been improving
+            hit_cap = sum(1 for b in best if b >= 900)
             lines.append(f'{dataset}\t{a}\t{len(recs)}\t{np.median(best):.0f}\t{max(best)}\t'
                          f'{np.median(stop):.0f}\t{max(stop)}\t{hit_cap}')
     return '\n'.join(lines) + '\n'

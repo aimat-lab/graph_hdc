@@ -6,8 +6,10 @@ from the HDC algebra or simply from multi-hop message passing? Every one of the 
 (GCN, GIN, GATv2) is evaluated in two ways and compared against HDF with the same downstream models:
 
 * ``trained``  the GNN trained end-to-end on the target (fixed standard config: 3x128 conv, dense head
-               128-64-32, lr 1e-4, batch 32), with validation-based best-checkpoint restoration and early
-               stopping (patience 50, max 1000 epochs).
+               128-64-32, lr 1e-4, batch 32) for the full 1000 epochs (no early stopping), after which the
+               weights of the epoch with the best validation metric are restored. (A first round with early
+               stopping, patience 50, stopped the extensive QM9 targets after ~50 epochs on the noisy
+               validation plateau of the fixed learning rate; those archives are ignored by the analysis.)
 * ``random``   the same architecture with frozen random weights (width 2048 = HDF dimension, 2 layers =
                HDF depth, sum pooling) as a training-free encoder, followed by the MLP and KNN.
 * ``hdf``      HDF (D=2048, L=2; the ex_13 fixed config) followed by the same MLP and KNN.
@@ -26,6 +28,7 @@ Stages / command files written to ``_ex14/`` (executed by ``run_ex14_kcist.sbatc
                   cost (longest first). With the round-robin sharding over the array tasks, every shard
                   then gets the same number (+-1) of runs of each cost class, and each node's work queue
                   starts its longest runs first.
+* ``gnn_trained.txt``  only the trained-GNN lines of gnn.txt (same cost ordering), for re-running them.
 * ``smoke_*``     the same pipeline on FreeSolv with seed 0, all 7 variants, few epochs.
 
 * ``missing_*``   written by the ``missing`` mode: the lines of hdf.txt / gnn.txt that have no completed
@@ -92,7 +95,7 @@ VARIANTS = {
     }),
     'trained': ('gnn', {
         'NODE_FEATURES': 'hdf', 'CONV_UNITS': [128, 128, 128], 'DENSE_UNITS': [128, 64, 32],
-        'BATCH_SIZE': 32, 'LEARNING_RATE': 1e-4, 'EPOCHS': 1000, 'EARLY_STOPPING_PATIENCE': 50,
+        'BATCH_SIZE': 32, 'LEARNING_RATE': 1e-4, 'EPOCHS': 1000, 'EARLY_STOPPING_PATIENCE': None,
     }),
 }
 
@@ -193,6 +196,12 @@ def identity_of_line(line: str) -> tuple:
     return module, note, seed, ''
 
 
+def is_superseded(meta_path: str, params: dict) -> bool:
+    """Trained-GNN archives of the first round with early stopping, replaced by the full-length runs."""
+    module = os.path.basename(os.path.dirname(os.path.dirname(meta_path)))
+    return module == 'predict_molecules__gnn' and params.get('EARLY_STOPPING_PATIENCE') is not None
+
+
 def completed_identities(prefix: str) -> set:
     """Identities of all runs with a completed (status 'done') archive of the given prefix."""
     done = set()
@@ -203,6 +212,8 @@ def completed_identities(prefix: str) -> set:
             continue
         params = {k: v.get('value') for k, v in meta.get('parameters', {}).items() if isinstance(v, dict)}
         if params.get('__PREFIX__') != prefix or meta.get('status') != 'done' or meta.get('has_error'):
+            continue
+        if is_superseded(meta_path, params):
             continue
         module = os.path.basename(os.path.dirname(os.path.dirname(meta_path))).replace('predict_molecules__', '')
         arch = params.get('GNN_ARCH') if module == 'gnn_random' else (params['MODELS'][0] if module == 'gnn' else '')
@@ -252,7 +263,7 @@ if __name__ == '__main__':
         # The exact production pipeline on FreeSolv, seed 0, but a short training budget so that the
         # whole thing finishes in minutes. Validates imports, parameters, GPU use and the archive layout.
         datasets = [d for d in DATASETS if d[0] == 'freesolv_hfe']
-        overrides = {'trained': {'EPOCHS': 30, 'EARLY_STOPPING_PATIENCE': 5}}
+        overrides = {'trained': {'EPOCHS': 5}}
         hdf_primer, hdf_rest, gnn = build(datasets, [0], 'ex_14_smoke', overrides)
         _write('smoke_warmup.txt', build_warmup(datasets))
         _write('smoke_hdf.txt', hdf_primer + hdf_rest)
@@ -264,3 +275,4 @@ if __name__ == '__main__':
         _write('hdf.txt', hdf_primer + hdf_rest)
         _write('hdf_primer_count.txt', [str(len(hdf_primer))])
         _write('gnn.txt', gnn)
+        _write('gnn_trained.txt', [line for line in gnn if 'predict_molecules__gnn.py' in line])

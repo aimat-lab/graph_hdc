@@ -159,6 +159,8 @@ class BestModelRestorer(pl.Callback):
         # This will store the time and epoch when the best score was achieved.
         self.best_time = None
         self.best_epoch = None
+        # Per-epoch learning curve: list of (epoch, monitored validation metric).
+        self.history = []
 
     def on_fit_start(self, trainer, pl_module):
         """
@@ -185,6 +187,7 @@ class BestModelRestorer(pl.Callback):
         if current_score is None:
             # Metric not found, cannot update best score
             return
+        self.history.append((trainer.current_epoch, float(current_score)))
 
         if (
             (self.mode == "min" and current_score < self.best_score) or
