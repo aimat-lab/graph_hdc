@@ -57,9 +57,9 @@ cd "$FP"
 mkdir -p "$RUN"
 
 # pycomex decompresses cache files into a temporary file; the QM9 HDF caches are several GB each and
-# up to 12 runs load them at once, so keep these temp files on the large shared /home instead of the
-# node-local /tmp (and remove them at the end, also after a failed run).
-export TMPDIR="$RUN/tmp_$TAG"
+# up to 12 runs load them at once. KCIST compute nodes have a 3.5 TB local NVMe /tmp, so use a
+# per-job folder there (fast, and removed at the end, also after a failed run).
+export TMPDIR="/tmp/ex14_$TAG"
 mkdir -p "$TMPDIR"
 trap 'rm -rf "$TMPDIR"' EXIT
 
