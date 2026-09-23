@@ -15,10 +15,13 @@
 #   smoke   warmup + hdf + gnn on the smoke_* command files, on one node.
 #   retry   re-run the command lines in RETRY_FILE.
 #
-# Examples (from the fingerprints folder):
-#   sbatch --job-name=ex14warm  --export=ALL,EX14_STAGE=warmup run_ex14_kcist.sbatch
-#   sbatch --job-name=ex14hdf   --dependency=afterok:<warm> --export=ALL,EX14_STAGE=hdf run_ex14_kcist.sbatch
-#   sbatch --job-name=ex14gnn   --dependency=afterok:<warm> --array=0-7 --export=ALL,EX14_STAGE=gnn run_ex14_kcist.sbatch
+# Examples (from the fingerprints folder). Pass the variables through the submitting environment, NOT
+# with --export=ALL,VAR=...: on KCIST the latter makes most nodes fail the job start with
+# "user env retrieval failed requeued held" (sbatch exports the submitting environment by default).
+#   EX14_STAGE=warmup sbatch --job-name=ex14warm run_ex14_kcist.sbatch
+#   EX14_STAGE=hdf sbatch --job-name=ex14hdf --dependency=afterok:<warm> run_ex14_kcist.sbatch
+#   EX14_STAGE=gnn sbatch --job-name=ex14gnn --dependency=afterok:<warm> --array=0-7 run_ex14_kcist.sbatch
+#   EX14_STAGE=gnn SHARD_ID=3 SHARD_COUNT=8 sbatch --job-name=ex14gnn3 run_ex14_kcist.sbatch   # one shard
 #
 # Every stage writes a joblog (index, exit code, seconds, worker) and a failed_<...>.txt with the
 # command lines that exited non-zero, which can be fed back via EX14_STAGE=retry RETRY_FILE=...
@@ -26,8 +29,8 @@
 # Resume after a timeout / kill / failures (no ex_14 job may be running): on the login node run
 #   python _slurm_ex_14.py missing
 # which writes the lines without a completed archive to _ex14/missing_{hdf,gnn}.txt, then re-submit
-#   ... --export=ALL,EX14_STAGE=hdf,HDF_FILE=_ex14/missing_hdf.txt,HDF_PRIMER_FILE=_ex14/missing_hdf_primer_count.txt
-#   ... --array=0-K --export=ALL,EX14_STAGE=gnn,GNN_FILE=_ex14/missing_gnn.txt
+#   EX14_STAGE=hdf HDF_FILE=_ex14/missing_hdf.txt HDF_PRIMER_FILE=_ex14/missing_hdf_primer_count.txt sbatch ...
+#   EX14_STAGE=gnn GNN_FILE=_ex14/missing_gnn.txt sbatch --array=0-K ...
 #
 # The warmup is short CPU work; submit it with e.g. --gres=gpu:0 --cpus-per-task=16 --mem=64G --time=02:00:00.
 #SBATCH --job-name=ex14
@@ -119,7 +122,8 @@ run_queue() {  # $1 = command file, $2 = number of workers, $3 = number of GPUs 
 }
 
 shard() {  # $1 = command file -> prints the path of this array task's shard of it
-    local count="${SLURM_ARRAY_TASK_COUNT:-1}" id="${SLURM_ARRAY_TASK_ID:-0}"
+    # SHARD_ID / SHARD_COUNT override the array variables, e.g. to (re)submit single shards as plain jobs.
+    local count="${SHARD_COUNT:-${SLURM_ARRAY_TASK_COUNT:-1}}" id="${SHARD_ID:-${SLURM_ARRAY_TASK_ID:-0}}"
     local out="$RUN/$(basename "$1" .txt)_shard_${id}_of_${count}.txt"
     awk -v n="$count" -v t="$id" '(NR - 1) % n == t' "$1" > "$out"
     echo "$out"
