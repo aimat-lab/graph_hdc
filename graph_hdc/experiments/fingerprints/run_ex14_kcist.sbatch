@@ -69,7 +69,7 @@ THREADS=$(( ${SLURM_CPUS_PER_TASK:-64} / NUM_WORKERS ))
 export OMP_NUM_THREADS="$THREADS" MKL_NUM_THREADS="$THREADS" OPENBLAS_NUM_THREADS="$THREADS" NUMEXPR_NUM_THREADS="$THREADS"
 export PYTHONWARNINGS=ignore
 # Three runs share each GPU; expandable segments reduce fragmentation of the shared memory.
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTORCH_ALLOC_CONF=expandable_segments:True
 
 # pycomex creates the namespace folder with a non-atomic "if not exists: mkdir", so concurrent first
 # runs of a module race; creating them up front removes the race.
