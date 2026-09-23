@@ -1,0 +1,42 @@
+# PyComex configuration: HDC + neural-network prediction of QM9 atomization energy.
+#
+# This reproduces the setup behind the QM9 learning curves in Ramakrishnan/Faber et al.
+# (out-of-sample MAE of atomization energy vs. number of training molecules): a graph
+# HDC encoder (HyperNet) turns each molecular graph into a hypervector "fingerprint",
+# which a neural network (`neural_net2`, a PyTorch-Lightning MLP) regresses onto the
+# target. The target is the atomization energy at 0 K, which in the ChemMatData
+# `qm9_smiles` dataset is TARGET_INDEX=15 ("U_0 atom - Atomization energy at 0K").
+pycomex: true
+
+extend: predict_molecules__hdc.py
+
+name: hdc_qm9_atomization
+
+description: |
+  HDC + NN prediction of QM9 atomization energy at 0 K (TARGET_INDEX=15).
+
+  The graph HDC encoder (HyperNet, continuous encoding) maps each molecule to a
+  fixed-size hypervector which the `neural_net2` MLP head regresses onto the
+  atomization energy. Sweeping NUM_TRAIN produces a learning curve comparable to
+  the QM9 atomization-energy learning curves in the literature.
+
+parameters:
+  DATASET_NAME: "qm9_smiles"
+  DATASET_NAME_ID: "qm9_smiles_atomization"
+  DATASET_TYPE: "regression"
+  TARGET_INDEX: 15          # U_0 atom - atomization energy at 0K
+
+  # -- HDC encoder --
+  EMBEDDING_SIZE: 2048
+  NUM_LAYERS: 2
+  ENCODING_MODE: "continuous"
+  DEVICE: "cpu"
+
+  # -- model --
+  MODELS: ["neural_net2"]
+
+  # -- data splitting (fixed held-out test set across all training sizes) --
+  NUM_DATA: 1.0
+  NUM_TEST: 10000
+  NUM_VAL: 0.1
+  NUM_TRAIN: 10000

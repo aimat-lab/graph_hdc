@@ -1,0 +1,28 @@
+# PyComex configuration file for BACE dataset Sherlock-fingerprint experiments
+pycomex: true
+
+extend: predict_molecules__sherlock.py
+
+name: sherlock_bace
+
+description: |
+  Sherlock-fingerprint (entropy-ranked, collision-free Morgan; SPECTRE, Xu et al.
+  2026) molecular property prediction on the BACE dataset.
+
+  BACE (Beta-secretase 1) is a binary classification dataset for binding results for
+  inhibitors of human β-secretase 1 (BACE-1).
+
+  Native paper configuration (radius 6, 16384 bits). For a size-matched comparison
+  against the Morgan / HDF columns, override FINGERPRINT_SIZE (e.g. 2048). Set
+  SHERLOCK_DICTIONARY_PATH to a dictionary fit on the external corpus (COCONUT+LOTUS)
+  for paper-faithful results; otherwise the dictionary is fit on this dataset's
+  training split (leakage-safe fallback).
+
+parameters:
+  DATASET_NAME: "bace"
+  DATASET_NAME_ID: "bace"
+  DATASET_TYPE: "binary"
+  NUM_TEST: 0.1
+  FINGERPRINT_SIZE: 16384
+  SHERLOCK_RADIUS: 6
+  SHERLOCK_DICTIONARY_PATH: "/media/ssd2/Programming/graph_hdc/data/sherlock/sherlock_r6_coconut_lotus_dict.pkl"

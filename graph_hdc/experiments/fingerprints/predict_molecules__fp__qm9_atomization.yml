@@ -1,0 +1,39 @@
+# PyComex configuration: Morgan-fingerprint + neural-network prediction of QM9
+# atomization energy. This is the same-pipeline baseline for
+# predict_molecules__hdc__qm9_atomization.yml: identical dataset, target, data
+# splits (same seeds), and neural-network head (`neural_net2`); the ONLY
+# difference is the molecular representation -- a Morgan/ECFP fingerprint instead
+# of the graph-HDC hypervector.
+#
+# Matched to the HDC setting for a fair comparison:
+#   FINGERPRINT_SIZE  = 2048  <-> HDC EMBEDDING_SIZE = 2048  (same #elements)
+#   FINGERPRINT_RADIUS = 2    <-> HDC NUM_LAYERS = 2         (same receptive field)
+pycomex: true
+
+extend: predict_molecules__fp.py
+
+name: fp_qm9_atomization
+
+description: |
+  Morgan-fingerprint + NN prediction of QM9 atomization energy at 0 K
+  (TARGET_INDEX=15). Same-pipeline baseline to the HDC learning curve.
+
+parameters:
+  DATASET_NAME: "qm9_smiles"
+  DATASET_NAME_ID: "qm9_smiles_atomization"
+  DATASET_TYPE: "regression"
+  TARGET_INDEX: 15          # U_0 atom - atomization energy at 0K
+
+  # -- Morgan fingerprint (matched to HDC size/depth) --
+  FINGERPRINT_TYPE: "morgan"
+  FINGERPRINT_SIZE: 2048
+  FINGERPRINT_RADIUS: 2
+
+  # -- model (identical to the HDC pipeline) --
+  MODELS: ["neural_net2"]
+
+  # -- data splitting (identical to the HDC pipeline) --
+  NUM_DATA: 1.0
+  NUM_TEST: 10000
+  NUM_VAL: 0.1
+  NUM_TRAIN: 10000
