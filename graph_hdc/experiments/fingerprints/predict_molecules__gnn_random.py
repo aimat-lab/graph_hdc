@@ -84,6 +84,9 @@ def process_dataset(e: Experiment,
     encoder (just like every HDF repetition draws a new random hypervector dictionary) and the variance
     across repetitions includes the variance due to the random initialization.
     """
+    # The encoding time covers the featurization of the molecules (as HDF's encode_time covers its
+    # graph conversion) plus the forward pass.
+    time_start = time.time()
     if e.NODE_FEATURES == 'hdf':
         for data in index_data_map.values():
             hdf_matched_graph(data)
@@ -106,7 +109,6 @@ def process_dataset(e: Experiment,
     e['encoder/num_params'] = sum(p.numel() for p in model.parameters())
     e.log(f'created random {e.GNN_ARCH} encoder with {e["encoder/num_params"]} parameters')
 
-    time_start = time.time()
     data_loader = DataLoader(
         build_pyg_list(index_data_map, indices),
         batch_size=e.ENCODE_BATCH_SIZE,

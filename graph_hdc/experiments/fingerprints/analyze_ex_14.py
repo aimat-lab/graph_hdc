@@ -211,8 +211,9 @@ def cost_table(records: list) -> str:
         if found:
             lines.append(' & '.join(out) + ' \\\\')
     lines += ['\\bottomrule', '\\end{tabular}',
-              '% median wall time in seconds: encoding of the whole dataset (HDF on CPU, random GNN on GPU) / '
-              'training until the best epoch (trained GNN, GPU)']
+              '% median wall time in seconds: featurization + encoding of the whole dataset (HDF on CPU, '
+              'random GNN on GPU; HDF only from the cache-building run of a dataset/seed, so QM9 is '
+              'reported under the gap target) / training until the best epoch (trained GNN, GPU)']
     return '\n'.join(lines) + '\n'
 
 

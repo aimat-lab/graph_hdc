@@ -161,11 +161,17 @@ def build(datasets: list, seeds: list, prefix: str, overrides: dict = {}) -> tup
 
 
 def expected_cost(variant: str, ds: tuple) -> int:
-    """Coarse cost class of a run, used to balance the array shards (higher = longer)."""
-    big = ds[4]
-    if variant.startswith('trained'):
-        return 3 if big else 1
-    return 2 if big else 0
+    """
+    Cost class of a run, used to balance the array shards (higher = longer). Every (variant, dataset
+    family) combination is its own class, so that the round-robin sharding splits each class evenly;
+    e.g. a trained QM9 run costs ~3.4x a trained COMPAS run and must not share a class with it.
+    """
+    trained = variant.startswith('trained')
+    if ds[1] == 'qm9_smiles':
+        return 5 if trained else 3
+    if ds[1] == 'compas_3x':
+        return 4 if trained else 2
+    return 1 if trained else 0
 
 
 def _write(name: str, lines: list):
