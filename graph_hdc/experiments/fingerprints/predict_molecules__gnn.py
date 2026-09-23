@@ -1,38 +1,21 @@
 import os
 import time
-import copy
 import random
-from torch import Tensor
-from typing import List, Any, Literal
+from typing import List, Any, Literal, Optional
 
 import torch
-import torch.nn as nn
 import umap
 import numpy as np
-import networkx as nx
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 from scipy.special import softmax
-from rdkit.Chem.Crippen import MolLogP
-from rich.pretty import pprint
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
-from chem_mat_data.processing import MoleculeProcessing, OneHotEncoder
-from rdkit import Chem
-from torchmetrics import R2Score, MeanAbsoluteError
-from torchmetrics import Accuracy, F1Score
-from torch_geometric.nn import GCNConv, GCN2Conv
-from torch_geometric.nn import GINConv
-from torch_geometric.nn import GATv2Conv
-from torch_geometric.nn.aggr import SumAggregation
-from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 
-# from visual_graph_datasets.data import nx_from_graph
-from graph_hdc.models import HyperNet
-from graph_hdc.special.molecules import graph_dict_from_mol
-from graph_hdc.special.molecules import make_molecule_node_encoder_map
-from chem_mat_data.main import pyg_data_list_from_graphs
+from graph_hdc.baselines.gnn import GNN_CLASSES
+from graph_hdc.baselines.gnn import hdf_matched_graph
+from graph_hdc.baselines.gnn import build_pyg_list
 
 
 # == DATASET PARAMETERS ==
@@ -60,6 +43,13 @@ MODELS: List[str] = [
     'gatv2',
 ]
 
+# :param NODE_FEATURES:
+#       Which node features the GNN receives. 'default' uses the full ChemMatData featurization of the
+#       dataset (element, hybridization, degree, H count, charge, aromaticity, ring membership, mass, Crippen
+#       contributions). 'hdf' restricts the input to exactly the atom attributes that the hyperdimensional
+#       fingerprint encodes (element, heavy-atom degree, implicit H count; no bond types), which makes the
+#       GNN comparison a test of the encoding mechanism rather than of the input features.
+NODE_FEATURES: Literal['default', 'hdf'] = 'default'
 # :param CONV_UNITS:
 #       A list of integers specifying the number of units in each convolutional layer of the GNN models.
 CONV_UNITS: List[int] = [128, 128, 128]
@@ -71,18 +61,18 @@ DENSE_UNITS: List[int] = [128, 64, 32]
 #       that are processed in parallel during the training of the model.
 BATCH_SIZE: int = 32
 # :param EPOCHS:
-#       The number of epochs to be used for the training of the model. This parameter determines the number of
-#       times the model will be trained on the entire dataset.
+#       The maximum number of training epochs. With early stopping enabled this is only an upper bound.
 EPOCHS: int = 200
+# :param EARLY_STOPPING_PATIENCE:
+#       Training stops once the validation metric has not improved for this many epochs. In any case, the
+#       weights of the epoch with the best validation metric are restored at the end of training. None
+#       (the default, which keeps older configs unchanged) always trains for the full number of EPOCHS;
+#       the GNN comparison (ex_14) uses 50 with EPOCHS=1000.
+EARLY_STOPPING_PATIENCE: Optional[int] = None
 # :param LEARNING_RATE:
 #       The learning rate to be used for the training of the model. This parameter determines the step size that
 #       is used to update the model parameters during training.
 LEARNING_RATE: float = 1e-4
-# :param DEVICE:
-#       The device to be used for the training of the model. This parameter can be set to 'cuda:0' to use the
-#       GPU for training, or to 'cpu' to use the CPU.
-DEVICE: str = "cuda:0" if torch.cuda.is_available() else "cpu"
-#DEVICE: str = "cpu"
 
 # == VISUALIZATION PARAMETERS ==
 
@@ -90,493 +80,6 @@ DEVICE: str = "cuda:0" if torch.cuda.is_available() else "cpu"
 #       A boolean flag that determines whether to plot the UMAP dimensionality reduction of the HDC vectors
 #       for the molecular graphs in the dataset.
 PLOT_UMAP: bool = False
-
-# == DATASET UTILITIES ==
-
-class LazyGraphDataset(torch.utils.data.Dataset):
-    """
-    Memory-efficient PyG dataset that creates Data objects on-the-fly
-    instead of pre-loading all graphs into memory.
-    """
-    def __init__(self, indices, data_map):
-        self.indices = indices
-        self.data_map = data_map
-        
-    def __len__(self):
-        return len(self.indices)
-        
-    def __getitem__(self, idx):
-        data_idx = self.indices[idx]
-        graph = self.data_map[data_idx]
-        # Convert single graph to PyG Data object on-the-fly
-        data_list = pyg_data_list_from_graphs([graph])
-        return data_list[0]
-
-# == GNN MODELS ==
-
-class BestModelRestorer(pl.Callback):
-    """
-    This class implements a PyTorch Lightning callback which will restore the model weights to 
-    that state which achieved the best validation loss observed during the training process.
-    
-    This is done by monitoring a specific metric (e.g. 'val_loss') and saving the model state
-    whenever the monitored metric improves. Using a hook at the very end of the training, the 
-    model weights are reset to that best state.
-    """
-    
-    def __init__(self, 
-                 monitor: str = "val_loss", 
-                 mode: str = "min"
-                 ) -> None:
-        super().__init__()
-        self.monitor = monitor
-        if mode not in ["min", "max"]:
-            raise ValueError("mode must be 'min' or 'max'.")
-        self.mode = mode
-
-        # This will variable will store the best score observed during the training.
-        self.best_score: float = None
-        # This will store the best model state dict associated with the best score.
-        self.best_state_dict = None
-        # This will store the time when the best score was achieved.
-        self.best_time = None
-
-    def on_fit_start(self, trainer, pl_module):
-        """
-        Initialize the best score before starting the fit.
-        """
-        if self.mode == "min":
-            self.best_score = float("inf")
-        else:
-            self.best_score = -float("inf")
-        self.best_state_dict = None
-
-    def on_validation_end(self, trainer, pl_module):
-        """
-        Called at the end of the validation loop. We check whether the monitored metric i
-        mproved and if so, store the model state dict and log the improvement.
-        """
-        metrics = trainer.callback_metrics
-        current_score = metrics.get(self.monitor)
-
-        if current_score is None:
-            # Metric not found, cannot update best score
-            return
-
-        if (
-            (self.mode == "min" and current_score < self.best_score) or
-            (self.mode == "max" and current_score > self.best_score)
-        ):
-            # Update best score and store model weights
-            self.best_score = current_score
-            self.best_state_dict = {
-                k: copy.deepcopy(v.detach().cpu().clone())
-                for k, v in pl_module.state_dict().items()
-            }
-            self.best_time = time.time()
-
-            # Log the new best score (if the logger is available)
-            if trainer.logger is not None:
-                trainer.logger.log_metrics({f"best_{self.monitor}": current_score}, step=trainer.global_step)
-                
-            # You could also print a message if desired:
-            trainer.print(
-                f"New best {self.monitor}={current_score:.4f} at step={trainer.global_step}."
-            )
-
-    def on_train_end(self, trainer, pl_module):
-        """
-        At the end of training, restore the model to the best recorded state.
-        """
-        if self.best_state_dict is not None:
-            current_state_dict = pl_module.state_dict()
-            pl_module.load_state_dict(self.best_state_dict)
-            trainer.print(
-                f"Restored the best model with {self.monitor}={self.best_score:.4f}."
-            )
-
-
-class GnnModel(pl.LightningModule):
-    
-    def __init__(self,
-                 output_type: Literal['classification', 'regression'],
-                 output_dim: int,
-                 learning_rate: float = 1e-3,
-                 **kwargs):
-        
-        super().__init__(**kwargs)
-        self.output_type = output_type
-        self.output_dim = output_dim
-        self.learning_rate = learning_rate
-        
-        self.lay_act = nn.LeakyReLU()
-        
-        # Define loss function based on output type
-        if output_type == 'classification':
-            self.loss = nn.CrossEntropyLoss()
-        elif output_type == 'regression':
-            self.loss = nn.MSELoss()
-            
-        if self.output_type == 'regression':
-            self.metric = MeanAbsoluteError(num_outputs=output_dim)
-        elif self.output_type == 'classification':
-            self.metric = nn.CrossEntropyLoss()
-    
-    def training_step(self, data, batch_idx):
-        """
-        Training step for the GIN model.
-
-        :param data: A batch of graph data.
-        :param batch_idx: The index of the batch.
-        :return: The training loss for the batch.
-        """
-        # Forward pass
-        output = self(data)
-
-        # Compute loss
-        loss = self.loss(output, data.y.view(output.shape))
-
-        # Log training loss
-        self.log('train_loss', loss, prog_bar=True, on_epoch=True)
-        return loss
-    
-    def validation_step(self, data, batch_idx):
-        """
-        Validation step for the GIN model.
-
-        :param data: A batch of graph data.
-        :param batch_idx: The index of the batch.
-        :return: The validation loss for the batch.
-        """
-        # Forward pass
-        output = self(data)
-        target = data.y.view(output.shape)
-
-        # Compute loss
-        loss = self.loss(output, data.y.view(output.shape))
-        # Log validation loss
-        self.log('val_loss', loss, prog_bar=True, on_epoch=True)
-        
-        if self.output_type == 'regression':
-            metric = self.metric(output, target)
-        elif self.output_type == 'classification':
-            output = torch.softmax(output, dim=1)
-            labels = torch.argmax(target, dim=1)
-            metric = self.metric(output, labels)
-
-        self.log('val_metric', metric, prog_bar=True, on_epoch=True)
-
-        return loss
-
-    def configure_optimizers(self):
-        """
-        Configures the optimizer for training.
-
-        :return: The optimizer to be used for training.
-        """
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        return optimizer
-    
-    def configure_callbacks(self):
-        """
-        Configures the callbacks for training.
-
-        :return: A list of callbacks to be used during training.
-        """
-        self.model_restorer = BestModelRestorer(
-            monitor='val_metric',
-            mode='min'
-        )
-        return [self.model_restorer]
-
-
-class GcnModel(GnnModel):
-    """
-    A Graph Convolutional Network (GCN) implemented using PyTorch Lightning.
-    
-    This model is designed for both classification and regression tasks on graph-structured data.
-    """
-
-    def __init__(self,
-                 input_dim: int,
-                 output_dim: int,
-                 output_type: Literal['classification', 'regression'],
-                 conv_units: List[int] = [64, 64, 64],
-                 dense_units: List[int] = [64, 32],
-                 learning_rate: float = 1e-3,
-                 ):
-        """
-        Initializes the GCN model with the given parameters.
-
-        :param input_dim: The dimensionality of the input node features.
-        :param output_dim: The dimensionality of the output predictions.
-        :param output_type: The type of the output, either 'classification' or 'regression'.
-        :param conv_units: A list of integers specifying the number of units in each convolutional layer.
-        :param dense_units: A list of integers specifying the number of units in each dense (fully connected) layer.
-        """
-        super(GcnModel, self).__init__(
-            output_type=output_type,
-            output_dim=output_dim,
-            learning_rate=learning_rate
-        )
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.conv_units = conv_units
-        self.dense_units = dense_units
-
-        self.lay_embedd = nn.Linear(input_dim, conv_units[0])
-
-        # Create convolutional layers
-        self.conv_layers = nn.ModuleList()
-        prev_units = conv_units[0]
-        for units in conv_units:
-            lay = GCNConv(
-                in_channels=prev_units, 
-                out_channels=units,
-                improved=True,
-                add_self_loops=True,
-            )
-            self.conv_layers.append(lay)
-            prev_units = units
-
-        # Pooling layer
-        self.lay_pool = SumAggregation()
-
-        # Create dense layers
-        self.dense_layers = nn.ModuleList()
-        for units in dense_units:
-            lay = nn.Sequential(
-                nn.Linear(prev_units, units),
-                nn.BatchNorm1d(units),
-            )
-            self.dense_layers.append(lay)
-            prev_units = units
-
-        # Final output layer
-        lay_final = nn.Linear(prev_units, output_dim)
-        self.dense_layers.append(lay_final)
-
-    def forward(self, data):
-        """
-        Forward pass through the GCN model.
-
-        :param data: A batch of graph data.
-        :return: The output predictions of the model.
-        """
-        x, edge_index = data.x, data.edge_index
-        node_emb = self.lay_embedd(x)
-        for conv in self.conv_layers:
-            node_emb = conv(node_emb, edge_index)
-            node_emb = self.lay_act(node_emb)
-
-        # Pooling node embeddings to get graph-level embedding
-        graph_emb = self.lay_pool(node_emb, data.batch)
-        out = graph_emb
-
-        # Pass through dense layers
-        for dense in self.dense_layers[:-1]:
-            out = dense(out)
-            out = self.lay_act(out)
-
-        # Final output layer
-        out = self.dense_layers[-1](out)
-
-        return out
-    
-    
-class GinModel(GnnModel):
-    """
-    A Graph Isomorphism Network (GIN) implemented using PyTorch Lightning.
-    
-    This model is designed for both classification and regression tasks on graph-structured data.
-    """
-
-    def __init__(self,
-                    input_dim: int,
-                    output_dim: int,
-                    output_type: Literal['classification', 'regression'],
-                    conv_units: List[int] = [64, 64, 64],
-                    dense_units: List[int] = [64, 32],
-                    learning_rate: float = 1e-3,
-                    ):
-        """
-        Initializes the GIN model with the given parameters.
-
-        :param input_dim: The dimensionality of the input node features.
-        :param output_dim: The dimensionality of the output predictions.
-        :param output_type: The type of the output, either 'classification' or 'regression'.
-        :param conv_units: A list of integers specifying the number of units in each convolutional layer.
-        :param dense_units: A list of integers specifying the number of units in each dense (fully connected) layer.
-        """
-        super(GinModel, self).__init__(
-            output_type=output_type,
-            output_dim=output_dim,
-            learning_rate=learning_rate
-        )
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.conv_units = conv_units
-        self.dense_units = dense_units
-
-        self.lay_embedd = nn.Linear(input_dim, conv_units[0])
-
-        # Create convolutional layers
-        self.conv_layers = nn.ModuleList()
-        prev_units = conv_units[0]
-        for units in conv_units:
-            lay = GINConv(
-                nn.Sequential(
-                    nn.Linear(prev_units, 2 * units),
-                    nn.BatchNorm1d(2 * units),
-                    nn.LeakyReLU(),
-                    nn.Linear(2 * units, units),
-                    #nn.Dropout1d(0.1),
-                ),
-                train_eps=True,
-            )
-            self.conv_layers.append(lay)
-            prev_units = units
-
-        # Pooling layer
-        self.lay_pool = SumAggregation()
-
-        # Create dense layers
-        self.dense_layers = nn.ModuleList()
-        for units in dense_units:
-            lay = nn.Sequential(
-                nn.Linear(prev_units, units),
-                nn.BatchNorm1d(units),
-            )
-            self.dense_layers.append(lay)
-            prev_units = units
-
-        # Final output layer
-        lay_final = nn.Linear(prev_units, output_dim)
-        self.dense_layers.append(lay_final)
-
-    def forward(self, data):
-        """
-        Forward pass through the GIN model.
-
-        :param data: A batch of graph data.
-        :return: The output predictions of the model.
-        """
-        x, edge_index = data.x, data.edge_index
-        node_emb = self.lay_embedd(x)
-        for conv in self.conv_layers:
-            node_emb = conv(node_emb, edge_index)
-            node_emb = self.lay_act(node_emb)
-
-        # Pooling node embeddings to get graph-level embedding
-        graph_emb = self.lay_pool(node_emb, data.batch)
-        out = graph_emb
-
-        # Pass through dense layers
-        for dense in self.dense_layers[:-1]:
-            out = dense(out)
-            out = self.lay_act(out)
-
-        # Final output layer
-        out = self.dense_layers[-1](out)
-
-        return out
-    
-    
-class Gatv2Model(GnnModel):
-    """
-    A Graph Attention Network v2 (GATv2) implemented using PyTorch Lightning.
-    
-    This model is designed for both classification and regression tasks on graph-structured data.
-    """
-
-    def __init__(self,
-                    input_dim: int,
-                    output_dim: int,
-                    output_type: Literal['classification', 'regression'],
-                    conv_units: List[int] = [64, 64, 64],
-                    dense_units: List[int] = [64, 32],
-                    learning_rate: float = 1e-3,
-                    ):
-        """
-        Initializes the GATv2 model with the given parameters.
-
-        :param input_dim: The dimensionality of the input node features.
-        :param output_dim: The dimensionality of the output predictions.
-        :param output_type: The type of the output, either 'classification' or 'regression'.
-        :param conv_units: A list of integers specifying the number of units in each convolutional layer.
-        :param dense_units: A list of integers specifying the number of units in each dense (fully connected) layer.
-        """
-        super(Gatv2Model, self).__init__(
-            output_type=output_type,
-            output_dim=output_dim,
-            learning_rate=learning_rate
-        )
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.conv_units = conv_units
-        self.dense_units = dense_units
-
-        self.lay_embedd = nn.Linear(input_dim, conv_units[0])
-
-        # Create convolutional layers
-        self.conv_layers = nn.ModuleList()
-        prev_units = conv_units[0]
-        for units in conv_units:
-            lay = GATv2Conv(
-                in_channels=prev_units, 
-                out_channels=units,
-                heads=5,
-                concat=False,
-                dropout=0.0,
-                add_self_loops=True,
-            )
-            self.conv_layers.append(lay)
-            prev_units = units
-
-        # Pooling layer
-        self.lay_pool = SumAggregation()
-
-        # Create dense layers
-        self.dense_layers = nn.ModuleList()
-        for units in dense_units:
-            #lay = nn.Linear(prev_units, units)
-            lay = nn.Sequential(
-                nn.Linear(prev_units, units),
-                nn.BatchNorm1d(units),
-            )
-            self.dense_layers.append(lay)
-            prev_units = units
-
-        # Final output layer
-        lay_final = nn.Linear(prev_units, output_dim)
-        self.dense_layers.append(lay_final)
-
-    def forward(self, data):
-        """
-        Forward pass through the GATv2 model.
-
-        :param data: A batch of graph data.
-        :return: The output predictions of the model.
-        """
-        x, edge_index = data.x, data.edge_index
-        node_emb = self.lay_embedd(x)
-        for conv in self.conv_layers:
-            node_emb = conv(node_emb, edge_index)
-            node_emb = self.lay_act(node_emb)
-
-        # Pooling node embeddings to get graph-level embedding
-        graph_emb = self.lay_pool(node_emb, data.batch)
-        out = graph_emb
-
-        # Pass through dense layers
-        for dense in self.dense_layers[:-1]:
-            out = dense(out)
-            out = self.lay_act(out)
-
-        # Final output layer
-        out = self.dense_layers[-1](out)
-
-        return out
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -588,6 +91,74 @@ experiment = Experiment.extend(
 )
 
 
+def train_gnn(e: Experiment,
+              name: str,
+              index_data_map: dict,
+              train_indices: list[int],
+              ) -> Any:
+    """
+    Train the GNN of type ``name`` ('gcn', 'gin' or 'gatv2') end-to-end on the prediction target.
+
+    Like the ``neural_net2`` baseline, 5% of the training indices are held out as an internal validation
+    set. The weights of the epoch with the best validation metric are restored at the end, and training
+    stops early once that metric has not improved for EARLY_STOPPING_PATIENCE epochs. The training time
+    (up to the best epoch), the best epoch and the total number of epochs are recorded.
+    """
+    pl.seed_everything(e.SEED, workers=True)
+
+    num_val = max(2, int(0.05 * len(train_indices)))
+    val_indices_ = random.sample(train_indices, k=num_val)
+    train_indices = list(set(train_indices) - set(val_indices_))
+
+    # Get example graph for model initialization
+    example_graph = index_data_map[train_indices[0]]
+
+    data_loader_train = DataLoader(
+        build_pyg_list(index_data_map, train_indices),
+        batch_size=e.BATCH_SIZE,
+        shuffle=True,
+    )
+    data_loader_val = DataLoader(
+        build_pyg_list(index_data_map, val_indices_),
+        batch_size=e.BATCH_SIZE,
+        shuffle=False,
+    )
+
+    model = GNN_CLASSES[name](
+        input_dim=example_graph['node_attributes'].shape[1],
+        output_dim=example_graph['graph_labels'].shape[0],
+        output_type=e.DATASET_TYPE,
+        conv_units=e.CONV_UNITS,
+        dense_units=e.DENSE_UNITS,
+        learning_rate=e.LEARNING_RATE,
+        early_stopping_patience=e.EARLY_STOPPING_PATIENCE,
+    )
+
+    # Use PyTorch Lightning's Trainer to handle the training loop. Default checkpointing is disabled
+    # because parallel runs would race on the shared ./checkpoints folder; best-state selection is done
+    # in memory by the BestModelRestorer callback instead.
+    time_start = time.time()
+    trainer = pl.Trainer(
+        max_epochs=e.EPOCHS,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+    )
+    trainer.fit(model, data_loader_train, data_loader_val)
+
+    # best_time is None only if the validation metric never improved (e.g. NaN); keep the run anyway
+    best_time = model.model_restorer.best_time
+    e[f'train_time/{name}'] = (best_time if best_time is not None else time.time()) - time_start
+    e[f'best_epoch/{name}'] = model.model_restorer.best_epoch
+    e[f'epochs/{name}'] = trainer.current_epoch
+    e.log(f'trained {name} for {trainer.current_epoch} epochs, best epoch {model.model_restorer.best_epoch}')
+
+    model.eval()
+
+    # Return the trained model
+    return model
+
+
 @experiment.hook('train_model__gcn', replace=False, default=True)
 def train_model__gcn(e: Experiment,
                      index_data_map: dict,
@@ -596,194 +167,32 @@ def train_model__gcn(e: Experiment,
                      ) -> Any:
     """
     This hook is called during the training period of the experiment to train a model of the "gcn" type.
-    ---
-    In this specific implementation, the data is first converted into PyTorch Geometric Data objects and then
-    used to train a Graph Convolutional Network (GCN) model for the given number of EPOCHS. The trained model 
-    is then returned. 
     """
-    num_val = max(2, int(0.05 * len(train_indices)))
-    val_indices_ = random.sample(train_indices, k=num_val)
-    train_indices = list(set(train_indices) - set(val_indices_))
-    
-    # Get example graph for model initialization
-    example_graph = index_data_map[train_indices[0]]
-    
-    # Create memory-efficient datasets
-    train_dataset = LazyGraphDataset(train_indices, index_data_map)
-    val_dataset = LazyGraphDataset(val_indices_, index_data_map)
-    
-    # Create DataLoaders with optimized settings
-    data_loader_train = DataLoader(
-        train_dataset, 
-        batch_size=e.BATCH_SIZE, 
-        shuffle=True,
-        num_workers=4,
-        prefetch_factor=2,
-        pin_memory=True
-    )
-    data_loader_val = DataLoader(
-        val_dataset, 
-        batch_size=e.BATCH_SIZE, 
-        shuffle=False,
-        num_workers=4,
-        prefetch_factor=2,
-        pin_memory=True
-    )
-    
-    # Initialize the GCN model with the appropriate input and output dimensions
-    model = GcnModel(
-        input_dim=example_graph['node_attributes'].shape[1],
-        output_dim=example_graph['graph_labels'].shape[0],
-        output_type=e.DATASET_TYPE,
-        conv_units=e.CONV_UNITS,
-        dense_units=e.DENSE_UNITS,
-        learning_rate=e.LEARNING_RATE,
-    )
-    
-    # Use PyTorch Lightning's Trainer to handle the training loop
-    time_start = time.time()
-    trainer = pl.Trainer(max_epochs=e.EPOCHS, logger=False)
-    trainer.fit(model, data_loader_train, data_loader_val)
-    
-    time_end = model.model_restorer.best_time
-    e['train_time/gcn'] = time_end - time_start
-        
-    model.eval()
-        
-    # Return the trained model
-    return model
+    return train_gnn(e, 'gcn', index_data_map, train_indices)
 
 
 @experiment.hook('train_model__gin', replace=False, default=True)
 def train_model__gin(e: Experiment,
-                        index_data_map: dict,
-                        train_indices: list[int],
-                        val_indices: list[int],
-                        ) -> Any:
+                     index_data_map: dict,
+                     train_indices: list[int],
+                     val_indices: list[int],
+                     ) -> Any:
     """
     This hook is called during the training period of the experiment to train a model of the "gin" type.
-    ---
-    In this specific implementation, the data is first converted into PyTorch Geometric Data objects and then
-    used to train a Graph Isomorphism Network (GIN) model for the given number of EPOCHS. The trained model 
-    is then returned. 
     """
-    num_val = max(2, int(0.05 * len(train_indices)))
-    val_indices_ = random.sample(train_indices, k=num_val)
-    train_indices = list(set(train_indices) - set(val_indices_))
-    
-    # Get example graph for model initialization
-    example_graph = index_data_map[train_indices[0]]
-    
-    # Create memory-efficient datasets
-    train_dataset = LazyGraphDataset(train_indices, index_data_map)
-    val_dataset = LazyGraphDataset(val_indices_, index_data_map)
-    
-    # Create DataLoaders with optimized settings
-    data_loader_train = DataLoader(
-        train_dataset, 
-        batch_size=e.BATCH_SIZE, 
-        shuffle=True,
-        num_workers=4,
-        prefetch_factor=2,
-        pin_memory=True
-    )
-    data_loader_val = DataLoader(
-        val_dataset, 
-        batch_size=e.BATCH_SIZE, 
-        shuffle=False,
-        num_workers=4,
-        prefetch_factor=2,
-        pin_memory=True
-    )
-    
-    # Initialize the GIN model with the appropriate input and output dimensions
-    model = GinModel(
-        input_dim=example_graph['node_attributes'].shape[1],
-        output_dim=example_graph['graph_labels'].shape[0],
-        output_type=e.DATASET_TYPE,
-        conv_units=e.CONV_UNITS,
-        dense_units=e.DENSE_UNITS,
-        learning_rate=e.LEARNING_RATE,
-    )
-    
-    # Use PyTorch Lightning's Trainer to handle the training loop
-    time_start = time.time()
-    trainer = pl.Trainer(max_epochs=e.EPOCHS, logger=False)
-    trainer.fit(model, data_loader_train, data_loader_val)
-        
-    time_end = model.model_restorer.best_time
-    e['train_time/gin'] = time_end - time_start
-        
-    model.eval()
-        
-    # Return the trained model
-    return model
+    return train_gnn(e, 'gin', index_data_map, train_indices)
 
 
 @experiment.hook('train_model__gatv2', replace=False, default=True)
 def train_model__gatv2(e: Experiment,
-                        index_data_map: dict,
-                        train_indices: list[int],
-                        val_indices: list[int],
-                        ) -> Any:
+                       index_data_map: dict,
+                       train_indices: list[int],
+                       val_indices: list[int],
+                       ) -> Any:
     """
     This hook is called during the training period of the experiment to train a model of the "gatv2" type.
-    ---
-    In this specific implementation, the data is first converted into PyTorch Geometric Data objects and then
-    used to train a Graph Attention Network v2 (GATv2) model for the given number of EPOCHS. The trained model 
-    is then returned. 
     """
-    num_val = max(2, int(0.05 * len(train_indices)))
-    val_indices_ = random.sample(train_indices, k=num_val)
-    train_indices = list(set(train_indices) - set(val_indices_))
-    
-    # Get example graph for model initialization
-    example_graph = index_data_map[train_indices[0]]
-    
-    # Create memory-efficient datasets
-    train_dataset = LazyGraphDataset(train_indices, index_data_map)
-    val_dataset = LazyGraphDataset(val_indices_, index_data_map)
-    
-    # Create DataLoaders with optimized settings
-    data_loader_train = DataLoader(
-        train_dataset, 
-        batch_size=e.BATCH_SIZE, 
-        shuffle=True,
-        num_workers=4,
-        prefetch_factor=2,
-        pin_memory=False
-    )
-    data_loader_val = DataLoader(
-        val_dataset, 
-        batch_size=e.BATCH_SIZE, 
-        shuffle=False,
-        num_workers=4,
-        prefetch_factor=2,
-        pin_memory=False
-    )
-    
-    # Initialize the GATv2 model with the appropriate input and output dimensions
-    model = Gatv2Model(
-        input_dim=example_graph['node_attributes'].shape[1],
-        output_dim=example_graph['graph_labels'].shape[0],
-        output_type=e.DATASET_TYPE,
-        conv_units=e.CONV_UNITS,
-        dense_units=e.DENSE_UNITS,
-        learning_rate=e.LEARNING_RATE,
-    )
-    
-    # Use PyTorch Lightning's Trainer to handle the training loop
-    time_start = time.time()
-    trainer = pl.Trainer(max_epochs=e.EPOCHS, logger=False)
-    trainer.fit(model, data_loader_train, data_loader_val)
-        
-    time_end = model.model_restorer.best_time
-    e['train_time/gatv2'] = time_end - time_start
-        
-    model.eval()
-        
-    # Return the trained model
-    return model
+    return train_gnn(e, 'gatv2', index_data_map, train_indices)
 
 
 @experiment.hook('predict_model', replace=True, default=False)
@@ -792,22 +201,19 @@ def predict_model(e: Experiment,
                   model: Any,
                   indices: list[int],
                   ) -> np.ndarray:
-    
-    # Use memory-efficient dataset for prediction
-    pred_dataset = LazyGraphDataset(indices, index_data_map)
+
+    model.eval()
     data_loader = DataLoader(
-        pred_dataset, 
-        batch_size=e.BATCH_SIZE, 
+        build_pyg_list(index_data_map, indices),
+        batch_size=e.BATCH_SIZE,
         shuffle=False,
-        num_workers=4,
-        prefetch_factor=2,
-        pin_memory=True
     )
     y_pred = []
-    for data in data_loader:
-        out = model(data).detach().cpu().numpy()
-        y_pred.extend(out.tolist())
-        
+    with torch.no_grad():
+        for data in data_loader:
+            out = model(data.to(model.device)).cpu().numpy()
+            y_pred.extend(out.tolist())
+
     y_pred = np.array(y_pred)
     return y_pred
 
@@ -819,7 +225,7 @@ def predict_model_proba(e: Experiment,
                         indices: list[int],
                         y_pred: np.ndarray,
                         ) -> np.ndarray:
-    
+
     y_proba = softmax(y_pred, axis=1)
     return y_proba
 
@@ -828,11 +234,17 @@ def predict_model_proba(e: Experiment,
 def process_dataset(e: Experiment,
                     index_data_map: dict
                     ) -> None:
-    
+    """
+    The GNNs operate on the graphs directly, so there is no fixed vector representation. The
+    placeholder "graph_features" only exist because the base experiment expects them. If NODE_FEATURES
+    is 'hdf', the node and edge features are replaced by the HDF-matched featurization.
+    """
     for index, data in index_data_map.items():
+        if e.NODE_FEATURES == 'hdf':
+            hdf_matched_graph(data)
         data['graph_features'] = np.zeros((e.CONV_UNITS[-1],))
-        
-        
+
+
 @experiment.hook('after_dataset', replace=False, default=False)
 def after_dataset(e: Experiment,
                   index_data_map: dict,

@@ -843,7 +843,11 @@ def train_model__neural_net2(e: Experiment,
     """
     This hook trains a PytorchLightning neural network model.
     """
-    
+    # Seed python, numpy and torch so that the internal validation split, the weight initialization and
+    # the batch order are reproducible for a given SEED (and the internal validation split is identical
+    # to the one of the end-to-end GNNs, which seed the same way).
+    pl.seed_everything(e.SEED, workers=True)
+
     num_val = max(2, int(0.05 * len(train_indices)))
     val_indices_ = random.sample(train_indices, k=num_val)
     train_indices = list(set(train_indices) - set(val_indices_))
@@ -1293,6 +1297,7 @@ def experiment(e: Experiment):
     )
     time_end = time.time()
     duration = time_end - time_start
+    e['process_time'] = duration
     e.log(f'processed dataset after {duration:.2f} seconds')
     
     ## --- exporting the converted dataset ---
@@ -1360,6 +1365,9 @@ def experiment(e: Experiment):
         )
         time_end = time.time()
         duration = time_end - time_start
+        # Total wall time of the training hook, recorded uniformly for every model (some hooks record
+        # their own "train_time/<model>", e.g. only up to the best epoch; that one is kept as is).
+        e[f'fit_time/{model_name}'] = duration
         e.log(f'training done after {duration:.2f} seconds')
         
         # ~ model evaluation

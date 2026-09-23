@@ -207,6 +207,9 @@ def process_dataset(
         # representations, the encoder can operate.
         e.log('processing molecules into graphs...')
         time_start_process = time.time()
+        # Time of the actual encoding (graph conversion + HyperNet forward pass), excluding dataset
+        # statistics, cache (de)serialization and model saving. Only set on a cache miss.
+        time_start_encode = time.time()
         graphs: List[dict] = []
         for c, (index, data) in enumerate(index_data_map.items()):
             
@@ -240,6 +243,7 @@ def process_dataset(
             
         time_end_forward = time.time()
         e.log(f'done the model forward pass after {time_end_forward - time_start_forward:.2f} seconds')
+        e['encode_time'] = time_end_forward - time_start_encode
             
         return index_data_map
     
