@@ -88,6 +88,10 @@ def iter_archives(prefix: str):
         # the first round of trained GNNs used early stopping and was replaced by full-length runs
         if module == 'predict_molecules__gnn' and params.get('EARLY_STOPPING_PATIENCE') is not None:
             continue
+        # the HDF arm was re-run with bidirectional message passing (the corrected HDF, 2026-10-08); the archives
+        # of the first, one-directional round (no BIDIRECTIONAL parameter or False) are ignored
+        if module == 'predict_molecules__hdc' and params.get('BIDIRECTIONAL') is not True:
+            continue
         data_path = os.path.join(os.path.dirname(meta_path), 'experiment_data.json')
         if not os.path.exists(data_path):
             continue

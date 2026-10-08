@@ -35,8 +35,15 @@ Stages / command files written to ``_ex14/`` (executed by ``run_ex14_kcist.sbatc
                   (status 'done') archive yet, e.g. after a timeout, a node failure or failed runs. Submit
                   them with HDF_FILE / GNN_FILE pointing to these files (see run_ex14_kcist.sbatch).
 
+* ``hdf_bidir.txt``  written by the ``hdf_bidir`` mode: the HDF runs again with bidirectional message passing
+                  (the corrected HDF, 2026-10-08), same prefix, seeds, splits (the cached dataset order) and
+                  primer layout as ``hdf.txt``; run them with the hdf stage of run_ex14_kcist.sbatch
+                  (HDF_FILE=_ex14/hdf_bidir.txt HDF_PRIMER_FILE=_ex14/hdf_bidir_primer_count.txt). Their encoding
+                  caches carry a ``__bidir`` suffix, and analyze_ex_14.py uses only the bidirectional HDF archives.
+
 Usage:
     python _slurm_ex_14.py            # writes the full command files
+    python _slurm_ex_14.py hdf_bidir  # writes hdf_bidir.txt / hdf_bidir_primer_count.txt
     python _slurm_ex_14.py smoke      # writes the smoke command files only
     python _slurm_ex_14.py missing    # writes missing_hdf.txt / missing_gnn.txt (no jobs may be running!)
     python _slurm_ex_14.py missing smoke  # the same for the smoke files / ex_14_smoke prefix
@@ -256,6 +263,11 @@ def write_missing(prefix: str, stem: str = ''):
 
 
 if __name__ == '__main__':
+    if 'hdf_bidir' in sys.argv[1:]:
+        hdf_primer, hdf_rest, _ = build(DATASETS, SEEDS, PREFIX, overrides={'hdf': {'BIDIRECTIONAL': True}})
+        _write('hdf_bidir.txt', hdf_primer + hdf_rest)
+        _write('hdf_bidir_primer_count.txt', [str(len(hdf_primer))])
+        sys.exit(0)
     if 'missing' in sys.argv[1:]:
         if 'smoke' in sys.argv[1:]:
             write_missing('ex_14_smoke', stem='smoke_')
