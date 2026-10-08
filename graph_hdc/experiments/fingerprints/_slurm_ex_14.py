@@ -2,20 +2,30 @@
 Command-file generator for Experiment 14 (ex_14): comparison of HDF with graph neural networks.
 
 Answers reviewer comment R2.1 ("missing GNN baseline"): do the gains of hyperdimensional fingerprints come
-from the HDC algebra or simply from multi-hop message passing? Every one of the three standard PyG GNNs
-(GCN, GIN, GATv2) is evaluated in two ways and compared against HDF with the same downstream models:
+from the HDC algebra or simply from multi-hop message passing? Two standard PyG GNNs (GIN, GATv2) are each
+evaluated in two ways and compared against HDF with the same downstream models:
 
 * ``trained``  the GNN trained end-to-end on the target (fixed standard config: 3x128 conv, dense head
-               128-64-32, lr 1e-4, batch 32) for the full 1000 epochs (no early stopping), after which the
-               weights of the epoch with the best validation metric are restored. (A first round with early
-               stopping, patience 50, stopped the extensive QM9 targets after ~50 epochs on the noisy
-               validation plateau of the fixed learning rate; those archives are ignored by the analysis.)
+               128-64-32, lr 1e-4 with cosine decay to 1e-6 over the epochs, batch 32) for the full 1000
+               epochs (no early stopping), after which the weights of the epoch with the best validation
+               metric are restored.
 * ``random``   the same architecture with frozen random weights (width 2048 = HDF dimension, 2 layers =
                HDF depth, sum pooling) as a training-free encoder, followed by the MLP and KNN.
 * ``hdf``      HDF (D=2048, L=2; the ex_13 fixed config) followed by the same MLP and KNN.
 
 All GNNs receive exactly the atom information HDF encodes (NODE_FEATURES='hdf'). The MLP is the ex_13
 fixed-table MLP ((100, 100), lr 1e-3); KNN uses k=5 with Euclidean distance for every representation.
+
+Rounds under the same prefix (only archives with the CURRENT settings count, here and in analyze_ex_14.py):
+
+1. trained GNNs with early stopping (patience 50), which stopped the extensive QM9 targets after ~50 epochs
+   on the noisy validation plateau of the fixed learning rate; replaced by full-length runs.
+2. up to 2026-10-07: one-directional HDF message passing, implicit hydrogen counts (for HDF and for the GNN
+   inputs: 0 for every bracket atom such as [nH] or [NH3+]), constant learning rate, and GCN as a third
+   architecture.
+3. 2026-10-08 (current): all variants re-run with bidirectional HDF message passing, total hydrogen counts
+   everywhere and the cosine learning-rate decay; GCN dropped (the SI reports GIN and GATv2 only). The
+   splits are unchanged: they come from the cached, seed-independent dataset order (``load__`` caches).
 
 Stages / command files written to ``_ex14/`` (executed by ``run_ex14_kcist.sbatch``):
 
@@ -29,21 +39,15 @@ Stages / command files written to ``_ex14/`` (executed by ``run_ex14_kcist.sbatc
                   then gets the same number (+-1) of runs of each cost class, and each node's work queue
                   starts its longest runs first.
 * ``gnn_trained.txt``  only the trained-GNN lines of gnn.txt (same cost ordering), for re-running them.
-* ``smoke_*``     the same pipeline on FreeSolv with seed 0, all 7 variants, few epochs.
+* ``smoke_*``     the same pipeline on FreeSolv with seed 0, all 5 variants, few epochs.
 
 * ``missing_*``   written by the ``missing`` mode: the lines of hdf.txt / gnn.txt that have no completed
-                  (status 'done') archive yet, e.g. after a timeout, a node failure or failed runs. Submit
-                  them with HDF_FILE / GNN_FILE pointing to these files (see run_ex14_kcist.sbatch).
-
-* ``hdf_bidir.txt``  written by the ``hdf_bidir`` mode: the HDF runs again with bidirectional message passing
-                  (the corrected HDF, 2026-10-08), same prefix, seeds, splits (the cached dataset order) and
-                  primer layout as ``hdf.txt``; run them with the hdf stage of run_ex14_kcist.sbatch
-                  (HDF_FILE=_ex14/hdf_bidir.txt HDF_PRIMER_FILE=_ex14/hdf_bidir_primer_count.txt). Their encoding
-                  caches carry a ``__bidir`` suffix, and analyze_ex_14.py uses only the bidirectional HDF archives.
+                  (status 'done') archive with the CURRENT settings yet, e.g. after a timeout, a node failure
+                  or failed runs. Submit them with HDF_FILE / GNN_FILE pointing to these files (see
+                  run_ex14_kcist.sbatch).
 
 Usage:
     python _slurm_ex_14.py            # writes the full command files
-    python _slurm_ex_14.py hdf_bidir  # writes hdf_bidir.txt / hdf_bidir_primer_count.txt
     python _slurm_ex_14.py smoke      # writes the smoke command files only
     python _slurm_ex_14.py missing    # writes missing_hdf.txt / missing_gnn.txt (no jobs may be running!)
     python _slurm_ex_14.py missing smoke  # the same for the smoke files / ex_14_smoke prefix
@@ -78,7 +82,7 @@ DATASETS = [
     ('qm9_zpve',           'qm9_smiles',   9,    {}, True),
 ]
 
-ARCHS = ['gcn', 'gin', 'gatv2']
+ARCHS = ['gin', 'gatv2']
 
 # Downstream models on top of the fixed representations (HDF and random GNN).
 DOWNSTREAM = {
@@ -91,20 +95,42 @@ DOWNSTREAM = {
 }
 
 VARIANTS = {
-    # module suffix, params (MODELS for the trained GNN is filled in per architecture)
+    # module suffix, params (MODELS for the trained GNN is filled in per architecture). The HDF encoder
+    # settings (BIDIRECTIONAL, HYDROGEN_COUNT) are added by _command.
     'hdf': ('hdc', {
         'EMBEDDING_SIZE': 2048, 'NUM_LAYERS': 2, 'ENCODING_MODE': 'continuous', 'DEVICE': 'cpu',
         **DOWNSTREAM,
     }),
     'random': ('gnn_random', {
-        'EMBEDDING_SIZE': 2048, 'NUM_LAYERS': 2, 'NODE_FEATURES': 'hdf', 'DEVICE': 'cuda',
+        'EMBEDDING_SIZE': 2048, 'NUM_LAYERS': 2, 'NODE_FEATURES': 'hdf', 'HYDROGEN_COUNT': 'total',
+        'DEVICE': 'cuda',
         **DOWNSTREAM,
     }),
     'trained': ('gnn', {
-        'NODE_FEATURES': 'hdf', 'CONV_UNITS': [128, 128, 128], 'DENSE_UNITS': [128, 64, 32],
-        'BATCH_SIZE': 32, 'LEARNING_RATE': 1e-4, 'EPOCHS': 1000, 'EARLY_STOPPING_PATIENCE': None,
+        'NODE_FEATURES': 'hdf', 'HYDROGEN_COUNT': 'total', 'CONV_UNITS': [128, 128, 128],
+        'DENSE_UNITS': [128, 64, 32], 'BATCH_SIZE': 32, 'LEARNING_RATE': 1e-4, 'LR_SCHEDULE': 'cosine',
+        'LR_MIN': 1e-6, 'EPOCHS': 1000, 'EARLY_STOPPING_PATIENCE': None,
     }),
 }
+
+# The settings that distinguish the current round from the earlier ones under the same prefix (see the
+# module docstring), per module suffix. Only archives with all of them count as done (missing mode) and
+# enter the analysis (analyze_ex_14.py); build() checks that every generated command has them.
+CURRENT = {
+    'hdc': {'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total'},
+    'gnn_random': {'HYDROGEN_COUNT': 'total'},
+    'gnn': {'HYDROGEN_COUNT': 'total', 'LR_SCHEDULE': 'cosine', 'EARLY_STOPPING_PATIENCE': None},
+}
+
+
+def is_current(module: str, params: dict) -> bool:
+    """Whether a run of ``predict_molecules__<module>`` with these parameters belongs to the current round."""
+    return all(params.get(key) == value for key, value in CURRENT.get(module, {}).items())
+
+
+def params_of_line(line: str) -> dict:
+    """The parameters of a command line, as Python values."""
+    return {k: eval(v) for k, v in re.findall(r'--(\w+)="([^"]*)"', line)}
 
 
 def _command(module: str, prefix: str, seed: int, ds: tuple, params: dict) -> str:
@@ -167,6 +193,9 @@ def build(datasets: list, seeds: list, prefix: str, overrides: dict = {}) -> tup
     for seed in seeds:
         for ds in datasets:
             cmds = variant_commands(ds, seed, prefix, overrides)
+            for line in cmds.values():
+                # the missing mode and the analysis count only archives of the current round
+                assert is_current(identity_of_line(line)[0], params_of_line(line)), f'not CURRENT: {line}'
             key = (ds[1], seed)
             (hdf_rest if key in primed else hdf_primer).append(cmds.pop('hdf'))
             primed.add(key)
@@ -200,23 +229,17 @@ def _write(name: str, lines: list):
 def identity_of_line(line: str) -> tuple:
     """(module, NOTE, SEED, arch) of a command line; arch is GNN_ARCH or MODELS[0] ('' for HDF)."""
     module = re.search(r'predict_molecules__(\w+)\.py', line).group(1)
-    params = dict(re.findall(r'--(\w+)="([^"]*)"', line))
-    note, seed = eval(params['NOTE']), eval(params['SEED'])
+    params = params_of_line(line)
+    note, seed = params['NOTE'], params['SEED']
     if module == 'gnn_random':
-        return module, note, seed, eval(params['GNN_ARCH'])
+        return module, note, seed, params['GNN_ARCH']
     if module == 'gnn':
-        return module, note, seed, eval(params['MODELS'])[0]
+        return module, note, seed, params['MODELS'][0]
     return module, note, seed, ''
 
 
-def is_superseded(meta_path: str, params: dict) -> bool:
-    """Trained-GNN archives of the first round with early stopping, replaced by the full-length runs."""
-    module = os.path.basename(os.path.dirname(os.path.dirname(meta_path)))
-    return module == 'predict_molecules__gnn' and params.get('EARLY_STOPPING_PATIENCE') is not None
-
-
 def completed_identities(prefix: str) -> set:
-    """Identities of all runs with a completed (status 'done') archive of the given prefix."""
+    """Identities of all runs of the current round (CURRENT) with a completed (status 'done') archive."""
     done = set()
     for meta_path in glob.glob(os.path.join(PATH, 'results', 'predict_molecules__*', '*', 'experiment_meta.json')):
         try:
@@ -226,12 +249,23 @@ def completed_identities(prefix: str) -> set:
         params = {k: v.get('value') for k, v in meta.get('parameters', {}).items() if isinstance(v, dict)}
         if params.get('__PREFIX__') != prefix or meta.get('status') != 'done' or meta.get('has_error'):
             continue
-        if is_superseded(meta_path, params):
-            continue
         module = os.path.basename(os.path.dirname(os.path.dirname(meta_path))).replace('predict_molecules__', '')
+        if not is_current(module, params):
+            continue
         arch = params.get('GNN_ARCH') if module == 'gnn_random' else (params['MODELS'][0] if module == 'gnn' else '')
         done.add((module, params['NOTE'], params['SEED'], arch))
     return done
+
+
+def hdf_cache_name(params: dict) -> str:
+    """Name of the HDF encoding cache of a full-data predict_molecules__hdc run (as built in that module)."""
+    name = (f"hdc_{params['DATASET_NAME']}__seed_{params['SEED']}__size_{params['EMBEDDING_SIZE']}"
+            f"__depth_{params['NUM_LAYERS']}")
+    if params.get('BIDIRECTIONAL'):
+        name += '__bidir'
+    if params.get('HYDROGEN_COUNT') == 'total':
+        name += '__totalh'
+    return name
 
 
 def write_missing(prefix: str, stem: str = ''):
@@ -253,8 +287,7 @@ def write_missing(prefix: str, stem: str = ''):
     missing_gnn = [l for l in gnn if identity_of_line(l) not in done]
 
     for line in missing_primer:
-        params = dict(re.findall(r'--(\w+)="([^"]*)"', line))
-        key = f"hdc_{eval(params['DATASET_NAME'])}__seed_{eval(params['SEED'])}__size_{eval(params['EMBEDDING_SIZE'])}__depth_{eval(params['NUM_LAYERS'])}"
+        key = hdf_cache_name(params_of_line(line))
         for path in glob.glob(os.path.join(PATH, '.cache', key + '.pkl*')):
             print(f'removing possibly incomplete cache {os.path.basename(path)}')
             os.remove(path)
@@ -265,11 +298,6 @@ def write_missing(prefix: str, stem: str = ''):
 
 
 if __name__ == '__main__':
-    if 'hdf_bidir' in sys.argv[1:]:
-        hdf_primer, hdf_rest, _ = build(DATASETS, SEEDS, PREFIX, overrides={'hdf': {'BIDIRECTIONAL': True}})
-        _write('hdf_bidir.txt', hdf_primer + hdf_rest)
-        _write('hdf_bidir_primer_count.txt', [str(len(hdf_primer))])
-        sys.exit(0)
     if 'missing' in sys.argv[1:]:
         if 'smoke' in sys.argv[1:]:
             write_missing('ex_14_smoke', stem='smoke_')

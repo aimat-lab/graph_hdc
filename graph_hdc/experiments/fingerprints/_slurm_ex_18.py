@@ -6,7 +6,8 @@ MinHash sketches for similarity search; for machine learning their authors use t
 (SECFP for MHFP, folded MAP4), which take the same place in the pipeline as Morgan
 (``graph_hdc/baselines/minhash_fps.py``). This experiment compares, with the MLP only:
 
-* ``hdf``     HDF, D=2048, L=2, continuous encoding, bidirectional message passing (the corrected HDF)
+* ``hdf``     HDF, D=2048, L=2, continuous encoding, bidirectional message passing and total hydrogen counts
+              (the corrected HDF)
 * ``morgan``  Morgan / ECFP4, 2048 bits, radius 2 (the established baseline, as a reference point)
 * ``secfp``   SECFP6 = folded MHFP6, 2048 bits, radius 3 (the MHFP default)
 * ``map4``    folded MAP4, 2048 bits, radius 2 (the MAP4 default)
@@ -89,7 +90,7 @@ MLP = {
 }
 # (variant name, experiment module suffix, parameters)
 REPRESENTATIONS = [
-    ('hdf', 'hdc', {**VARIANTS['hdf'][1], **MLP, 'BIDIRECTIONAL': True}),
+    ('hdf', 'hdc', {**VARIANTS['hdf'][1], **MLP, 'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total'}),
     ('morgan', 'fp', {**MLP, 'FINGERPRINT_TYPE': 'morgan', 'FINGERPRINT_SIZE': 2048, 'FINGERPRINT_RADIUS': 2}),
     ('secfp', 'fp', {**MLP, 'FINGERPRINT_TYPE': 'secfp', 'FINGERPRINT_SIZE': 2048, 'FINGERPRINT_RADIUS': 3}),
     ('map4', 'fp', {**MLP, 'FINGERPRINT_TYPE': 'map4', 'FINGERPRINT_SIZE': 2048, 'FINGERPRINT_RADIUS': 2}),

@@ -40,7 +40,7 @@ def collect(prefix: str):
     completed archives of the prefix, plus the split indices per (variant, dataset, seed). A newer archive of
     the same run (e.g. a retry) replaces an older one. Unreadable archives are reported and skipped.
     """
-    archives = []
+    archives, skipped_old_hdf = [], 0
     for module in ('predict_molecules__hdc', 'predict_molecules__fp'):
         for meta_path in glob.glob(os.path.join(RESULTS, module, '*', 'experiment_meta.json')):
             try:
@@ -51,10 +51,14 @@ def collect(prefix: str):
             # a killed or timed-out run keeps status 'running' (and has_error False), so require 'done'
             if params.get('__PREFIX__') != prefix or meta.get('status') != 'done' or meta.get('has_error'):
                 continue
-            if module == 'predict_molecules__hdc' and params.get('BIDIRECTIONAL') is not True:
-                print(f'skipping one-directional HDF archive {os.path.dirname(meta_path)}')
+            # only the corrected HDF encoder: bidirectional message passing and total hydrogen counts
+            if module == 'predict_molecules__hdc' and (params.get('BIDIRECTIONAL') is not True
+                                                       or params.get('HYDROGEN_COUNT') != 'total'):
+                skipped_old_hdf += 1
                 continue
             archives.append((meta.get('start_time') or 0, module, params, os.path.dirname(meta_path)))
+    if skipped_old_hdf:
+        print(f'skipped {skipped_old_hdf} HDF archive(s) of the old encoder (one-directional or implicit hydrogens)')
 
     records, splits = {}, {}
     for _, module, params, folder in sorted(archives, key=lambda a: a[0]):

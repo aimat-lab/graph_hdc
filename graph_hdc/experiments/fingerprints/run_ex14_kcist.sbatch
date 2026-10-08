@@ -22,6 +22,8 @@
 #   EX14_STAGE=hdf sbatch --job-name=ex14hdf --dependency=afterok:<warm> run_ex14_kcist.sbatch
 #   EX14_STAGE=gnn sbatch --job-name=ex14gnn --dependency=afterok:<warm> --array=0-7 run_ex14_kcist.sbatch
 #   EX14_STAGE=gnn SHARD_ID=3 SHARD_COUNT=8 sbatch --job-name=ex14gnn3 run_ex14_kcist.sbatch   # one shard
+# With a pinned checkout (see CODE below), submit from its fingerprints folder with CODE set, e.g.
+#   CODE=$HOME/Programming/graph_hdc_ex14 EX14_STAGE=hdf sbatch --job-name=ex14hdf run_ex14_kcist.sbatch
 #
 # Every stage writes a joblog (index, exit code, seconds, worker) and a failed_<...>.txt with the
 # command lines that exited non-zero, which can be fed back via EX14_STAGE=retry RETRY_FILE=...
@@ -47,7 +49,13 @@ EX14_STAGE="${EX14_STAGE:?set EX14_STAGE=warmup|hdf|gnn|smoke|retry}"
 NUM_GPUS="${NUM_GPUS:-4}"
 NUM_WORKERS="${NUM_WORKERS:-12}"          # 3 concurrent runs per RTX 4090
 REPO="${REPO:-$HOME/Programming/graph_hdc}"
-FP="$REPO/graph_hdc/experiments/fingerprints"
+# CODE: the checkout that runs (default: REPO). Pin it to one commit (a detached git worktree of REPO), so
+# that pulls on the shared checkout cannot change the code during a run; the venv of REPO is used, with CODE
+# first on PYTHONPATH. Results and command files are then those of CODE. Link CODE's fingerprints/.cache to
+# REPO's: the load__ caches there fix the dataset order and thereby the splits of all rounds.
+CODE="${CODE:-$REPO}"
+VENV="${VENV:-$REPO/.venv}"
+FP="$CODE/graph_hdc/experiments/fingerprints"
 EX14="$FP/_ex14"
 RUN="$EX14/run"
 TAG="${SLURM_JOB_ID:-local}_${SLURM_ARRAY_TASK_ID:-0}"
@@ -55,8 +63,9 @@ GNN_FILE="${GNN_FILE:-$EX14/gnn.txt}"
 HDF_FILE="${HDF_FILE:-$EX14/hdf.txt}"
 HDF_PRIMER_FILE="${HDF_PRIMER_FILE:-$EX14/hdf_primer_count.txt}"
 
-source "$REPO/.venv/bin/activate"
-cd "$FP"
+source "$VENV/bin/activate"
+export PYTHONPATH="$CODE"
+cd "$FP" || { echo "!!! no folder $FP"; exit 2; }
 mkdir -p "$RUN"
 
 # pycomex decompresses cache files into a temporary file; the QM9 HDF caches are several GB each and
@@ -79,9 +88,31 @@ export PYTORCH_ALLOC_CONF=expandable_segments:True
 mkdir -p results/predict_molecules__gnn results/predict_molecules__gnn_random results/predict_molecules__hdc
 
 echo "=== ex14 STAGE=$EX14_STAGE host=$(hostname) tag=$TAG workers=$NUM_WORKERS threads=$THREADS $(date) ==="
-python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), 'ndev', torch.cuda.device_count())"
+git -C "$CODE" log -1 --format='code: %h %s' || true
+python -c "import graph_hdc, torch; print('graph_hdc from', graph_hdc.__file__, '| torch', torch.__version__, 'cuda', torch.cuda.is_available(), 'ndev', torch.cuda.device_count())"
+python -c "import os, sys, graph_hdc; sys.exit(not os.path.realpath(graph_hdc.__file__).startswith(os.path.realpath('$CODE') + os.sep))" \
+    || { echo "!!! graph_hdc is not imported from CODE=$CODE"; exit 2; }
 
 NUM_FAILED=0
+
+need() {  # $@ = files the stage reads; a missing command file would make the stage a silent no-op
+    local f
+    for f in "$@"; do
+        [ -e "$f" ] || { echo "!!! missing $f (generate it with: python _slurm_ex_14.py [smoke])"; exit 2; }
+    done
+}
+
+check_caches() {  # $@ = command files -> exit if the shared load__/stats_ cache of one of their datasets is missing
+    # Without the warmup's caches every run would rebuild them: the runs would race on the same cache files,
+    # and load__ fixes the dataset order and thereby the splits (a rebuilt one changes them). With a pinned
+    # CODE this means that its .cache is not linked to REPO's.
+    local name c
+    for name in $(cat "$@" | grep -o -- "--DATASET_NAME=\"'[a-z0-9_]*'\"" | sed -E "s/.*'([a-z0-9_]+)'.*/\1/" | sort -u); do
+        for c in load__ stats_; do
+            [ -s ".cache/$c$name.pkl.gz" ] || { echo "!!! missing .cache/$c$name.pkl.gz (run the warmup / link .cache)"; exit 2; }
+        done
+    done
+}
 
 run_queue() {  # $1 = command file, $2 = number of workers, $3 = number of GPUs (0 = CPU only)
     local file="$1" nworkers="$2" ngpus="$3"
@@ -148,17 +179,25 @@ run_hdf() {  # $1 = hdf command file, $2 = file holding the primer line count
 
 case "$EX14_STAGE" in
     warmup)
+        need "$EX14/warmup.txt"
         run_queue "$EX14/warmup.txt" 8 0 ;;
     hdf)
+        need "$HDF_FILE" "$HDF_PRIMER_FILE"
+        check_caches "$HDF_FILE"
         run_hdf "$HDF_FILE" "$HDF_PRIMER_FILE" ;;
     gnn)
+        need "$GNN_FILE"
+        check_caches "$GNN_FILE"
         run_queue "$(shard "$GNN_FILE")" "$NUM_WORKERS" "$NUM_GPUS" ;;
     smoke)
+        need "$EX14/smoke_warmup.txt" "$EX14/smoke_hdf.txt" "$EX14/smoke_hdf_primer_count.txt" "$EX14/smoke_gnn.txt"
         run_queue "$EX14/smoke_warmup.txt" 8 0
         run_hdf "$EX14/smoke_hdf.txt" "$EX14/smoke_hdf_primer_count.txt"
         run_queue "$EX14/smoke_gnn.txt" "$NUM_WORKERS" "$NUM_GPUS" ;;
     retry)
-        run_queue "${RETRY_FILE:?set RETRY_FILE}" "$NUM_WORKERS" "$NUM_GPUS" ;;
+        need "${RETRY_FILE:?set RETRY_FILE}"
+        check_caches "$RETRY_FILE"
+        run_queue "$RETRY_FILE" "$NUM_WORKERS" "$NUM_GPUS" ;;
     *)
         echo "unknown EX14_STAGE=$EX14_STAGE"; exit 2 ;;
 esac

@@ -17,8 +17,11 @@ all tests of a table can never reach significance with 10 seeds: the smallest po
 for a lower / higher MAE than HDF, filled for p<0.05 (corrected) and hollow otherwise.
 
 The two comparison tables are the tabulars of the SI (mean over the seeds with the standard deviation set
-below in gray, best mean per target in bold) and report only the architectures in TABLE_ARCHS. All three
-architectures stay in the CSV.
+below in gray, best mean per target in bold) and report the architectures in TABLE_ARCHS.
+
+Only archives of the current round count (``is_current`` of _slurm_ex_14.py: bidirectional HDF, total hydrogen
+counts for HDF and the GNN inputs, cosine learning-rate decay for the trained GNNs); the archives of the
+earlier rounds under the same prefix are skipped, and their number is printed.
 
 Usage:
     python analyze_ex_14.py                 # prefix ex_14_gnn
@@ -36,11 +39,14 @@ from collections import defaultdict
 import numpy as np
 from scipy.stats import wilcoxon
 
+from _slurm_ex_14 import is_current
+
 PATH = os.path.dirname(os.path.abspath(__file__))
 RESULTS = os.path.join(PATH, 'results')
 OUT = os.path.join(PATH, '_ex14')
 
-ARCHS = ['gcn', 'gin', 'gatv2']
+# GCN was part of the earlier rounds only (dropped from the paper and from the 2026-10-08 re-run)
+ARCHS = ['gin', 'gatv2']
 ARCH_LABEL = {'gcn': 'GCN', 'gin': 'GIN', 'gatv2': 'GATv2'}
 DATASET_ORDER = [
     'freesolv_hfe', 'aqsoldb_logs', 'lipophilicity_logD', 'bace_ic50', 'hopv15_pce',
@@ -68,12 +74,16 @@ ROW_META = {
     'qm9_energy': ('QM9', '$U_0$', 'Ha', 1.0),
     'qm9_zpve': ('QM9', 'ZPVE', 'mHa', 1000.0),
 }
-# The SI reports GIN and GATv2 only; GCN was run as well and remains in the CSV.
+# architectures in the SI tables
 TABLE_ARCHS = ['gin', 'gatv2']
 
 
-def iter_archives(prefix: str):
-    """Yield (module, meta, params, data) for every completed archive whose __PREFIX__ equals ``prefix``."""
+def iter_archives(prefix: str, skipped: dict = None):
+    """
+    Yield (module, meta, params, data) for every completed archive of the current round whose __PREFIX__
+    equals ``prefix``. If ``skipped`` is a dict, it counts the archives of earlier rounds per module.
+    """
+    skipped = defaultdict(int) if skipped is None else skipped
     pattern = os.path.join(RESULTS, 'predict_molecules__*', '*', 'experiment_meta.json')
     for meta_path in glob.glob(pattern):
         module = os.path.basename(os.path.dirname(os.path.dirname(meta_path)))
@@ -85,12 +95,10 @@ def iter_archives(prefix: str):
         # a killed or timed-out run keeps status 'running' (and has_error False), so require 'done'
         if params.get('__PREFIX__') != prefix or meta.get('status') != 'done' or meta.get('has_error'):
             continue
-        # the first round of trained GNNs used early stopping and was replaced by full-length runs
-        if module == 'predict_molecules__gnn' and params.get('EARLY_STOPPING_PATIENCE') is not None:
-            continue
-        # the HDF arm was re-run with bidirectional message passing (the corrected HDF, 2026-10-08); the archives
-        # of the first, one-directional round (no BIDIRECTIONAL parameter or False) are ignored
-        if module == 'predict_molecules__hdc' and params.get('BIDIRECTIONAL') is not True:
+        # only the current round (see _slurm_ex_14.py): the earlier rounds under the same prefix (early stopping;
+        # one-directional HDF, implicit hydrogen counts, constant learning rate, GCN) are ignored
+        if not is_current(module.replace('predict_molecules__', ''), params):
+            skipped[module] = skipped.get(module, 0) + 1
             continue
         data_path = os.path.join(os.path.dirname(meta_path), 'experiment_data.json')
         if not os.path.exists(data_path):
@@ -102,17 +110,20 @@ def iter_archives(prefix: str):
         yield module, meta, params, data
 
 
-def collect(prefix: str) -> list:
+def collect(prefix: str, splits: dict = None) -> list:
     """
     Flatten the archives into records ``{variant, arch, model, dataset, seed, mae, r2, ...}``.
 
     variant is 'hdf', 'random' or 'trained'; model is the downstream model ('neural_net2', 'k_neighbors')
     or 'end2end' for the trained GNN. Duplicates of (variant, arch, model, dataset, seed), e.g. from a
-    retried run, keep the newest archive.
+    retried run, keep the newest archive. If ``splits`` is a dict, it receives the (train, val, test)
+    indices of every kept run under the key (variant, arch, dataset, seed).
     """
-    records = {}
+    records, skipped = {}, {}
     # oldest first, so that a newer archive of the same run (e.g. a retry) overwrites an older one
-    archives = sorted(iter_archives(prefix), key=lambda t: t[1].get('start_time') or 0)
+    archives = sorted(iter_archives(prefix, skipped), key=lambda t: t[1].get('start_time') or 0)
+    if skipped:
+        print('skipped archives of earlier rounds: ' + ', '.join(f'{m} {n}' for m, n in sorted(skipped.items())))
     for module, meta, params, data in archives:
         metrics = data.get('metrics', {})
         if module == 'predict_molecules__hdc':
@@ -143,7 +154,32 @@ def collect(prefix: str) -> list:
             }
             k = (rec['variant'], rec['arch'], rec['model'], rec['dataset'], rec['seed'])
             records[k] = rec
+        if splits is not None:
+            indices = data.get('indices', {})
+            splits[(variant, arch, params['NOTE'], params['SEED'])] = tuple(
+                tuple(indices.get(part) or ()) for part in ('train', 'val', 'test'))
     return list(records.values())
+
+
+def check_splits(splits: dict) -> int:
+    """
+    Number of (dataset, seed) pairs whose runs used different (or unrecorded) splits. The paired tests need
+    HDF and every GNN variant on the same split, which they all get from the cached dataset order (load__).
+    """
+    by_pair = {}
+    for (variant, arch, dataset, seed), split in splits.items():
+        by_pair.setdefault((dataset, seed), {})[f'{variant}{"_" + arch if arch else ""}'] = split
+    mismatches = 0
+    for (dataset, seed), runs in sorted(by_pair.items()):
+        missing = sorted(name for name, split in runs.items() if not split[2])
+        if missing or len(set(runs.values())) > 1:
+            mismatches += 1
+            groups = {}
+            for name, split in runs.items():
+                groups.setdefault(split, []).append(name)
+            print(f'SPLIT MISMATCH: {dataset} seed {seed}: ' + ' | '.join(sorted(', '.join(sorted(g)) for g in groups.values()))
+                  + (f' (no recorded test indices: {missing})' if missing else ''))
+    return mismatches
 
 
 def load_csv(path: str) -> list:
@@ -280,7 +316,8 @@ def convergence(records: list) -> str:
                 continue
             best = [r['best_epoch'] for r in recs]
             stop = [r['epochs'] for r in recs]
-            # best epoch in the last 10% of training: the run might still have been improving
+            # best epoch in the last 10% of training: with a constant learning rate a sign that the run might still
+            # have been improving; with the cosine decay (current round) expected, as the rate is smallest there
             hit_cap = sum(1 for b in best if b >= 900)
             lines.append(f'{dataset}\t{a}\t{len(recs)}\t{np.median(best):.0f}\t{max(best)}\t'
                          f'{np.median(stop):.0f}\t{max(stop)}\t{hit_cap}')
@@ -293,8 +330,10 @@ def main(prefix: str, csv_path: str = None):
         records = load_csv(csv_path)
         print(f'loaded {len(records)} records from {csv_path}')
     else:
-        records = collect(prefix)
+        splits = {}
+        records = collect(prefix, splits)
         print(f'collected {len(records)} records for prefix "{prefix}"')
+        print(f'split check: {check_splits(splits)} mismatching (dataset, seed) pairs')
     if not records:
         return
 

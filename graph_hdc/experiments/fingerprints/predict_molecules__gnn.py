@@ -66,9 +66,23 @@ EPOCHS: int = 200
 # :param EARLY_STOPPING_PATIENCE:
 #       Training stops once the validation metric has not improved for this many epochs. In any case, the
 #       weights of the epoch with the best validation metric are restored at the end of training. None
-#       (the default, which keeps older configs unchanged) always trains for the full number of EPOCHS;
-#       the GNN comparison (ex_14) uses 50 with EPOCHS=1000.
+#       (the default, which keeps older configs unchanged) always trains for the full number of EPOCHS,
+#       as the GNN comparison (ex_14) does.
 EARLY_STOPPING_PATIENCE: Optional[int] = None
+# :param LR_SCHEDULE:
+#       None keeps the learning rate constant at LEARNING_RATE (the default, which keeps older configs
+#       unchanged). 'cosine' decays it from LEARNING_RATE to LR_MIN over EPOCHS (cosine annealing, stepped
+#       once per epoch); the GNN comparison (ex_14) uses it. The best-validation weights are restored either way.
+LR_SCHEDULE: Optional[str] = None
+# :param LR_MIN:
+#       The final learning rate of the cosine schedule.
+LR_MIN: float = 1e-6
+# :param HYDROGEN_COUNT:
+#       For NODE_FEATURES='hdf': how the hydrogen count of each atom is determined, as the HYDROGEN_COUNT of
+#       the HDF experiment modules. 'total' counts all bonded hydrogens (RDKit GetTotalNumHs, the corrected HDF
+#       encoder); 'implicit' only the implicit ones (0 for atoms written in brackets such as [nH] or [NH3+];
+#       the behavior before this parameter existed).
+HYDROGEN_COUNT: str = 'total'
 # :param LEARNING_RATE:
 #       The learning rate to be used for the training of the model. This parameter determines the step size that
 #       is used to update the model parameters during training.
@@ -100,8 +114,9 @@ def train_gnn(e: Experiment,
     Train the GNN of type ``name`` ('gcn', 'gin' or 'gatv2') end-to-end on the prediction target.
 
     Like the ``neural_net2`` baseline, 5% of the training indices are held out as an internal validation
-    set. The weights of the epoch with the best validation metric are restored at the end, and training
-    stops early once that metric has not improved for EARLY_STOPPING_PATIENCE epochs. The training time
+    set. The weights of the epoch with the best validation metric are restored at the end; if
+    EARLY_STOPPING_PATIENCE is set, training stops early once that metric has not improved for that many
+    epochs, and with LR_SCHEDULE='cosine' the learning rate decays to LR_MIN over EPOCHS. The training time
     (up to the best epoch), the best epoch and the total number of epochs are recorded.
     """
     pl.seed_everything(e.SEED, workers=True)
@@ -132,6 +147,9 @@ def train_gnn(e: Experiment,
         dense_units=e.DENSE_UNITS,
         learning_rate=e.LEARNING_RATE,
         early_stopping_patience=e.EARLY_STOPPING_PATIENCE,
+        lr_schedule=e.LR_SCHEDULE,
+        lr_min=e.LR_MIN,
+        epochs=e.EPOCHS,
     )
 
     # Use PyTorch Lightning's Trainer to handle the training loop. Default checkpointing is disabled
@@ -151,6 +169,8 @@ def train_gnn(e: Experiment,
     e[f'train_time/{name}'] = (best_time if best_time is not None else time.time()) - time_start
     e[f'best_epoch/{name}'] = model.model_restorer.best_epoch
     e[f'epochs/{name}'] = trainer.current_epoch
+    # learning rate after the last epoch (LR_MIN with the cosine schedule), a record that the schedule ran
+    e[f'final_lr/{name}'] = trainer.optimizers[0].param_groups[0]['lr']
     # learning curve: (epoch, validation metric) for every epoch
     e[f'history/{name}'] = model.model_restorer.history
     e.log(f'trained {name} for {trainer.current_epoch} epochs, best epoch {model.model_restorer.best_epoch}')
@@ -239,11 +259,12 @@ def process_dataset(e: Experiment,
     """
     The GNNs operate on the graphs directly, so there is no fixed vector representation. The
     placeholder "graph_features" only exist because the base experiment expects them. If NODE_FEATURES
-    is 'hdf', the node and edge features are replaced by the HDF-matched featurization.
+    is 'hdf', the node and edge features are replaced by the HDF-matched featurization (hydrogen counts
+    as HYDROGEN_COUNT says).
     """
     for index, data in index_data_map.items():
         if e.NODE_FEATURES == 'hdf':
-            hdf_matched_graph(data)
+            hdf_matched_graph(data, hydrogens=e.HYDROGEN_COUNT)
         data['graph_features'] = np.zeros((e.CONV_UNITS[-1],))
 
 

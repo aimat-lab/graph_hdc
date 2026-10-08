@@ -43,6 +43,11 @@ NUM_LAYERS: int = 2
 #       'hdf' restricts the input node features to the atom attributes that HDF encodes (element, heavy
 #       atom degree, implicit H count; no bond types). 'default' uses the full ChemMatData featurization.
 NODE_FEATURES: Literal['default', 'hdf'] = 'hdf'
+# :param HYDROGEN_COUNT:
+#       For NODE_FEATURES='hdf': how the hydrogen count of each atom is determined, as the HYDROGEN_COUNT of
+#       the HDF experiment modules. 'total' counts all bonded hydrogens (RDKit GetTotalNumHs, the corrected HDF
+#       encoder); 'implicit' only the implicit ones (the behavior before this parameter existed).
+HYDROGEN_COUNT: str = 'total'
 # :param ENCODE_BATCH_SIZE:
 #       The number of graphs per batch during the encoding forward pass. Kept small because a width-2048
 #       GATv2 materializes several (num_edges x 5 * 2048) tensors: a batch of 512 COMPAS graphs needs ~16 GB,
@@ -89,7 +94,7 @@ def process_dataset(e: Experiment,
     time_start = time.time()
     if e.NODE_FEATURES == 'hdf':
         for data in index_data_map.values():
-            hdf_matched_graph(data)
+            hdf_matched_graph(data, hydrogens=e.HYDROGEN_COUNT)
 
     indices = list(index_data_map.keys())
     example_graph = index_data_map[indices[0]]

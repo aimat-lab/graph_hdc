@@ -38,11 +38,11 @@ from graph_hdc.special.molecules import make_molecule_node_encoder_map_cont
 HDF_ATOMS: List[int] = [
     int(z) for z in inspect.signature(make_molecule_node_encoder_map_cont).parameters['atoms'].default
 ]
-# HDF encodes the heavy-atom degree and the number of implicit hydrogens with fractional power encoders
-# of size 10, so we one-hot the same range (values above are clipped into the last bucket).
+# HDF encodes the heavy-atom degree and the number of hydrogens with fractional power encoders of size 10,
+# so we one-hot the same range (values above are clipped into the last bucket).
 HDF_MAX_DEGREE: int = 10
 HDF_MAX_HYDROGENS: int = 10
-# one-hot atoms (+1 "other" bucket), one-hot degree, one-hot implicit hydrogens
+# one-hot atoms (+1 "other" bucket), one-hot degree, one-hot hydrogens
 HDF_NODE_DIM: int = len(HDF_ATOMS) + 1 + HDF_MAX_DEGREE + HDF_MAX_HYDROGENS
 
 
@@ -52,7 +52,7 @@ def _one_hot(index: int, size: int) -> np.ndarray:
     return vec
 
 
-def hdf_matched_graph(graph: dict) -> dict:
+def hdf_matched_graph(graph: dict, hydrogens: str = 'implicit') -> dict:
     """
     Replace the node and edge features of the given ``graph`` dict with the information that is
     available to the hyperdimensional fingerprint (HDF) encoder, and nothing more.
@@ -64,7 +64,7 @@ def hdf_matched_graph(graph: dict) -> dict:
 
     - one-hot atomic number over the HDF atom list (plus one "other" bucket)
     - one-hot heavy-atom degree (the HDF ``node_degrees``)
-    - one-hot number of implicit hydrogens (the HDF ``node_valences``)
+    - one-hot number of hydrogens (the HDF ``node_valences``), counted as ``hydrogens`` says
 
     HDF does not encode bond types, so the edges only carry a constant dummy attribute. Edges are
     stored in both directions as required for PyG message passing.
@@ -77,9 +77,16 @@ def hdf_matched_graph(graph: dict) -> dict:
         graph['node_attributes'].shape  # (3, HDF_NODE_DIM)
 
     :param graph: A graph dict which contains at least the "graph_repr" SMILES string.
+    :param hydrogens: How the hydrogen count of each atom is determined, matching the ``hydrogens`` argument of
+        ``graph_dict_from_mol`` that the HDF encoder uses. "total" counts all bonded hydrogens
+        (``GetTotalNumHs``, the corrected HDF encoder); "implicit" only the implicit ones (``GetNumImplicitHs``,
+        0 for every atom written in brackets such as [nH], [NH3+] or [C@@H]; the behavior before this argument
+        existed, kept as the default).
 
     :returns: The same graph dict with updated node_attributes, edge_indices and edge_attributes.
     """
+    if hydrogens not in ('implicit', 'total'):
+        raise ValueError(f'unknown hydrogens mode "{hydrogens}", expected "implicit" or "total"')
     mol = Chem.MolFromSmiles(graph['graph_repr'])
 
     atom_index = {z: i for i, z in enumerate(HDF_ATOMS)}
@@ -88,7 +95,7 @@ def hdf_matched_graph(graph: dict) -> dict:
         node_attributes.append(np.concatenate([
             _one_hot(atom_index.get(atom.GetAtomicNum(), len(HDF_ATOMS)), len(HDF_ATOMS) + 1),
             _one_hot(atom.GetDegree(), HDF_MAX_DEGREE),
-            _one_hot(atom.GetNumImplicitHs(), HDF_MAX_HYDROGENS),
+            _one_hot(atom.GetTotalNumHs() if hydrogens == 'total' else atom.GetNumImplicitHs(), HDF_MAX_HYDROGENS),
         ]))
 
     edge_indices = []
@@ -227,6 +234,10 @@ class GnnModel(pl.LightningModule):
 
     :param early_stopping_patience: If not None, training stops once the validation metric has not
         improved for that many epochs. The best weights are always restored at the end of training.
+    :param lr_schedule: None keeps the learning rate constant. "cosine" decays it from ``learning_rate`` to
+        ``lr_min`` over ``epochs`` epochs (cosine annealing, stepped once per epoch).
+    :param lr_min: The final learning rate of the cosine schedule.
+    :param epochs: The number of training epochs; required by the cosine schedule.
     """
 
     def __init__(self,
@@ -237,8 +248,15 @@ class GnnModel(pl.LightningModule):
                  dense_units: List[int] = [64, 32],
                  learning_rate: float = 1e-3,
                  early_stopping_patience: Optional[int] = None,
+                 lr_schedule: Optional[str] = None,
+                 lr_min: float = 1e-6,
+                 epochs: Optional[int] = None,
                  ):
         super().__init__()
+        if lr_schedule not in (None, 'cosine'):
+            raise ValueError(f'unknown lr_schedule "{lr_schedule}", expected None or "cosine"')
+        if lr_schedule == 'cosine' and not epochs:
+            raise ValueError('the cosine learning rate schedule needs the number of epochs')
         self.input_dim = input_dim
         self.output_type = output_type
         self.output_dim = output_dim
@@ -246,6 +264,9 @@ class GnnModel(pl.LightningModule):
         self.dense_units = dense_units
         self.learning_rate = learning_rate
         self.early_stopping_patience = early_stopping_patience
+        self.lr_schedule = lr_schedule
+        self.lr_min = lr_min
+        self.epochs = epochs
 
         self.lay_act = nn.LeakyReLU()
 
@@ -346,7 +367,11 @@ class GnnModel(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        if self.lr_schedule is None:
+            return optimizer
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.epochs, eta_min=self.lr_min)
+        return {'optimizer': optimizer, 'lr_scheduler': {'scheduler': scheduler, 'interval': 'epoch'}}
 
     def configure_callbacks(self):
         """
