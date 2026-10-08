@@ -30,7 +30,7 @@ MLP_KEYS = ('NN_HIDDEN_LAYER_SIZES', 'NN_LEARNING_RATE_INIT')
 
 # table layout
 REP_ORDER = ['hdc', 'morgan', 'count_morgan', 'rdkit', 'torsion', 'atom', 'sherlock']
-REP_LABEL = {'hdc': 'HDC', 'morgan': 'Morgan', 'count_morgan': 'CountMorgan', 'rdkit': 'RDKit',
+REP_LABEL = {'hdc': 'HDF', 'morgan': 'Morgan', 'count_morgan': 'CountMorgan', 'rdkit': 'RDKit',
              'torsion': 'Torsion', 'atom': 'AtomPair', 'sherlock': 'Sherlock'}
 DATASET_ORDER = [
     'aqsoldb_logs', 'clogp', 'freesolv_hfe', 'lipophilicity_logD', 'bace_ic50',

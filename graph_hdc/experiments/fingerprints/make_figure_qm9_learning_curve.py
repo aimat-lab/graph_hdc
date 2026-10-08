@@ -47,7 +47,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 
 # Our two same-pipeline representations: (label, results glob, plot style).
 THIS_WORK = [
-    ('HDC (2D graph) + NN  [this work]',
+    ('HDF (2D graph) + NN  [this work]',
      os.path.join(_HERE, 'results', 'predict_molecules__hdc__qm9_atomization', 'ex_12_qm9_ae_*'),
      dict(color='tab:red', marker='o')),
     ('Morgan FP + NN  [this work]',
@@ -148,7 +148,7 @@ def main() -> None:
     ax.set_xlabel('Number of training molecules')
     ax.set_ylabel('Test MAE of atomization energy (eV)')
     ax.set_title('QM9 atomization energy learning curves\n'
-                 'HDC vs. Morgan-FP (same NN pipeline) vs. notable methods (Fig. 2, digitized)',
+                 'HDF vs. Morgan-FP (same NN pipeline) vs. notable methods (Fig. 2, digitized)',
                  fontsize=12)
     ax.grid(True, which='both', ls='--', alpha=0.3)
     ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=8,
