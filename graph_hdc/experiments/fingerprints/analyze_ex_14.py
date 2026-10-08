@@ -3,19 +3,28 @@ Analysis for Experiment 14 (HDF vs. graph neural networks, reviewer comment R2.1
 
 Collects the ex_14 archives of the three experiment modules and writes to ``_ex14/``:
 
-* ``results_ex14.csv``           one row per (variant, model, dataset, seed) with test MAE / R2 and timings
-* ``gnn_comparison_mlp.tex``     MAE table: HDF + MLP vs. random-init GNN + MLP vs. trained GNN (end-to-end)
-* ``gnn_comparison_knn.tex``     MAE table: HDF + KNN vs. random-init GNN + KNN
+* ``results_<prefix>.csv``      one row per (variant, model, dataset, seed) with test MAE / R2 and timings
+* ``gnn_comparison_mlp_<prefix>.tex``  SI table: HDF + MLP vs. random-init GNN + MLP vs. trained GNN (end-to-end)
+* ``gnn_comparison_knn_<prefix>.tex``  SI table: HDF + KNN vs. random-init GNN + KNN
 * ``gnn_comparison_cost.tex``    median featurization / training wall time per variant and dataset
 * ``gnn_convergence.txt``        best epoch vs. stop epoch of the trained GNNs (early-stopping sanity check)
 
 Significance: paired two-sided Wilcoxon signed-rank tests over the seeds (HDF vs. each other column of the
 same table, paired by SEED so that both sides share the identical train/val/test split), Holm-corrected
-over all tests of a table. Marks: * p<0.05, ** p<0.01 (corrected).
+within each dataset row: the comparisons against HDF on one dataset form one family. (A correction over
+all tests of a table can never reach significance with 10 seeds: the smallest possible two-sided p is
+2/2^10 ~ 0.002, and the MLP table has 36 tests with GIN and GATv2.) Marks: a triangle pointing down / up
+for a lower / higher MAE than HDF, filled for p<0.05 (corrected) and hollow otherwise.
+
+The two comparison tables are the tabulars of the SI (mean over the seeds with the standard deviation set
+below in gray, best mean per target in bold) and report only the architectures in TABLE_ARCHS. All three
+architectures stay in the CSV.
 
 Usage:
     python analyze_ex_14.py                 # prefix ex_14_gnn
     python analyze_ex_14.py ex_14_smoke     # any other archive prefix, e.g. the smoke runs
+    python analyze_ex_14.py ex_14_gnn --csv _ex14/results_ex_14_gnn.csv
+                                            # rebuild the tables from a results CSV, without the archives
 """
 import os
 import sys
@@ -42,6 +51,25 @@ DATASET_LABEL = {
     'bace_ic50': 'BACE', 'hopv15_pce': 'HOPV15 (PCE)', 'compas_gap': 'COMPAS-3X (gap)',
     'qm9_gap': 'QM9 (gap)', 'qm9_energy': r'QM9 ($U_0$)', 'qm9_zpve': 'QM9 (ZPVE)',
 }
+# Rows of the SI tables: dataset name (printed on the first row of a dataset), quantity, unit and the factor
+# that converts the raw MAE into that unit. The raw QM9 targets are in hartree, COMPAS-3X in eV. All cells are
+# printed with TABLE_DECIMALS decimals, so the small energy errors are given in millihartree: the QM9 gap and
+# ZPVE scaled from Ha, the COMPAS-3X gap converted from eV. U0 stays in Ha (its errors are ~600x larger).
+HARTREE_EV = 27.211386245988   # CODATA 2018
+TABLE_DECIMALS = 3
+ROW_META = {
+    'freesolv_hfe': ('FreeSolv', r'$\Delta G$', 'kcal/mol', 1.0),
+    'aqsoldb_logs': ('AqSolDB', 'logS', r'log\,M', 1.0),
+    'lipophilicity_logD': ('Lipophilicity', 'logD', '', 1.0),
+    'bace_ic50': ('BACE', 'IC50', 'pIC50', 1.0),
+    'hopv15_pce': ('HOPV15', 'PCE', r'\%', 1.0),
+    'compas_gap': ('COMPAS-3X', 'Gap', 'mHa', 1000.0 / HARTREE_EV),
+    'qm9_gap': ('QM9', 'Gap', 'mHa', 1000.0),
+    'qm9_energy': ('QM9', '$U_0$', 'Ha', 1.0),
+    'qm9_zpve': ('QM9', 'ZPVE', 'mHa', 1000.0),
+}
+# The SI reports GIN and GATv2 only; GCN was run as well and remains in the CSV.
+TABLE_ARCHS = ['gin', 'gatv2']
 
 
 def iter_archives(prefix: str):
@@ -114,6 +142,20 @@ def collect(prefix: str) -> list:
     return list(records.values())
 
 
+def load_csv(path: str) -> list:
+    """Records as written to ``results_<prefix>.csv``, so that the tables can be rebuilt without the archives."""
+    def number(value, cast=float):
+        return None if value in ('', None) else cast(float(value))
+    records = []
+    with open(path) as f:
+        for row in csv.DictReader(f):
+            records.append({**row, 'seed': int(row['seed']), 'mae': float(row['mae']), 'r2': number(row['r2']),
+                            'process_time': number(row['process_time']), 'encode_time': number(row['encode_time']),
+                            'train_time': number(row['train_time']), 'fit_time': number(row['fit_time']),
+                            'best_epoch': number(row['best_epoch'], int), 'epochs': number(row['epochs'], int)})
+    return records
+
+
 def by_seed(records: list, variant: str, arch: str, model: str, dataset: str) -> dict:
     return {r['seed']: r['mae'] for r in records
             if (r['variant'], r['arch'], r['model'], r['dataset']) == (variant, arch, model, dataset)}
@@ -131,22 +173,41 @@ def holm(pvalues: list) -> list:
     return adjusted
 
 
-def fmt(values: list) -> str:
+def si_cell(values: list, bold: bool, mark: str = None, significant: bool = False) -> str:
+    """
+    Mean with the standard deviation set below it in gray, as in the other SI tables, with TABLE_DECIMALS
+    decimals (the units in ROW_META are chosen such that this keeps at least three significant digits).
+    ``mark`` 'down' / 'up' adds a triangle for a lower / higher MAE than the reference, filled if the
+    difference is ``significant`` and hollow otherwise. The triangle macros (\\trilowsig, \\trihighsig,
+    \\trilow, \\trihigh) and their colors are defined in the preamble of supplementary.tex.
+    """
     mean, std = np.mean(values), np.std(values)
-    digits = max(0, 2 - int(np.floor(np.log10(abs(mean))))) if mean != 0 else 2
-    digits = min(digits, 4)
-    return f'{mean:.{digits}f} $\\pm$ {std:.{digits}f}'
+    digits = TABLE_DECIMALS
+    text = f'{mean:.{digits}f}'
+    if bold:
+        text = f'\\mathbf{{{text}}}'
+    if mark:
+        macro = {('down', True): 'trilowsig', ('up', True): 'trihighsig',
+                 ('down', False): 'trilow', ('up', False): 'trihigh'}[(mark, significant)]
+        text += f'^{{\\{macro}}}'
+    return f'$\\underset{{\\color{{darkgray}} \\pm{std:.{digits}f}}}{{{text}}}$'
 
 
-def table(records: list, columns: list, caption_note: str) -> str:
+def table(records: list, columns: list, header: list, note: str) -> str:
     """
-    LaTeX tabular with datasets as rows and ``columns`` = [(label, variant, arch, model), ...]. The first
-    column is the reference (HDF) against which all others are tested. The best mean MAE per row is bold.
+    SI tabular with one row per target and ``columns`` = [(label, variant, arch, model), ...]. ``header``
+    holds the header lines between \toprule and \midrule. The first column is the reference (HDF), against
+    which all others are tested, Holm-corrected within the row. Every other cell carries a triangle that points
+    down for a lower and up for a higher mean MAE than the reference, filled if p < 0.05 and hollow otherwise.
+    The best mean MAE per row is bold.
     """
-    rows, tests = [], []
+    lines = ['\\begin{tabular}{ll' + 'c' * len(columns) + '}', '\\toprule', *header, '\\midrule']
+    previous = None
     for dataset in DATASET_ORDER:
-        cells = [by_seed(records, v, a, m, dataset) for _, v, a, m in columns]
-        if not any(cells):
+        name, quantity, unit, scale = ROW_META[dataset]
+        # unit conversion of the MAE (does not change the paired tests, which only use the ranks)
+        cells = [{s: scale * v for s, v in by_seed(records, v_, a, m, dataset).items()} for _, v_, a, m in columns]
+        if not all(cells):
             continue
         ref = cells[0]
         pvals = []
@@ -157,37 +218,22 @@ def table(records: list, columns: list, caption_note: str) -> str:
                 pvals.append(wilcoxon([ref[s] for s in seeds], [cell[s] for s in seeds]).pvalue)
             else:
                 pvals.append(None)
-        rows.append((dataset, cells))
-        tests.append(pvals)
-
-    flat = holm([p for pv in tests for p in pv])
-    it = iter(flat)
-    tests = [[next(it) for _ in pv] for pv in tests]
-
-    lines = [
-        '\\begin{tabular}{l' + 'c' * len(columns) + '}',
-        '\\toprule',
-        'Dataset & ' + ' & '.join(label for label, *_ in columns) + ' \\\\',
-        '\\midrule',
-    ]
-    for (dataset, cells), pvals in zip(rows, tests):
-        means = [np.mean(list(c.values())) if c else np.inf for c in cells]
+        # one family per target (see the module docstring for why not per table)
+        pvals = holm(pvals)
+        means = [np.mean(list(c.values())) for c in cells]
         best = int(np.argmin(means))
-        out = [DATASET_LABEL.get(dataset, dataset)]
+
+        out = [name if name != previous else '', quantity + (f' \\qunit{{{unit}}}' if unit else '')]
+        previous = name
         for i, cell in enumerate(cells):
-            if not cell:
-                out.append('--')
-                continue
-            text = fmt(list(cell.values()))
-            if i == best:
-                text = f'\\textbf{{{text}}}'
-            if i > 0 and pvals[i - 1] is not None:
-                text += '$^{**}$' if pvals[i - 1] < 0.01 else ('$^{*}$' if pvals[i - 1] < 0.05 else '')
+            significant = i > 0 and pvals[i - 1] is not None and pvals[i - 1] < 0.05
+            mark = ('down' if means[i] < means[0] else 'up') if i > 0 else None
+            text = si_cell(list(cell.values()), bold=(i == best), mark=mark, significant=significant)
             if len(cell) < 10:
                 text += f' ({len(cell)})'   # flags incomplete cells (fewer seeds than planned)
             out.append(text)
-        lines.append(' & '.join(out) + ' \\\\')
-    lines += ['\\bottomrule', '\\end{tabular}', f'% {caption_note}']
+        lines.append(' &\n'.join(out) + ' \\\\\n')
+    lines += ['\\bottomrule', '\\end{tabular}', f'% {note}']
     return '\n'.join(lines) + '\n'
 
 
@@ -237,29 +283,44 @@ def convergence(records: list) -> str:
     return '\n'.join(lines) + '\n'
 
 
-def main(prefix: str):
+def main(prefix: str, csv_path: str = None):
     os.makedirs(OUT, exist_ok=True)
-    records = collect(prefix)
-    print(f'collected {len(records)} records for prefix "{prefix}"')
+    if csv_path:
+        records = load_csv(csv_path)
+        print(f'loaded {len(records)} records from {csv_path}')
+    else:
+        records = collect(prefix)
+        print(f'collected {len(records)} records for prefix "{prefix}"')
     if not records:
         return
 
-    with open(os.path.join(OUT, f'results_{prefix}.csv'), 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=list(records[0].keys()))
-        writer.writeheader()
-        writer.writerows(sorted(records, key=lambda r: (r['dataset'], r['variant'], r['arch'], r['model'], r['seed'])))
+    if not csv_path:
+        with open(os.path.join(OUT, f'results_{prefix}.csv'), 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=list(records[0].keys()))
+            writer.writeheader()
+            writer.writerows(sorted(records, key=lambda r: (r['dataset'], r['variant'], r['arch'], r['model'], r['seed'])))
 
-    mlp_columns = [('HDF + MLP', 'hdf', '', 'neural_net2')]
-    mlp_columns += [(f'Rand. {ARCH_LABEL[a]} + MLP', 'random', a, 'neural_net2') for a in ARCHS]
-    mlp_columns += [(f'Trained {ARCH_LABEL[a]}', 'trained', a, 'end2end') for a in ARCHS]
-    knn_columns = [('HDF + KNN', 'hdf', '', 'k_neighbors')]
-    knn_columns += [(f'Rand. {ARCH_LABEL[a]} + KNN', 'random', a, 'k_neighbors') for a in ARCHS]
+    labels = [ARCH_LABEL[a] for a in TABLE_ARCHS]
+    n = len(TABLE_ARCHS)
+    mlp_columns = [('HDF', 'hdf', '', 'neural_net2')]
+    mlp_columns += [(f'Random {ARCH_LABEL[a]}', 'random', a, 'neural_net2') for a in TABLE_ARCHS]
+    mlp_columns += [(ARCH_LABEL[a], 'trained', a, 'end2end') for a in TABLE_ARCHS]
+    # HDF stands on its own; the banners group the random (untrained) and the trained GNN columns
+    mlp_header = [
+        f' & & & \\multicolumn{{{n}}}{{c}}{{Random Repr. + MLP}} & \\multicolumn{{{n}}}{{c}}{{Trained end-to-end}} \\\\',
+        f'\\cmidrule(lr){{4-{n + 3}}} \\cmidrule(lr){{{n + 4}-{2 * n + 3}}}',
+        'Dataset & Quantity & HDF & ' + ' & '.join(labels) + ' & ' + ' & '.join(labels) + ' \\\\',
+    ]
+    knn_columns = [('HDF', 'hdf', '', 'k_neighbors')]
+    knn_columns += [(f'Random {ARCH_LABEL[a]}', 'random', a, 'k_neighbors') for a in TABLE_ARCHS]
+    knn_header = ['Dataset & Quantity & HDF & ' + ' & '.join(f'Random {l}' for l in labels) + ' \\\\']
 
+    note = ('generated by analyze_ex_14.py; test MAE, mean (std below) over the seeds; bold = best mean per '
+            'target; triangle down/up = lower/higher MAE than HDF {}, filled if significant (paired Wilcoxon, '
+            'Holm-corrected within each target, p < 0.05), hollow otherwise')
     outputs = {
-        f'gnn_comparison_mlp_{prefix}.tex': table(records, mlp_columns, 'test MAE, mean +/- std over seeds; '
-                                                  'Wilcoxon vs. HDF + MLP, Holm-corrected'),
-        f'gnn_comparison_knn_{prefix}.tex': table(records, knn_columns, 'test MAE, mean +/- std over seeds; '
-                                                  'Wilcoxon vs. HDF + KNN, Holm-corrected'),
+        f'gnn_comparison_mlp_{prefix}.tex': table(records, mlp_columns, mlp_header, note.format('+ MLP')),
+        f'gnn_comparison_knn_{prefix}.tex': table(records, knn_columns, knn_header, note.format('+ KNN')),
         f'gnn_comparison_cost_{prefix}.tex': cost_table(records),
         f'gnn_convergence_{prefix}.txt': convergence(records),
     }
@@ -270,4 +331,8 @@ def main(prefix: str):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1] if len(sys.argv) > 1 else 'ex_14_gnn')
+    args = [a for a in sys.argv[1:] if a != '--csv']
+    csv_path = sys.argv[sys.argv.index('--csv') + 1] if '--csv' in sys.argv else None
+    if csv_path:
+        args.remove(csv_path)
+    main(args[0] if args else 'ex_14_gnn', csv_path)
