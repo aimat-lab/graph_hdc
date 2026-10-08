@@ -2,17 +2,21 @@
 Unit tests for the folded MHFP (SECFP) and MAP4 fingerprints
 (:mod:`graph_hdc.baselines.minhash_fps`).
 
-The reference implementations (the ``mhfp`` and ``map4`` packages of the Reymond group) cannot be
-installed next to this project (``map4`` requires ``tmap``, which has no Python 3.11 wheels), so the
-expected set bits below were generated once with the reference code (mhfp 1.9.6
+SECFP is computed by the reference implementation (the ``mhfp`` package), so its tests check that the
+wrapper passes the right settings and handles edge cases. The reference MAP4 package cannot be installed
+next to this project (``map4`` requires ``tmap``, which has no Python 3.11 wheels), so the expected set
+bits below were generated once with the reference code (mhfp 1.9.6
 ``MHFPEncoder.secfp_from_mol(mol, length=1024, radius=3)`` and map4 1.0
 ``MAP4Calculator(dimensions=1024, radius=2, is_folded=True)``, rdkit 2025.9.1) and are pinned here.
-The re-implementation was verified to be bit-identical to the reference on 1200 molecules of
-FreeSolv, Lipophilicity and AqSolDB for sizes 8 to 16384 and SECFP radii 1 to 3.
+The MAP4 shingling was verified to be bit-identical to the reference on 1200 molecules of FreeSolv,
+Lipophilicity and AqSolDB for sizes 8 to 16384.
 """
+import warnings
+
 import numpy as np
 import pytest
 from rdkit import Chem
+from mhfp.encoder import MHFPEncoder
 
 from graph_hdc.baselines.minhash_fps import secfp_fingerprint, map4_fingerprint, map4_shingles
 
@@ -35,17 +39,49 @@ REFERENCE_BITS = {
     },
 }
 
+# Molecules with features that tend to break fingerprint code: charges and salts (disconnected graphs),
+# stereo centres and double bonds, fused and bridged rings, a macrocycle, heteroatoms, halogens.
+EDGE_CASE_SMILES = [
+    'CCO',
+    'C[C@H](N)C(=O)O',
+    'C/C=C/C(=O)O',
+    '[Na+].[Cl-]',
+    'CC(=O)[O-].[NH4+]',
+    'C1CC2CCC1C2',
+    'c1ccc2c(c1)ccc1ccccc12',
+    'C1CCCCCCCCCCC1',
+    'FC(F)(F)c1ccncc1Br',
+    'O=S(=O)(N)c1ccc(Cl)cc1',
+]
+
 
 @pytest.mark.parametrize('smiles', list(REFERENCE_BITS))
-def test_secfp_matches_reference(smiles):
+def test_secfp_matches_pinned_reference(smiles):
     fp = secfp_fingerprint(Chem.MolFromSmiles(smiles), length=1024, radius=3)
     assert np.flatnonzero(fp).tolist() == REFERENCE_BITS[smiles]['secfp6_1024']
 
 
 @pytest.mark.parametrize('smiles', list(REFERENCE_BITS))
-def test_map4_matches_reference(smiles):
+def test_map4_matches_pinned_reference(smiles):
     fp = map4_fingerprint(Chem.MolFromSmiles(smiles), length=1024, radius=2)
     assert np.flatnonzero(fp).tolist() == REFERENCE_BITS[smiles]['map4_1024']
+
+
+@pytest.mark.parametrize('smiles', EDGE_CASE_SMILES)
+@pytest.mark.parametrize('length,radius', [(64, 1), (1024, 2), (2048, 3)])
+def test_secfp_equals_reference_package(smiles, length, radius):
+    """The wrapper must give exactly the reference fingerprint for any size and radius."""
+    mol = Chem.MolFromSmiles(smiles)
+    expected = MHFPEncoder.secfp_from_mol(mol, length=length, radius=radius)
+    assert np.array_equal(secfp_fingerprint(mol, length=length, radius=radius), expected)
+
+
+@pytest.mark.parametrize('smiles', EDGE_CASE_SMILES)
+def test_map4_is_hashed_and_folded_like_the_reference(smiles):
+    """Folded MAP4 = reference MHFP hashing + folding of the (unique) atom-pair shingles."""
+    mol = Chem.MolFromSmiles(smiles)
+    expected = MHFPEncoder.fold(MHFPEncoder.hash(set(map4_shingles(mol))), length=2048)
+    assert np.array_equal(map4_fingerprint(mol, length=2048), expected)
 
 
 @pytest.mark.parametrize('encode', [secfp_fingerprint, map4_fingerprint])
@@ -56,6 +92,41 @@ def test_fingerprint_shape_and_binary(encode, length):
     assert fp.dtype == np.uint8
     assert set(np.unique(fp)) <= {0, 1}
     assert fp.sum() > 0
+
+
+@pytest.mark.parametrize('encode', [secfp_fingerprint, map4_fingerprint])
+@pytest.mark.parametrize('smiles', ['C', 'O', 'N'])
+def test_single_heavy_atom_gives_empty_fingerprint_without_warning(encode, smiles):
+    """QM9 contains e.g. methane and water, which have no substructures of radius >= 1 and no atom pairs."""
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        fp = encode(Chem.MolFromSmiles(smiles), length=128)
+    assert fp.shape == (128,) and fp.sum() == 0
+
+
+@pytest.mark.parametrize('encode', [secfp_fingerprint, map4_fingerprint])
+def test_disconnected_molecules_are_encoded(encode):
+    """Salts are disconnected graphs; both fragments contribute bits and nothing fails."""
+    salt = encode(Chem.MolFromSmiles('CC(=O)[O-].[NH4+]'), length=1024)
+    acid = encode(Chem.MolFromSmiles('CC(=O)[O-]'), length=1024)
+    assert salt.sum() > 0
+    assert np.all(salt >= acid)   # the fragment's bits stay set in the salt
+
+
+def test_radius_changes_the_fingerprints():
+    mol = Chem.MolFromSmiles('CCN(CC)CCOC(=O)c1ccc(N)cc1')
+    assert not np.array_equal(secfp_fingerprint(mol, radius=1), secfp_fingerprint(mol, radius=3))
+    assert not np.array_equal(map4_fingerprint(mol, radius=1), map4_fingerprint(mol, radius=2))
+
+
+def test_fingerprints_do_not_depend_on_atom_order():
+    """Canonical SMILES shingles make both fingerprints invariant to the input atom order."""
+    smiles = 'CCN(CC)CCOC(=O)c1ccc(N)cc1'
+    mol = Chem.MolFromSmiles(smiles)
+    for random_smiles in {Chem.MolToSmiles(mol, doRandom=True) for _ in range(5)}:
+        other = Chem.MolFromSmiles(random_smiles)
+        assert np.array_equal(secfp_fingerprint(mol), secfp_fingerprint(other))
+        assert np.array_equal(map4_fingerprint(mol), map4_fingerprint(other))
 
 
 def test_folding_is_consistent_across_lengths():

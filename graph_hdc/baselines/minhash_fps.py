@@ -13,13 +13,8 @@ distances and kernels as the other binary fingerprints (Morgan, RDKit, atom pair
       Probst, Reymond. "A probabilistic molecular fingerprint for big data settings."
       J. Cheminform. 10, 66 (2018). doi:10.1186/s13321-018-0321-8
 
-  Bit-identical to ``mhfp.encoder.MHFPEncoder.secfp_from_mol`` of the reference package
-  (github.com/reymond-group/mhfp, MIT): the shingling is taken from RDKit's built-in implementation
-  (``rdkit.Chem.rdMHFPFingerprint``; with ``isomeric=True, kekulize=False`` its shingles equal those of
-  the reference package, which writes isomeric SMILES and whose kekulize option has no effect with
-  current RDKit versions; verified on 1200 molecules of FreeSolv/Lipophilicity/AqSolDB), but RDKit's
-  ``EncodeSECFPMol`` uses a different hash function than the reference, so hashing and folding follow
-  the reference (first 4 bytes of the SHA-1 digest, modulo the vector length).
+  Computed with the reference implementation, ``mhfp.encoder.MHFPEncoder.secfp_from_mol`` of the
+  ``mhfp`` package (github.com/reymond-group/mhfp, MIT license).
 
 - **MAP4** (``map4_fingerprint``) -- the MinHashed atom-pair fingerprint. Shingles are the strings
   ``CS_i(j) | d(j, k) | CS_i(k)`` for every atom pair (j, k), every radius i = 1..r (r = 2 for MAP4),
@@ -29,39 +24,27 @@ distances and kernels as the other binary fingerprints (Morgan, RDKit, atom pair
       Capecchi, Probst, Reymond. "One molecular fingerprint to rule them all: drugs, biomolecules,
       and the metabolome." J. Cheminform. 12, 43 (2020). doi:10.1186/s13321-020-00445-4
 
-  Re-implementation of the reference code (github.com/reymond-group/map4, MIT license, Copyright (c)
-  2017 GDB / Reymond Research Group). The reference package cannot be installed on Python >= 3.11
-  because it unconditionally imports ``tmap``; the folded path does not need ``tmap`` and is
-  reproduced here bit-for-bit (SHA-1 shingle hashes as in ``mhfp.encoder.MHFPEncoder.hash``, folded
-  modulo the vector length as in ``MHFPEncoder.fold``).
+  The reference package (github.com/reymond-group/map4, MIT license, Copyright (c) 2017 GDB /
+  Reymond Research Group) cannot be installed on Python >= 3.11 because it unconditionally imports
+  ``tmap``, which the folded variant does not need. ``map4_shingles`` therefore reproduces the
+  shingling of the reference code (``MAP4Calculator._calculate``), while the hashing and folding use
+  ``mhfp.encoder.MHFPEncoder.hash`` and ``MHFPEncoder.fold`` exactly as the reference does for the
+  folded variant (``MAP4Calculator._fold``). The result was verified to be bit-identical to map4 1.0.
 """
-import struct
+import warnings
 import itertools
-from hashlib import sha1
 from typing import Dict, List
 
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import rdmolops
-from rdkit.Chem.rdMHFPFingerprint import MHFPEncoder
-
-
-# The shingling does not use the MinHash permutations, so a single encoder instance is enough.
-_SHINGLING_ENCODER = MHFPEncoder(1, 42)
-
-
-def _fold_shingles(shingles: List[bytes], length: int) -> np.ndarray:
-    """Hash shingles as ``mhfp.encoder.MHFPEncoder.hash`` and fold them as ``MHFPEncoder.fold``."""
-    array = np.zeros(length, dtype=np.uint8)
-    if shingles:
-        hashes = np.array([struct.unpack('<I', sha1(s).digest()[:4])[0] for s in shingles], dtype=np.uint64)
-        array[hashes % length] = 1
-    return array
+from mhfp.encoder import MHFPEncoder
 
 
 def secfp_fingerprint(mol: Chem.Mol, length: int = 2048, radius: int = 3) -> np.ndarray:
     """
-    Folded MHFP (SECFP) binary fingerprint of ``mol`` with ``length`` bits.
+    Folded MHFP (SECFP) binary fingerprint of ``mol`` with ``length`` bits, computed with the reference
+    implementation (``mhfp.encoder.MHFPEncoder.secfp_from_mol`` with its default shingling settings).
 
     .. code-block:: python
 
@@ -73,15 +56,11 @@ def secfp_fingerprint(mol: Chem.Mol, length: int = 2048, radius: int = 3) -> np.
 
     :returns: A numpy uint8 array of shape (length,).
     """
-    shingles = _SHINGLING_ENCODER.CreateShinglingFromMol(
-        mol,
-        radius=radius,
-        rings=True,
-        isomeric=True,
-        kekulize=False,
-        min_radius=1,
-    )
-    return _fold_shingles([s.encode('utf-8') for s in shingles], length)
+    with warnings.catch_warnings():
+        # Molecules with a single heavy atom (e.g. methane in QM9) have no circular substructures of
+        # radius >= 1 and no rings; the reference then warns and returns the all-zero fingerprint.
+        warnings.filterwarnings('ignore', message='The length of the shingling is 0')
+        return MHFPEncoder.secfp_from_mol(mol, length=length, radius=radius)
 
 
 def _find_env(mol: Chem.Mol, idx: int, radius: int) -> str:
@@ -96,7 +75,8 @@ def _find_env(mol: Chem.Mol, idx: int, radius: int) -> str:
 
 def map4_shingles(mol: Chem.Mol, radius: int = 2) -> List[bytes]:
     """
-    The set of MAP4 atom-pair shingles of ``mol`` (as in ``MAP4Calculator._calculate``).
+    The set of MAP4 atom-pair shingles of ``mol`` (as in ``MAP4Calculator._calculate`` of the reference
+    code, without counts).
 
     :param mol: The RDKit molecule.
     :param radius: The maximum radius of the circular substructures (2 = MAP4).
@@ -119,7 +99,8 @@ def map4_shingles(mol: Chem.Mol, radius: int = 2) -> List[bytes]:
 
 def map4_fingerprint(mol: Chem.Mol, length: int = 2048, radius: int = 2) -> np.ndarray:
     """
-    Folded MAP4 binary fingerprint of ``mol`` with ``length`` bits.
+    Folded MAP4 binary fingerprint of ``mol`` with ``length`` bits: the MAP4 shingles hashed and folded
+    with the reference ``mhfp`` functions, as in ``MAP4Calculator._fold`` of the reference code.
 
     .. code-block:: python
 
@@ -131,4 +112,8 @@ def map4_fingerprint(mol: Chem.Mol, length: int = 2048, radius: int = 2) -> np.n
 
     :returns: A numpy uint8 array of shape (length,).
     """
-    return _fold_shingles(map4_shingles(mol, radius=radius), length)
+    shingles = map4_shingles(mol, radius=radius)
+    if not shingles:
+        # molecules with a single heavy atom have no atom pairs (the reference returns all zeros as well)
+        return np.zeros(length, dtype=np.uint8)
+    return MHFPEncoder.fold(MHFPEncoder.hash(shingles), length=length)
