@@ -115,15 +115,22 @@ def nx_from_graph_dict(graph: dict) -> nx.Graph:
 
 def graph_dict_from_mol(mol: Chem.Mol,
                         processing: MoleculeProcessing = MoleculeProcessing(),
+                        hydrogens: str = 'implicit',
                         ) -> dict:
     """
-    Creates a new graph dict representation from the given rdkit ``mol`` object using the given 
+    Creates a new graph dict representation from the given rdkit ``mol`` object using the given
     MoleculeProcessing ``processing`` instance to do most of the conversion.
-    
+
     :param mol: The rdkit.Mol instance that represents the molecule to be encoded.
-    
+    :param hydrogens: How the hydrogen count of each atom ("node_valences") is determined. "implicit" uses
+        ``GetNumImplicitHs``, which is 0 for every atom written in brackets ([nH], [NH3+], [C@@H], ...).
+        "total" uses ``GetTotalNumHs`` and counts all bonded hydrogens. The default keeps the original
+        behavior, on which the decoders rely.
+
     :returns: A graph dict
     """
+    if hydrogens not in ('implicit', 'total'):
+        raise ValueError(f'unknown hydrogens mode "{hydrogens}", expected "implicit" or "total"')
     # --- Domain specific conversion ---
     # Instead of re-inventing the wheel here on how to convert a molecule to a graph dict, we simply use 
     # the already existing MoleculeProcessing class from the chem_mat_data package.
@@ -165,11 +172,11 @@ def graph_dict_from_mol(mol: Chem.Mol,
     graph['node_degrees'] = node_degrees
     
     # --- Calculating node valence ---
-    # We also need the information about the valence of the atoms (number of implicitly attached hydrogens)
+    # We also need the information about the valence of the atoms (number of attached hydrogens)
     # which we get from the mol object in this case.
     node_valences: np.ndarray = np.zeros(shape=graph['node_indices'].shape)
     for i, atom in enumerate(mol.GetAtoms()):
-        node_valences[i] = atom.GetNumImplicitHs()
+        node_valences[i] = atom.GetTotalNumHs() if hydrogens == 'total' else atom.GetNumImplicitHs()
     
     graph['node_valences'] = node_valences
     

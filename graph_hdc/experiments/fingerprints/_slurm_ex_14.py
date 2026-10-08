@@ -120,10 +120,12 @@ def _command(module: str, prefix: str, seed: int, ds: tuple, params: dict) -> st
         full['TARGET_INDEX'] = tidx
     full.update(params)
     full.update(extra)
-    # The ex_13/ex_14 archives were produced with one-directional HDF message passing (the behavior before the
-    # BIDIRECTIONAL parameter existed), so resumed or retried runs keep it. New runs set it explicitly.
+    # HDF runs use the fixed encoder: bidirectional message passing and total hydrogen counts. The archives up to
+    # 2026-10-07 were produced with one-directional message passing and implicit hydrogen counts (the behavior
+    # before both parameters existed); callers can pass the old values explicitly (ex_15 passes both).
     if module == 'hdc':
-        full.setdefault('BIDIRECTIONAL', False)
+        full.setdefault('BIDIRECTIONAL', True)
+        full.setdefault('HYDROGEN_COUNT', 'total')
     # Relative script path: the command files are executed from this folder (see run_ex14_kcist.sbatch),
     # so the same files work locally and on the cluster.
     parts = ['python', f'predict_molecules__{module}.py']

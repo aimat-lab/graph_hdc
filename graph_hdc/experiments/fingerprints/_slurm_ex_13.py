@@ -120,10 +120,12 @@ def _command(module: str, prefix: str, seed: int, num_data: float,
     params.update(feat)
     params.update(mlp)
     params.update(extra)
-    # The ex_13/ex_14 archives were produced with one-directional HDF message passing (the behavior before the
-    # BIDIRECTIONAL parameter existed), so resumed or retried runs keep it. New runs set it explicitly.
+    # HDF runs use the fixed encoder: bidirectional message passing and total hydrogen counts. The archives up to
+    # 2026-10-07 were produced with one-directional message passing and implicit hydrogen counts (the behavior
+    # before both parameters existed).
     if module == 'hdc':
-        params.setdefault('BIDIRECTIONAL', False)
+        params.setdefault('BIDIRECTIONAL', True)
+        params.setdefault('HYDROGEN_COUNT', 'total')
     parts = ['python', os.path.join(PATH, f'predict_molecules__{module}.py')]
     parts += [f'--{k}="{v!r}"' for k, v in params.items()]
     return ' '.join(parts)

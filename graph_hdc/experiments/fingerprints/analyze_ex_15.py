@@ -12,17 +12,47 @@ Writes ``_ex15/bidir_comparison_<prefix>.md`` (table) and ``.csv`` (all paired r
 import os
 import sys
 import csv
+import json
+import glob
 from collections import defaultdict
 
 import numpy as np
 from scipy.stats import wilcoxon
 
-from analyze_ex_14 import iter_archives, DATASET_ORDER, DATASET_LABEL
+from analyze_ex_14 import DATASET_ORDER, DATASET_LABEL
 
 PATH = os.path.dirname(os.path.abspath(__file__))
+RESULTS = os.path.join(PATH, 'results')
 OUT = os.path.join(PATH, '_ex15')
 MODELS = ['neural_net2', 'k_neighbors']
 MODEL_LABEL = {'neural_net2': 'MLP', 'k_neighbors': 'KNN'}
+
+
+def iter_archives(prefix: str):
+    """
+    Yield (module, meta, params, data) for every completed HDF archive whose __PREFIX__ equals ``prefix``.
+
+    Deliberately not the iterator of analyze_ex_14: that one keeps only HDF archives of the corrected encoder
+    (bidirectional, total hydrogen counts), whereas ex_15 compares both edge directions.
+    """
+    pattern = os.path.join(RESULTS, 'predict_molecules__hdc', '*', 'experiment_meta.json')
+    for meta_path in glob.glob(pattern):
+        try:
+            meta = json.load(open(meta_path))
+        except Exception:
+            continue
+        params = {k: v.get('value') for k, v in meta.get('parameters', {}).items() if isinstance(v, dict)}
+        # a killed or timed-out run keeps status 'running' (and has_error False), so require 'done'
+        if params.get('__PREFIX__') != prefix or meta.get('status') != 'done' or meta.get('has_error'):
+            continue
+        data_path = os.path.join(os.path.dirname(meta_path), 'experiment_data.json')
+        if not os.path.exists(data_path):
+            continue
+        try:
+            data = json.load(open(data_path))
+        except Exception:
+            continue
+        yield 'predict_molecules__hdc', meta, params, data
 
 
 def collect(prefix: str) -> dict:
@@ -73,6 +103,10 @@ def main(prefix: str):
     table = '\n'.join(lines)
     print(f'prefix {prefix}: {len(records)} paired runs\n')
     print(table)
+
+    if not records:
+        print('no paired runs found, existing outputs are left unchanged')
+        return
 
     with open(os.path.join(OUT, f'bidir_comparison_{prefix}.md'), 'w') as f:
         f.write(table + '\n')

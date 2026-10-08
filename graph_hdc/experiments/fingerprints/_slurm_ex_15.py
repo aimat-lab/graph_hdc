@@ -57,7 +57,10 @@ def commands(prefix: str, ds: tuple, seeds: list) -> list:
     """Both arms for every seed of one dataset, next to each other."""
     module, params = VARIANTS['hdf']
     return [
-        _command(module, prefix, seed, ds, {**params, 'BIDIRECTIONAL': bidirectional, '__CACHING__': False})
+        # ex_15 compares the edge direction with the hydrogen count of its archives (implicit, before the
+        # HYDROGEN_COUNT parameter existed), so it pins that count instead of taking the new 'total' default
+        _command(module, prefix, seed, ds, {**params, 'BIDIRECTIONAL': bidirectional, 'HYDROGEN_COUNT': 'implicit',
+                                            '__CACHING__': False})
         for seed in seeds
         for bidirectional in (False, True)
     ]

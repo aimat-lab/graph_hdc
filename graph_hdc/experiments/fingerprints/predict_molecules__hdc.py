@@ -70,6 +70,12 @@ ENCODING_MODE: Literal['categorical', 'continuous'] = 'continuous'
 #       True implements the message passing as described in the paper (sum over all neighbors), which is
 #       invariant to the atom order. Embedding caches of bidirectional runs carry a "__bidir" suffix.
 BIDIRECTIONAL: bool = True
+# :param HYDROGEN_COUNT:
+#       How the hydrogen count of each atom is determined. "total" counts all bonded hydrogens (RDKit
+#       GetTotalNumHs), as described in the paper. "implicit" (the behavior before this parameter existed) only
+#       counts implicit hydrogens, which is 0 for every atom written in brackets ([nH], [NH3+], [C@@H], ...).
+#       Embedding caches of "total" runs carry a "__totalh" suffix.
+HYDROGEN_COUNT: str = 'total'
 
 # == VISUALIZATION PARAMETERS ==
 
@@ -208,6 +214,8 @@ def process_dataset(
         hdc_cache_name = f'hdc_{e.DATASET_NAME}__numdata_{e.NUM_DATA}__seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}'
     if e.BIDIRECTIONAL:
         hdc_cache_name += '__bidir'
+    if e.HYDROGEN_COUNT == 'total':
+        hdc_cache_name += '__totalh'
     @experiment.cache.cached(name=hdc_cache_name)
     def process_dataset():
         
@@ -226,7 +234,7 @@ def process_dataset(
             smiles: str = data['graph_repr']
             mol: Chem.Mol = Chem.MolFromSmiles(smiles)
             
-            graph = graph_dict_from_mol(mol)
+            graph = graph_dict_from_mol(mol, hydrogens=e.HYDROGEN_COUNT)
             
             del graph['graph_labels']
             index_data_map[index].update(graph)

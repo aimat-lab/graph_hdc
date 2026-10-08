@@ -93,6 +93,12 @@ ENCODING_MODE: Literal['categorical', 'continuous'] = 'continuous'
 #       True implements the message passing as described in the paper (sum over all neighbors), which is
 #       invariant to the atom order. Embedding caches of bidirectional runs carry a "__bidir" suffix.
 BIDIRECTIONAL: bool = True
+# :param HYDROGEN_COUNT:
+#       How the hydrogen count of each atom is determined. "total" counts all bonded hydrogens (RDKit
+#       GetTotalNumHs), as described in the paper. "implicit" (the behavior before this parameter existed) only
+#       counts implicit hydrogens, which is 0 for every atom written in brackets ([nH], [NH3+], [C@@H], ...).
+#       Embedding caches of "total" runs carry a "__totalh" suffix.
+HYDROGEN_COUNT: str = 'total'
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -226,7 +232,7 @@ def process_dataset(
     # dataset and generate the HDC vectors for each molecular graph. This is
     # cached to avoid recomputation.
     @experiment.cache.cached(
-        name=f'hdc_{e.DATASET_NAME}__seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}__mode_{e.ENCODING_MODE}{"__bidir" if e.BIDIRECTIONAL else ""}'
+        name=f'hdc_{e.DATASET_NAME}__seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}__mode_{e.ENCODING_MODE}{"__bidir" if e.BIDIRECTIONAL else ""}{"__totalh" if e.HYDROGEN_COUNT == "total" else ""}'
     )
     def process_dataset_cached():
 
@@ -239,7 +245,7 @@ def process_dataset(
             smiles: str = data['graph_repr']
             mol: Chem.Mol = Chem.MolFromSmiles(smiles)
 
-            graph = graph_dict_from_mol(mol)
+            graph = graph_dict_from_mol(mol, hydrogens=e.HYDROGEN_COUNT)
 
             # Remove graph_labels if present (not needed for similarity)
             if 'graph_labels' in graph:
@@ -307,7 +313,7 @@ def encode_molecule(e: Experiment,
             return None
 
         # Convert to graph dict
-        graph = graph_dict_from_mol(mol)
+        graph = graph_dict_from_mol(mol, hydrogens=e.HYDROGEN_COUNT)
 
         # Remove graph_labels if present
         if 'graph_labels' in graph:
