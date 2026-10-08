@@ -193,6 +193,17 @@ NUM_NEIGHBOR_TOTAL: int = 20
 #       and GED analysis.
 GED_NUM_SAMPLES: int = 10
 
+# :param GED_CANONICAL_QUERY:
+#       Whether the SMILES of a GED query molecule is converted to the canonical RDKit SMILES before its edit
+#       neighborhood is generated. The HDF experiments replace the dataset SMILES with canonical ones while
+#       the fingerprint experiments keep the raw ones, which for ZINC250k end with a newline. With the raw
+#       SMILES, the query is never recognized as already visited (seen_smiles), so it can reappear as its own
+#       neighbor at a later edit step, and the neighborhood can differ because it depends on the atom order of
+#       the SMILES. With True, both generate identical neighborhoods for every query, so that their distances
+#       are compared on the same molecule pairs. False reproduces the fingerprint runs of ex_08_a exactly (the
+#       HDF runs are unaffected, since their SMILES are canonical already).
+GED_CANONICAL_QUERY: bool = True
+
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -853,6 +864,9 @@ def compute_ged_similarity_correlation(e: Experiment,
     skipped_invalid = 0
     skipped_disconnected = 0
     encoding_failed = 0
+    # one row per successfully encoded neighbor; the main loop writes them to ged_pairs.csv
+    neighbor_rows = []
+    e._ged_neighbor_rows = neighbor_rows
 
     for neighbor_smiles, ged in neighbors_with_ged:
         # Pre-validate molecule
@@ -887,6 +901,8 @@ def compute_ged_similarity_correlation(e: Experiment,
 
             ged_values.append(ged)
             similarity_values.append(similarity)
+            neighbor_rows.append({'neighbor_smiles': neighbor_smiles, 'edit_steps': ged,
+                                  'similarity': float(similarity), 'distance': float(distance)})
 
         except Exception as ex:
             e.log(f'    WARNING: Error encoding neighbor {neighbor_smiles[:30]}: {ex}')
@@ -1336,6 +1352,7 @@ def main(e: Experiment):
 
         # Store results for all queries
         ged_results = []
+        ged_pair_rows = []  # one row per (query, neighbor) pair, saved to ged_pairs.csv
         successful_query_idx = 0  # Counter for successful queries (used for consistent indexing)
 
         # Accumulate all GED and similarity values for aggregate diagnostic
@@ -1347,6 +1364,8 @@ def main(e: Experiment):
 
             query_smiles = index_data_map[query_idx]['graph_repr']
             query_features = index_data_map[query_idx]['graph_features']
+            if e.GED_CANONICAL_QUERY:
+                query_smiles = Chem.MolToSmiles(Chem.MolFromSmiles(query_smiles))
 
             e.log(f' * query SMILES: {query_smiles}')
 
@@ -1378,6 +1397,10 @@ def main(e: Experiment):
             if len(ged_array) < 2:
                 e.log(f' * WARNING: Insufficient valid neighbors for correlation, skipping')
                 continue
+
+            for neighbor_row in getattr(e, '_ged_neighbor_rows', []):
+                ged_pair_rows.append({'query_id': successful_query_idx, 'query_idx': query_idx,
+                                      'query_smiles': query_smiles, **neighbor_row})
 
             # Accumulate for aggregate diagnostic
             all_ged_values.extend(ged_array.tolist())
@@ -1427,6 +1450,11 @@ def main(e: Experiment):
             successful_query_idx += 1
 
             plt.close(fig)
+
+        # Distance of every generated molecule to its query, for the per-edit-step analysis
+        ged_pairs_path = os.path.join(e.path, 'ged_pairs.csv')
+        pd.DataFrame(ged_pair_rows).to_csv(ged_pairs_path, index=False)
+        e.log(f'saved {len(ged_pair_rows)} query-neighbor pairs to {ged_pairs_path}')
 
         # == AGGREGATE GED STATISTICS ==
 
