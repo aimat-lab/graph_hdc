@@ -43,7 +43,7 @@ class HyperNet(AbstractHyperNet):
                  unbind_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = 'circular_correlation_fft',
                  pooling: str = 'sum',
                  normalize_all: bool = False,
-                 bidirectional: bool = False,
+                 bidirectional: bool = True,
                  seed: Optional[int] = None,
                  device: str = 'cpu',
                  distance_func: Optional[Callable[[torch.Tensor, torch.Tensor], float]] = None,
@@ -248,6 +248,9 @@ class HyperNet(AbstractHyperNet):
         # Similarly we also duplicate the edge weights such that the same edge weight is used for both edge
         # "directions".
 
+        # Note that the graph dicts of ``graph_dict_from_mol`` store every bond only once, so without this flag
+        # (True by default) every node would only aggregate the neighbors on one side of its edges and the
+        # embedding would depend on the node order of the input graph.
         if self.bidirectional:
             edge_index = torch.cat([data.edge_index, data.edge_index[[1, 0]]], dim=1)
             edge_weight = torch.cat([edge_weight, edge_weight], dim=0)
@@ -898,7 +901,10 @@ class HyperNet(AbstractHyperNet):
         
         with open(path, mode='r') as file:
             data = jsonpickle.loads(file.read())
-            
+        
+        # Files saved before the "bidirectional" attribute existed were created with one-directional
+        # message passing, the old default. Without this, they would now silently load as bidirectional.
+        self.bidirectional = False
         for key, value in data['attributes'].items():
             setattr(self, key, value)
             

@@ -81,6 +81,7 @@ def encode_hdc(smiles_list: List[str],
         depth=depth,
         node_encoder_map=node_encoder_map,
         device=device,
+        bidirectional=True,
     )
 
     graphs = [graph_dict_from_mol(Chem.MolFromSmiles(smi)) for smi in smiles_list]

@@ -99,6 +99,13 @@ DEVICE: str = "cpu"
 #       features with the FHRR continuous encodings, which typically performs better
 #       for similarity tasks.
 ENCODING_MODE: Literal['categorical', 'continuous'] = 'continuous'
+# :param BIDIRECTIONAL:
+#       Whether messages are passed along both directions of every bond. The graph dicts created by
+#       ``graph_dict_from_mol`` store each bond only once, so with False every atom only aggregates the
+#       neighbors with a higher atom index and the fingerprint depends on the atom order of the input SMILES.
+#       True implements the message passing as described in the paper (sum over all neighbors), which is
+#       invariant to the atom order. Embedding caches of bidirectional runs carry a "__bidir" suffix.
+BIDIRECTIONAL: bool = True
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -226,6 +233,7 @@ def process_dataset(
         graph_encoder_map=graph_encoder_map,
         seed=e.SEED,
         normalize_all=True,
+        bidirectional=e.BIDIRECTIONAL,
     )
 
     e.log('saving HyperNet encoder to disk...')
@@ -237,7 +245,7 @@ def process_dataset(
     # dataset and generate the HDC vectors for each molecular graph. This is
     # cached to avoid recomputation across runs with the same parameters.
     @experiment.cache.cached(
-        name=f'hdc_{e.DATASET_NAME}__seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}__mode_{e.ENCODING_MODE}'
+        name=f'hdc_{e.DATASET_NAME}__seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}__mode_{e.ENCODING_MODE}{"__bidir" if e.BIDIRECTIONAL else ""}'
     )
     def process_dataset_cached():
 

@@ -120,6 +120,10 @@ def _command(module: str, prefix: str, seed: int, num_data: float,
     params.update(feat)
     params.update(mlp)
     params.update(extra)
+    # The ex_13/ex_14 archives were produced with one-directional HDF message passing (the behavior before the
+    # BIDIRECTIONAL parameter existed), so resumed or retried runs keep it. New runs set it explicitly.
+    if module == 'hdc':
+        params.setdefault('BIDIRECTIONAL', False)
     parts = ['python', os.path.join(PATH, f'predict_molecules__{module}.py')]
     parts += [f'--{k}="{v!r}"' for k, v in params.items()]
     return ' '.join(parts)

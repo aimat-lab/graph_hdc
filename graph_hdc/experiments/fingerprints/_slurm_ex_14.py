@@ -113,6 +113,10 @@ def _command(module: str, prefix: str, seed: int, ds: tuple, params: dict) -> st
         full['TARGET_INDEX'] = tidx
     full.update(params)
     full.update(extra)
+    # The ex_13/ex_14 archives were produced with one-directional HDF message passing (the behavior before the
+    # BIDIRECTIONAL parameter existed), so resumed or retried runs keep it. New runs set it explicitly.
+    if module == 'hdc':
+        full.setdefault('BIDIRECTIONAL', False)
     # Relative script path: the command files are executed from this folder (see run_ex14_kcist.sbatch),
     # so the same files work locally and on the cluster.
     parts = ['python', f'predict_molecules__{module}.py']

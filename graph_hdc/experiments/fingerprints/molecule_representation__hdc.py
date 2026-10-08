@@ -47,6 +47,13 @@ NUM_LAYERS: int = 3
 #       while 'continuous' uses FHRR encodings for continuous features which often
 #       performs better for regression tasks.
 ENCODING_MODE: Literal['categorical', 'continuous'] = 'continuous'
+# :param BIDIRECTIONAL:
+#       Whether messages are passed along both directions of every bond. The graph dicts created by
+#       ``graph_dict_from_mol`` store each bond only once, so with False every atom only aggregates the
+#       neighbors with a higher atom index and the fingerprint depends on the atom order of the input SMILES.
+#       True implements the message passing as described in the paper (sum over all neighbors), which is
+#       invariant to the atom order. Embedding caches of bidirectional runs carry a "__bidir" suffix.
+BIDIRECTIONAL: bool = True
 
 # :param DEVICE:
 #       The device to use for computation ('cpu' or 'cuda:0'). If CUDA is available,
@@ -174,6 +181,7 @@ def process_dataset(e: Experiment,
         graph_encoder_map=graph_encoder_map,
         seed=e.SEED,
         normalize_all=True,
+        bidirectional=e.BIDIRECTIONAL,
     )
 
     # Save the encoder for potential future use
@@ -187,7 +195,7 @@ def process_dataset(e: Experiment,
     @experiment.cache.cached(
         name=f'hdc_embeddings_{e.DATASET_NAME}__'
              f'seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}__'
-             f'mode_{e.ENCODING_MODE}'
+             f'mode_{e.ENCODING_MODE}{"__bidir" if e.BIDIRECTIONAL else ""}'
     )
     def process_dataset_cached():
         """

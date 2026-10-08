@@ -630,6 +630,10 @@ def experiment(e: Experiment):
         depth=e.NUM_LAYERS,
         node_encoder_map=node_encoder_map,
         seed=e.SEED,
+        # HyperNet passes messages along both edge directions by default since 2026-10-08. This decoder
+        # experiment keeps its previous one-directional encoder; note that the reconstruction tests use
+        # bidirectional=True, so switching this to True is probably intended (to be decided).
+        bidirectional=False,
     )
     
     # --- creating dataset ---

@@ -68,8 +68,10 @@ class TestHyperNetEnsembleWithMolecules:
 
         # Create ensemble
         encoder_map = make_molecule_node_encoder_map(dim=1000, seed=42)
-        model1 = HyperNet(hidden_dim=1000, depth=2, node_encoder_map=encoder_map, seed=42)
-        model2 = HyperNet(hidden_dim=1000, depth=3, node_encoder_map=encoder_map, seed=123)
+        # The node-count decoding below was written for one-directional message passing (the HyperNet
+        # default before 2026-10-08); with bidirectional messages it overestimates the number of nodes.
+        model1 = HyperNet(hidden_dim=1000, depth=2, node_encoder_map=encoder_map, seed=42, bidirectional=False)
+        model2 = HyperNet(hidden_dim=1000, depth=3, node_encoder_map=encoder_map, seed=123, bidirectional=False)
         ensemble = HyperNetEnsemble([model1, model2])
 
         # Get embedding
@@ -94,8 +96,10 @@ class TestHyperNetEnsembleWithMolecules:
 
         # Create ensemble
         encoder_map = make_molecule_node_encoder_map(dim=1000, seed=42)
-        model1 = HyperNet(hidden_dim=1000, depth=2, node_encoder_map=encoder_map, seed=42)
-        model2 = HyperNet(hidden_dim=1000, depth=3, node_encoder_map=encoder_map, seed=123)
+        # The node-count decoding below was written for one-directional message passing (the HyperNet
+        # default before 2026-10-08); with bidirectional messages it overestimates the number of nodes.
+        model1 = HyperNet(hidden_dim=1000, depth=2, node_encoder_map=encoder_map, seed=42, bidirectional=False)
+        model2 = HyperNet(hidden_dim=1000, depth=3, node_encoder_map=encoder_map, seed=123, bidirectional=False)
         ensemble = HyperNetEnsemble([model1, model2])
 
         # Get embeddings for all graphs

@@ -159,6 +159,10 @@ def experiment(e: Experiment):
         hidden_dim=e.EMBEDDING_SIZE,
         depth=e.NUM_LAYERS,
         node_encoder_map=node_encoder_map,
+        # HyperNet passes messages along both edge directions by default since 2026-10-08. This decoder
+        # experiment keeps its previous one-directional encoder; note that the reconstruction tests use
+        # bidirectional=True, so switching this to True is probably intended (to be decided).
+        bidirectional=False,
     )
     
     e.log('💾 saving HyperNet encoder to disk...')
