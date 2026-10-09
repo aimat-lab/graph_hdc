@@ -19,9 +19,9 @@ for a lower / higher MAE than HDF, filled for p<0.05 (corrected) and hollow othe
 The two comparison tables are the tabulars of the SI (mean over the seeds with the standard deviation set
 below in gray, best mean per target in bold) and report the architectures in TABLE_ARCHS.
 
-Only archives of the current round count (``is_current`` of _slurm_ex_14.py: bidirectional HDF, total hydrogen
-counts for HDF and the GNN inputs, cosine learning-rate decay for the trained GNNs); the archives of the
-earlier rounds under the same prefix are skipped, and their number is printed.
+Only archives of the current round count (``is_current`` of _slurm_ex_14.py: bidirectional HDF with unit-modulus
+codebooks, total hydrogen counts for HDF and the GNN inputs, cosine learning-rate decay for the trained GNNs); the
+archives of the earlier rounds under the same prefix are skipped, and their number is printed.
 
 Usage:
     python analyze_ex_14.py                 # prefix ex_14_gnn

@@ -23,9 +23,13 @@ Rounds under the same prefix (only archives with the CURRENT settings count, her
 2. up to 2026-10-07: one-directional HDF message passing, implicit hydrogen counts (for HDF and for the GNN
    inputs: 0 for every bracket atom such as [nH] or [NH3+]), constant learning rate, and GCN as a third
    architecture.
-3. 2026-10-08 (current): all variants re-run with bidirectional HDF message passing, total hydrogen counts
-   everywhere and the cosine learning-rate decay; GCN dropped (the SI reports GIN and GATv2 only). The
-   splits are unchanged: they come from the cached, seed-independent dataset order (``load__`` caches).
+3. 2026-10-08: all variants re-run with bidirectional HDF message passing, total hydrogen counts everywhere and
+   the cosine learning-rate decay; GCN dropped (the SI reports GIN and GATv2 only). The splits are unchanged:
+   they come from the cached, seed-independent dataset order (``load__`` caches).
+4. 2026-10-09 (current): only the HDF arm re-run, with the unit-modulus codebooks that became the HDF default
+   (SPECTRUM='unit', ex_22; size/diameter encodings kept); the GNN runs of round 3 remain current. Same splits.
+   The setting is added to the HDF commands of ex_14 only (HDF_ROUND), not to VARIANTS, which other schedulers
+   import; their HDF commands keep the original codebooks (see _command).
 
 Stages / command files written to ``_ex14/`` (executed by ``run_ex14_kcist.sbatch``):
 
@@ -117,10 +121,15 @@ VARIANTS = {
 # module docstring), per module suffix. Only archives with all of them count as done (missing mode) and
 # enter the analysis (analyze_ex_14.py); build() checks that every generated command has them.
 CURRENT = {
-    'hdc': {'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total'},
+    'hdc': {'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total', 'SPECTRUM': 'unit'},
     'gnn_random': {'HYDROGEN_COUNT': 'total'},
     'gnn': {'HYDROGEN_COUNT': 'total', 'LR_SCHEDULE': 'cosine', 'EARLY_STOPPING_PATIENCE': None},
 }
+
+
+# HDF settings of the current round that are added to the HDF commands of ex_14 only: VARIANTS is imported by other
+# schedulers (ex_15, ex_18, ex_20, ex_22), whose HDF commands keep the original codebooks.
+HDF_ROUND = {'SPECTRUM': 'unit'}
 
 
 def is_current(module: str, params: dict) -> bool:
@@ -168,7 +177,7 @@ def variant_commands(ds: tuple, seed: int, prefix: str, overrides: dict = {}) ->
     """All commands for one (dataset, seed), keyed by variant name ('hdf', 'random_gcn', 'trained_gin', ...)."""
     cmds = {}
     module, params = VARIANTS['hdf']
-    cmds['hdf'] = _command(module, prefix, seed, ds, {**params, **overrides.get('hdf', {})})
+    cmds['hdf'] = _command(module, prefix, seed, ds, {**params, **HDF_ROUND, **overrides.get('hdf', {})})
     for arch in ARCHS:
         module, params = VARIANTS['random']
         cmds[f'random_{arch}'] = _command(module, prefix, seed, ds,
@@ -270,6 +279,10 @@ def hdf_cache_name(params: dict) -> str:
         name += '__bidir'
     if params.get('HYDROGEN_COUNT') == 'total':
         name += '__totalh'
+    if params.get('ENCODING_MODE') == 'continuous' and params.get('SPECTRUM') == 'unit':
+        name += '__unitspec'
+    if params.get('GRAPH_ATTRIBUTES') is False:
+        name += '__noglobal'
     return name
 
 
