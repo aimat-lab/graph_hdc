@@ -5,6 +5,7 @@ from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 
 from graph_hdc.baselines.minhash_fps import secfp_fingerprint, map4_fingerprint
+from graph_hdc.baselines.sort_and_slice import SortAndSliceFingerprint, fit_transform_split
 
 # == FINGERPRINT PARAMETERS ==
 
@@ -16,13 +17,15 @@ FINGERPRINT_SIZE: int = 2048
 #       The radius of the fingerprint to be generated. This parameter determines the number of
 #       bonds to be considered when generating the fingerprint. For 'secfp' it is the maximum radius of
 #       the circular substructures (3 = SECFP6, the MHFP default), for 'map4' the maximum radius of the
-#       atom environments in the atom pairs (2 = MAP4).
+#       atom environments in the atom pairs (2 = MAP4), for 'sort_slice' the ECFP radius (2 = ECFP4).
 FINGERPRINT_RADIUS: int = 2
 # :param FINGERPRINT_TYPE:
 #       The type of fingerprint to be generated: 'morgan', 'count_morgan', 'rdkit', 'atom' (atom pair),
-#       'torsion' (topological torsion), 'secfp' (folded MHFP, Probst & Reymond 2018) or 'map4' (folded
-#       MinHashed atom-pair fingerprint, Capecchi et al. 2020). See graph_hdc.baselines.minhash_fps for
-#       the latter two.
+#       'torsion' (topological torsion), 'secfp' (folded MHFP, Probst & Reymond 2018), 'map4' (folded
+#       MinHashed atom-pair fingerprint, Capecchi et al. 2020) or 'sort_slice' (binary ECFP vectorised via
+#       Sort & Slice instead of folding, Dablander et al. 2024). See graph_hdc.baselines.minhash_fps and
+#       graph_hdc.baselines.sort_and_slice. 'sort_slice' keeps the FINGERPRINT_SIZE substructures that occur
+#       in the most training molecules (no labels involved; validation and test molecules are not used).
 FINGERPRINT_TYPE: str = 'morgan'
 
 # == EXPERIMENT PARAMETERS ==
@@ -38,7 +41,19 @@ experiment = Experiment.extend(
 def process_dataset(e: Experiment,
                     index_data_map: dict
                     ) -> None:
-    
+
+    if e.FINGERPRINT_TYPE == 'sort_slice':
+        # The vocabulary is fitted on the training molecules of this split, then all molecules are encoded.
+        fingerprint = SortAndSliceFingerprint(size=e.FINGERPRINT_SIZE, radius=e.FINGERPRINT_RADIUS)
+        mols = {index: Chem.MolFromSmiles(graph['graph_repr']) for index, graph in index_data_map.items()}
+        e.log(f'fitting the Sort & Slice vocabulary on the {len(e["indices/train"])} training molecules...')
+        features = fit_transform_split(fingerprint, mols, e['indices/train'])
+        e.log(f' * {fingerprint.num_reference_substructures} distinct substructures in the training molecules, '
+              f'{len(fingerprint.vocabulary)} kept')
+        for index, graph in index_data_map.items():
+            graph['graph_features'] = features[index]
+        return
+
     if e.FINGERPRINT_TYPE == 'morgan':
         gen = rdFingerprintGenerator.GetMorganGenerator(
             radius=e.FINGERPRINT_RADIUS, 

@@ -310,7 +310,12 @@ class SherlockFingerprint:
         ``descriptor -> bit index`` mapping. It reproduces the reference
         ``setup``/``keep_smallest_entropy`` logic: filter by radius, compute the
         signed Bernoulli entropy, ``argsort`` ascending with a *stable* sort, and
-        keep the first ``size`` descriptors.
+        keep the first ``size`` descriptors. One deliberate difference: the reference
+        breaks ties (descriptors of equal entropy) by the insertion order of its count
+        dictionary, which here would depend on the worker scheduling of a parallel fit
+        and on the string hashing of the processes. The descriptors are therefore
+        sorted by their key before the stable sort, so that ties are broken by the key
+        (ascending) and the same corpus always yields the same fingerprint.
 
         :param size: Number of descriptors (output bits) to keep.
         :param max_radius: Maximum descriptor radius to consider.
@@ -318,7 +323,8 @@ class SherlockFingerprint:
         if self.counts_ is None:
             raise RuntimeError('SherlockFingerprint is not fitted; call fit() or load() first.')
 
-        items = [(bi, c) for bi, c in self.counts_.items() if bi[3] <= max_radius]
+        # sorted by key: deterministic tie-break (see above)
+        items = sorted((bi, c) for bi, c in self.counts_.items() if bi[3] <= max_radius)
         if not items:
             raise ValueError(f'No descriptors with radius <= {max_radius} in the fitted corpus.')
 
