@@ -21,6 +21,7 @@ from rdkit.Chem import rdmolops
 from graph_hdc.models import HyperNet
 from graph_hdc.special.molecules import graph_dict_from_mol
 from graph_hdc.utils import quantize_equal_frequency
+from graph_hdc.special.spectrum import unit_spectrum, effective_components
 from graph_hdc.special.molecules import (
     make_molecule_node_encoder_map,
     make_molecule_node_encoder_map_cont,
@@ -84,6 +85,24 @@ HYDROGEN_COUNT: str = 'total'
 #       float32 vectors. Used for the bit-depth ablation (ex_20, reviewer comment R2.2). The embedding cache
 #       always stores the unquantized vectors.
 QUANTIZE_BITS: Optional[int] = None
+# :param SPECTRUM:
+#       Fourier magnitudes of the random codebook vectors (ablation ex_22). "gaussian" (default, the original
+#       encoder): the element vectors and the base vectors of the fractional power encoders have random Fourier
+#       magnitudes. "unit": all of them get unit Fourier magnitudes with unchanged phases (unitary HRR, see
+#       graph_hdc/special/spectrum.py). Only for ENCODING_MODE "continuous". Embedding caches of "unit" runs carry a
+#       "__unitspec" suffix.
+SPECTRUM: str = 'gaussian'
+# :param GRAPH_ATTRIBUTES:
+#       Whether the encodings of the graph size and graph diameter are added to the embedding (default True, the
+#       original encoder). False keeps only the message passing part, normalized to unit length as in the original
+#       formula normalize(normalize(S) + normalize(G)) without G (ablation ex_22). Without this normalization the
+#       norm of the sum-pooled readout would still carry the molecule size. Embedding caches of False runs carry a
+#       "__noglobal" suffix.
+GRAPH_ATTRIBUTES: bool = True
+# :param SPECTRUM_DIAGNOSTIC:
+#       If True, the median number of effective Fourier components of the embeddings (participation ratio of the
+#       power spectrum, over at most 1000 molecules) is stored as "embedding/effective_components" (ex_22).
+SPECTRUM_DIAGNOSTIC: bool = False
 
 # == VISUALIZATION PARAMETERS ==
 
@@ -186,14 +205,27 @@ def process_dataset(
             seed=e.SEED,
         )
         graph_encoder_map = {}
-    
-    
+
+    # --- ablations of ex_22 (the defaults keep the original encoder) ---
+    if e.SPECTRUM not in ('gaussian', 'unit'):
+        raise ValueError(f'SPECTRUM must be "gaussian" or "unit", got {e.SPECTRUM!r}')
+    if e.SPECTRUM == 'unit' and e.ENCODING_MODE != 'continuous':
+        raise ValueError('SPECTRUM="unit" is only implemented for ENCODING_MODE="continuous"')
+    if not e.GRAPH_ATTRIBUTES:
+        graph_encoder_map = {}
+    if e.SPECTRUM == 'unit':
+        node_encoder_map = unit_spectrum(node_encoder_map)
+        graph_encoder_map = unit_spectrum(graph_encoder_map)
+
+
     e.log('creating HyperNet encoder...')
     e.log(f' * DEVICE: {e.DEVICE}')
     e.log(f' * EMBEDDING_SIZE: {e.EMBEDDING_SIZE}')
     e.log(f' * NUM_LAYERS: {e.NUM_LAYERS}')
     e.log(f' * ENCODING_MODE: {e.ENCODING_MODE}')
-    
+    e.log(f' * SPECTRUM: {e.SPECTRUM}')
+    e.log(f' * GRAPH_ATTRIBUTES: {e.GRAPH_ATTRIBUTES} ({", ".join(graph_encoder_map) or "none"})')
+
     hyper_net = HyperNet(
         hidden_dim=e.EMBEDDING_SIZE,
         depth=e.NUM_LAYERS,
@@ -224,6 +256,10 @@ def process_dataset(
         hdc_cache_name += '__bidir'
     if e.HYDROGEN_COUNT == 'total':
         hdc_cache_name += '__totalh'
+    if e.SPECTRUM == 'unit':
+        hdc_cache_name += '__unitspec'
+    if not e.GRAPH_ATTRIBUTES:
+        hdc_cache_name += '__noglobal'
     @experiment.cache.cached(name=hdc_cache_name)
     def process_dataset():
         
@@ -266,7 +302,12 @@ def process_dataset(
         results = hyper_net.forward_graphs(graphs, batch_size=600)
         for (index, graph), result in zip(index_data_map.items(), results):
             index_data_map[index]['graph_features'] = result['graph_embedding']
-            
+            # Without graph attributes HyperNet returns the raw sum-pooled readout, whose norm grows with the
+            # molecule size. Normalizing it gives the original formula with the size/diameter part removed.
+            if not e.GRAPH_ATTRIBUTES:
+                embedding = index_data_map[index]['graph_features']
+                index_data_map[index]['graph_features'] = embedding / np.linalg.norm(embedding)
+
         time_end_forward = time.time()
         e.log(f'done the model forward pass after {time_end_forward - time_start_forward:.2f} seconds')
         e['encode_time'] = time_end_forward - time_start_encode
@@ -276,6 +317,16 @@ def process_dataset(
     index_data_map_processed = process_dataset()
     for index in index_data_map:
         index_data_map[index]['graph_features'] = index_data_map_processed[index]['graph_features']
+
+    # how many Fourier components effectively carry the energy of the embeddings (diagnostic of ex_22)
+    if e.SPECTRUM_DIAGNOSTIC:
+        sample = [np.asarray(index_data_map[index]['graph_features'], dtype=float)
+                  for index in list(index_data_map)[:1000]]
+        e['embedding/effective_components'] = effective_components(np.stack(sample))
+        e['embedding/mean_norm'] = float(np.mean([np.linalg.norm(x) for x in sample]))
+        e.log(f' * effective Fourier components of the embeddings: {e["embedding/effective_components"]:.0f} '
+              f'of {e.EMBEDDING_SIZE} (median over {len(sample)} molecules), mean norm '
+              f'{e["embedding/mean_norm"]:.4f}')
 
 
 @experiment.hook('after_dataset', replace=False, default=False)
