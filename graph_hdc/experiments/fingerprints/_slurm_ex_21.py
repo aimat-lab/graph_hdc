@@ -15,12 +15,17 @@ arms (the Morgan fingerprints that molecule_collisions.py computes as well are n
   (seed, arm).
 * ``props``: the BACE design on further datasets of the main comparison (FreeSolv, AqSolDB). One job per (dataset,
   seed) with the same three runs as for BACE.
+* ``cmrt``: the elution order of enantiomers on the chiral column Chiralpak AD-H (CMRT subset of Baimacheva et al.,
+  predict_enantiomers__hdc.py with prepare_cmrt_elution.py) with the same HDF configuration and models, on the
+  authors' split (seeds 0-9: codebooks, network initialization) and on random splits by pair with 194 test pairs
+  (seeds 0-9). One job per (split, seed) runs both arms.
 
 Job setup as in ex_20: CPU only, 2 threads, 4 CPUs per job, a private TMPDIR, caching disabled (no job writes shared
 cache files), this repository first on PYTHONPATH (so that a run from a git worktree uses the worktree's code), jobs
 pinned to euler. The datasets are loaded once, one after the other, before submitting.
 
     python prepare_chiro_docking.py    # once: writes data/chiro_docking/chiro_docking.csv
+    python prepare_cmrt_elution.py     # once: writes data/cmrt_elution/cmrt_adh.csv
     python _slurm_ex_21.py [part ...]  # pre-load datasets, write group scripts, submit (default: all parts)
     python _slurm_ex_21.py --dry-run   # write group scripts and job scripts only
     python _slurm_ex_21.py --smoke     # write small group scripts (prefix ex_21_smoke) and print their paths, to run
@@ -39,6 +44,7 @@ VENV = os.path.join(REPO, '.venv')
 if not os.path.isdir(VENV):
     VENV = '/media/ssd2/Programming/graph_hdc/.venv'
 CHIRO_CSV = os.path.join(REPO, 'data', 'chiro_docking', 'chiro_docking.csv')
+CMRT_CSV = os.path.join(REPO, 'data', 'cmrt_elution', 'cmrt_adh.csv')
 
 PREFIX = 'ex_21'
 PREFIX_SMOKE = 'ex_21_smoke'
@@ -52,7 +58,12 @@ NN_SEED_OFFSET = 1000
 CHIRO_SEEDS = [0, 1, 2]
 PROPS = [ds for ds in DATASETS if ds[0] in ('freesolv_hfe', 'aqsoldb_logs')]
 PROPS_SEEDS = list(range(10))
-PARTS = ['collisions', 'bace', 'chiro', 'props']
+# (SPLIT_MODE, seeds): the authors' split with different codebooks and network seeds, and random splits by pair (with
+# 10 repetitions each, so that a paired Wilcoxon test can reach p < 0.05; with 5, the smallest p is 0.0625)
+CMRT_SPLITS = [('given', list(range(10))), ('random', list(range(10)))]
+# test pairs of a random split: 194, as in the random splits of Baimacheva et al.
+CMRT_NUM_TEST_PAIRS = 194
+PARTS = ['collisions', 'bace', 'chiro', 'props', 'cmrt']
 
 AUTOSLURM_CONFIG = 'euler_3'
 NUM_THREADS = 2
@@ -60,7 +71,7 @@ CPUS = 4
 # (memory, time limit) per part
 # (BACE: the HDF encoding with stereo peaks at about 6.1 GB, ex_20 without stereo at about 4.9 GB)
 RESOURCES = {'collisions': ('24000mb', '24:00:00'), 'bace': ('10000mb', '12:00:00'), 'chiro': ('16000mb', '24:00:00'),
-             'props': ('10000mb', '12:00:00')}
+             'props': ('10000mb', '12:00:00'), 'cmrt': ('10000mb', '12:00:00')}
 
 
 def _line(module: str, params: dict) -> str:
@@ -96,6 +107,19 @@ def chiro_command(prefix: str, seed: int, stereo: bool, num_data=None) -> str:
     params = {
         '__DEBUG__': False, '__PREFIX__': f'{prefix}_chiro', 'SEED': seed, 'CHIRO_CSV': CHIRO_CSV,
         'NUM_DATA': num_data, 'NN_NUM_WORKERS': 0, **hdf_params(),
+        'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total', 'STEREO': stereo,
+    }
+    return _line('predict_enantiomers__hdc.py', params)
+
+
+def cmrt_command(prefix: str, split_mode: str, seed: int, stereo: bool, num_data=None) -> str:
+    """Elution order on Chiralpak AD-H: regression of the first-eluted label (1/0), ranking accuracy over the pairs
+    and accuracy of the predictions thresholded at 0.5 (as the classification accuracy of Baimacheva et al.)."""
+    params = {
+        '__DEBUG__': False, '__PREFIX__': f'{prefix}_cmrt', 'SEED': seed, 'PAIRS_CSV': CMRT_CSV,
+        'TARGET_COLUMN': 'first_eluted', 'SPLIT_MODE': split_mode, 'NUM_TEST': CMRT_NUM_TEST_PAIRS,
+        'DATASET_NAME': 'cmrt_adh', 'DATASET_NAME_ID': 'cmrt_adh',
+        'ACCURACY_THRESHOLD': 0.5, 'NUM_DATA': num_data, 'NN_NUM_WORKERS': 0, **hdf_params(),
         'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total', 'STEREO': stereo,
     }
     return _line('predict_enantiomers__hdc.py', params)
@@ -149,6 +173,12 @@ def groups(prefix: str, smoke: bool = False, parts: list = PARTS) -> dict:
             for seed in PROPS_SEEDS[:1] if smoke else PROPS_SEEDS:
                 name = f'{prefix}_props__{ds[0]}__seed_{seed}'
                 out['props'].append(write_group(name, prediction_group(prefix, 'props', ds, seed)))
+    if 'cmrt' in parts:
+        for split_mode, seeds in CMRT_SPLITS:
+            for seed in seeds[:1] if smoke else seeds:
+                name = f'{prefix}_cmrt__{split_mode}__seed_{seed}'
+                lines = [cmrt_command(prefix, split_mode, seed, stereo) for stereo in ARMS]
+                out['cmrt'].append(write_group(name, lines))
     return out
 
 
@@ -165,8 +195,9 @@ def preload(parts: list):
 
 if __name__ == '__main__':
 
-    if not os.path.exists(CHIRO_CSV):
-        sys.exit(f'{CHIRO_CSV} is missing, run prepare_chiro_docking.py first')
+    for path, script in ((CHIRO_CSV, 'prepare_chiro_docking.py'), (CMRT_CSV, 'prepare_cmrt_elution.py')):
+        if not os.path.exists(path):
+            sys.exit(f'{path} is missing, run {script} first')
 
     # a misspelled flag must not lead to a real submission
     flags = {arg for arg in sys.argv[1:] if arg.startswith('--')}

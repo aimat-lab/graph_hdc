@@ -20,6 +20,7 @@ import glob
 from collections import defaultdict
 
 import numpy as np
+import pandas as pd
 from scipy.stats import wilcoxon
 
 PATH = os.path.dirname(os.path.abspath(__file__))
@@ -97,8 +98,8 @@ def paired_table(runs: dict, metrics: list, arm: str = 'stereo', reference: str 
             diff = [b - a for a, b in zip(first, second)]
             wins = sum((d < 0) if better == 'lower' else (d > 0) for d in diff)
             # two-sided Wilcoxon signed-rank test paired by repetition (as in the GNN comparison of the SI); with
-            # fewer than 5 repetitions no test can reach p < 0.05
-            p = (f'{wilcoxon(second, first).pvalue:.3g}' if len(diff) >= 5 and any(d != 0 for d in diff)
+            # fewer than 6 repetitions no test can reach p < 0.05
+            p = (f'{wilcoxon(second, first).pvalue:.3g}' if len(diff) >= 6 and any(d != 0 for d in diff)
                  else '-')
             lines.append(f'| {label} | {metric} | {mean_sd(first, scale)} | {mean_sd(second, scale)} '
                          f'| {mean_sd(diff, scale)} | {wins} of {len(diff)} | {p} |')
@@ -161,9 +162,52 @@ def chiro(prefix: str) -> str:
     return '\n'.join(lines) + '\n'
 
 
+# Table 3 of Baimacheva et al. (J Cheminform 2025): per-molecule test accuracy of the elution order classification on
+# their split (random forest, one model), and the mean over five further random splits. The descriptors of a molecule
+# alone correspond to our "accuracy"; the variants that use the difference to the descriptors of the opposite
+# enantiomer decide each molecule against its mirror image, like our "ranking_accuracy".
+CMRT_REFERENCE = [
+    ('chirality-aware Morgan fingerprint (radius 3, 512 bits)', 0.807),
+    ('Transformer heteroencoder latent vector', 0.729),
+    ('CDDD latent vector', 0.683),
+    ('chirality-aware Morgan fingerprint, difference to the opposite enantiomer', 0.822),
+    ('Transformer latent vector, difference to the opposite enantiomer', 0.753),
+    ('CDDD latent vector, difference to the opposite enantiomer', 0.732),
+    ('chirality-aware Morgan fingerprint, mean over five further random splits', 0.81),
+]
+
+
+def r_first_rule(params: dict, data: dict) -> float:
+    """Accuracy of the rule "the R enantiomer elutes first" on the test molecules of a run. A model that receives the
+    R/S descriptors can reach it without learning anything else, so it is the chance level for HDF with stereo."""
+    table = pd.read_csv(params['PAIRS_CSV'])
+    test = table.iloc[data['indices']['test']]
+    return float(((test['r_s'] == 'R').astype(int) == test['first_eluted']).mean())
+
+
+def cmrt(prefix: str) -> str:
+    """Elution order on Chiralpak AD-H, one table per split mode (the authors' split, random splits by pair)."""
+    by_split, rule = defaultdict(dict), defaultdict(dict)
+    for p, d in archives('predict_enantiomers__hdc', f'{prefix}_cmrt'):
+        by_split[p['SPLIT_MODE']][(p['SEED'], arm(p))] = d
+        rule[p['SPLIT_MODE']][p['SEED']] = r_first_rule(p, d)
+    lines = ['## Elution order on Chiralpak AD-H (CMRT subset of Baimacheva et al.)\n',
+             'ranking_accuracy: fraction of test pairs whose predictions are in the elution order (ties count half); '
+             'accuracy: fraction of test molecules whose prediction, thresholded at 0.5, matches first/last eluted '
+             '(the metric of Baimacheva et al.).\n']
+    for split_mode, runs in sorted(by_split.items()):
+        lines.append(f'\n### Split: {split_mode}\n')
+        lines += paired_table(runs, [('ranking_accuracy', 100.0, 'higher'), ('accuracy', 100.0, 'higher')])
+        lines.append(f'\nRule "the R enantiomer elutes first" on the same test molecules: '
+                     f'{mean_sd(list(rule[split_mode].values()), 100.0, 1)}')
+    lines.append('\nReference (Baimacheva et al., Table 3), per-molecule test accuracy of a random forest:\n')
+    lines += [f'- {name}: {value:.3f}' for name, value in CMRT_REFERENCE]
+    return '\n'.join(lines) + '\n'
+
+
 def main(prefix: str):
     text = '\n'.join([f'# ex_21: HDF without and with stereo descriptors (prefix {prefix})\n',
-                      collisions(prefix), bace(prefix), props(prefix), chiro(prefix)])
+                      collisions(prefix), bace(prefix), props(prefix), chiro(prefix), cmrt(prefix)])
     print(text)
     os.makedirs(OUT, exist_ok=True)
     with open(os.path.join(OUT, f'summary_{prefix}.md'), 'w') as f:

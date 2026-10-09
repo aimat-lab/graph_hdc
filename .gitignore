@@ -25,6 +25,7 @@ lightning_logs/
 # Sherlock baseline corpus + fitted dictionary (large, not tracked)
 data/sherlock/
 data/chiro_docking/
+data/cmrt_elution/
 
 # Molecular dataset files (downloaded via chem_mat_data, cached separately — not tracked)
 *.mpack

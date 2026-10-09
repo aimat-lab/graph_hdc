@@ -1,22 +1,33 @@
 """
-Ranking enantiomers by their docking scores with HDF (experiment ex_21).
+Properties that differ between the two enantiomers of a pair, predicted with HDF (experiment ex_21).
 
-The benchmark of Adams et al. (ChIRo, ICLR 2022): pairs of small enantiomers with one stereocenter, docked into the
-chiral pocket of PDB 4JBV; the best docking scores of the two enantiomers of a pair differ by at least 0.3 kcal/mol.
-A model is trained to predict the docking score (regression, as in the original benchmark) on the authors' training
-split, and its ranking accuracy is the fraction of enantiomer pairs of the test split whose predicted scores are in
-the same order as the docking scores. A representation without stereochemistry gives both enantiomers the same
-vector and hence the same prediction; such ties count as half correct, so that it scores exactly 50 %. Predictions
-that differ by less than TIE_TOLERANCE also count as tied: the HDF vectors of two enantiomers without stereo
-descriptors differ by floating-point noise (the summation order follows the atom order), which the MLP turns into
-prediction differences of about 1e-7 kcal/mol.
+Two benchmarks share this module:
 
-The dataset is prepared by ``prepare_chiro_docking.py``. Everything else (HDF encoding, models, regression metrics)
-is the same as in ``predict_molecules__hdc.py``; the original train/validation/test splits replace the random split.
+* Ranking enantiomers by their docking scores (Adams et al., ChIRo, ICLR 2022): pairs of small enantiomers with one
+  stereocenter, docked into the chiral pocket of PDB 4JBV; the best docking scores of the two enantiomers of a pair
+  differ by at least 0.3 kcal/mol. Prepared by ``prepare_chiro_docking.py`` (target column top_score, the authors'
+  training, validation and test splits).
+* Elution order of enantiomers on the chiral HPLC column Chiralpak AD-H (CMRT dataset of Xu et al., Nat Commun 2023,
+  in the subset of Baimacheva et al., J Cheminform 2025): the target is 1 for the enantiomer that elutes first and 0
+  for the other. Prepared by ``prepare_cmrt_elution.py`` (target column first_eluted, the authors' training and test
+  split).
+
+A model is trained to predict the target (regression) on the training split. Its ranking accuracy is the fraction of
+enantiomer pairs of the test split whose predictions are in the same order as their targets. A representation
+without stereochemistry gives both enantiomers the same vector and hence the same prediction; such ties count as half
+correct, so that it scores exactly 50 %. Predictions that differ by less than TIE_TOLERANCE also count as tied: the
+HDF vectors of two enantiomers without stereo descriptors differ by floating-point noise (the summation order follows
+the atom order), which the MLP turns into prediction differences of about 1e-7. For binary targets,
+ACCURACY_THRESHOLD additionally gives the accuracy of the individual thresholded predictions, as reported by
+Baimacheva et al.
+
+Everything else (HDF encoding, models, regression metrics) is the same as in ``predict_molecules__hdc.py``; the given
+splits of the benchmark (or random splits by pair) replace the random split by molecule.
 """
 import os
 import random
 from collections import defaultdict
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -29,6 +40,17 @@ from pycomex.utils import folder_path, file_namespace
 #       The table written by prepare_chiro_docking.py (columns smiles, smiles_nostereo, top_score, split).
 CHIRO_CSV: str = os.path.abspath(os.path.join(folder_path(__file__), '..', '..', '..', 'data', 'chiro_docking',
                                               'chiro_docking.csv'))
+# :param PAIRS_CSV:
+#       Another table of enantiomer pairs with the columns smiles, smiles_nostereo (identifies the pair), split and
+#       TARGET_COLUMN (e.g. the one written by prepare_cmrt_elution.py). None uses CHIRO_CSV.
+PAIRS_CSV: Optional[str] = None
+# :param TARGET_COLUMN:
+#       The column of the table that holds the target.
+TARGET_COLUMN: str = 'top_score'
+# :param SPLIT_MODE:
+#       "given" uses the split column of the table. "random" instead puts a random fraction NUM_TEST of the pairs
+#       (sampled with SEED) into the test split and all other pairs into the training split, without validation split.
+SPLIT_MODE: str = 'given'
 # :param DATASET_NAME:
 #       Only used to name the caches of the HDF experiment.
 DATASET_NAME: str = 'chiro_docking'
@@ -40,10 +62,14 @@ TARGET_INDEX = None
 #       with SEED (for smoke tests). None uses all pairs.
 NUM_DATA = None
 # :param TIE_TOLERANCE:
-#       Predicted docking scores (kcal/mol) of the two enantiomers of a pair that differ by less than this count as
-#       tied. The docking scores themselves are given in steps of 0.1 kcal/mol, and the scores of the two enantiomers
-#       of a pair differ by at least 0.3 kcal/mol.
+#       Predictions (in units of the target) of the two enantiomers of a pair that differ by less than this count as
+#       tied. The docking scores are given in steps of 0.1 kcal/mol, and the scores of the two enantiomers of a pair
+#       differ by at least 0.3 kcal/mol; the elution order is 0 or 1.
 TIE_TOLERANCE: float = 1e-5
+# :param ACCURACY_THRESHOLD:
+#       If given, the accuracy of the individual predictions thresholded at this value is reported as well (for binary
+#       targets such as the elution order, 0.5). None skips it.
+ACCURACY_THRESHOLD: Optional[float] = None
 
 # == EMBEDDING PARAMETERS ==
 
@@ -69,8 +95,16 @@ experiment = Experiment.extend(
 
 
 def read_table(e: Experiment) -> pd.DataFrame:
-    """The benchmark table, optionally subsampled by pairs; the row number is the index of a molecule."""
-    table = pd.read_csv(e.CHIRO_CSV)
+    """The benchmark table with its split (given or random by pair), optionally subsampled by pairs; the row number
+    is the index of a molecule."""
+    table = pd.read_csv(e.PAIRS_CSV or e.CHIRO_CSV)
+    if e.SPLIT_MODE == 'random':
+        pairs = sorted(table['smiles_nostereo'].unique())
+        num_test = e.NUM_TEST if isinstance(e.NUM_TEST, int) else int(round(e.NUM_TEST * len(pairs)))
+        test = set(random.Random(e.SEED).sample(pairs, k=num_test))
+        table['split'] = ['test' if pair in test else 'train' for pair in table['smiles_nostereo']]
+    elif e.SPLIT_MODE != 'given':
+        raise ValueError(f'unknown SPLIT_MODE "{e.SPLIT_MODE}", expected "given" or "random"')
     if e.NUM_DATA is not None and e.NUM_DATA != 1.0:
         rng = random.Random(e.SEED)
         keep = []
@@ -87,11 +121,12 @@ def load_dataset(e: Experiment):
     table = read_table(e)
     index_data_map = {
         index: {
-            'graph_repr': row.smiles,
-            'graph_labels': np.array([row.top_score], dtype=float),
-            'smiles_nostereo': row.smiles_nostereo,
+            'graph_repr': smiles,
+            'graph_labels': np.array([target], dtype=float),
+            'smiles_nostereo': pair,
         }
-        for index, row in enumerate(table.itertuples(index=False))
+        for index, (smiles, pair, target) in enumerate(zip(table['smiles'], table['smiles_nostereo'],
+                                                            table[e.TARGET_COLUMN]))
     }
     e.log(f'loaded {len(index_data_map)} enantiomers in {table["smiles_nostereo"].nunique()} pairs')
     return index_data_map, {}
@@ -146,6 +181,10 @@ def evaluate_ranking(e: Experiment,
     e[f'metrics/{key}/num_pairs'] = num_pairs
     e[f'metrics/{key}/num_tied_pairs'] = num_ties
     e.log(f' * ranking accuracy: {accuracy:.4f} over {num_pairs} pairs ({num_ties} tied)')
+    if e.ACCURACY_THRESHOLD is not None:
+        threshold = e.ACCURACY_THRESHOLD
+        e[f'metrics/{key}/accuracy'] = float(np.mean((y_pred > threshold) == (y_true > threshold)))
+        e.log(f' * accuracy of the predictions thresholded at {threshold}: {e[f"metrics/{key}/accuracy"]:.4f}')
     if key.startswith('test'):
         e[f'predictions/{key}'] = {'indices': [int(i) for i in indices], 'y_pred': y_pred.tolist()}
 
