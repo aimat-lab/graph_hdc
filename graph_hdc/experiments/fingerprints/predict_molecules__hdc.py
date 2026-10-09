@@ -3,7 +3,7 @@ import time
 import torch
 import torch.nn as nn
 from torch import Tensor
-from typing import List, Literal, Dict
+from typing import List, Literal, Dict, Optional
 
 import umap
 import numpy as np
@@ -20,6 +20,7 @@ from rdkit.Chem import rdmolops
 # from visual_graph_datasets.data import nx_from_graph
 from graph_hdc.models import HyperNet
 from graph_hdc.special.molecules import graph_dict_from_mol
+from graph_hdc.utils import quantize_equal_frequency
 from graph_hdc.special.molecules import (
     make_molecule_node_encoder_map,
     make_molecule_node_encoder_map_cont,
@@ -76,6 +77,13 @@ BIDIRECTIONAL: bool = True
 #       counts implicit hydrogens, which is 0 for every atom written in brackets ([nH], [NH3+], [C@@H], ...).
 #       Embedding caches of "total" runs carry a "__totalh" suffix.
 HYDROGEN_COUNT: str = 'total'
+# :param QUANTIZE_BITS:
+#       If set, every component of the HDF vectors is quantized to 2**QUANTIZE_BITS levels before the models are
+#       trained: per embedding dimension, equal-frequency bins are fitted on the training split and each value is
+#       replaced by the mean of the training values in its bin (see ``quantize_equal_frequency``). None keeps the
+#       float32 vectors. Used for the bit-depth ablation (ex_20, reviewer comment R2.2). The embedding cache
+#       always stores the unquantized vectors.
+QUANTIZE_BITS: Optional[int] = None
 
 # == VISUALIZATION PARAMETERS ==
 
@@ -275,6 +283,23 @@ def after_dataset(e: Experiment,
                   index_data_map: dict,
                   **kwargs
                   ) -> None:
+
+    # --- quantization ---
+    # The bins are fitted on the training split only, so no information of the test molecules leaks in.
+    if e.QUANTIZE_BITS is not None:
+        e.log(f'quantizing the HDF vectors to {e.QUANTIZE_BITS} bits per dimension...')
+        indices = list(index_data_map.keys())
+        row_of = {index: row for row, index in enumerate(indices)}
+        features = np.array([index_data_map[index]['graph_features'] for index in indices])
+        train_rows = np.array([row_of[index] for index in kwargs['train_indices']])
+        quantized = quantize_equal_frequency(features, train_rows, e.QUANTIZE_BITS)
+        for row, index in enumerate(indices):
+            index_data_map[index]['graph_features'] = quantized[row]
+        e['quantize/mean_abs_error'] = float(np.abs(quantized - features).mean())
+        e['quantize/mean_levels'] = float(np.mean([len(np.unique(quantized[train_rows, d]))
+                                                   for d in range(quantized.shape[1])]))
+        e.log(f' * mean abs. error {e["quantize/mean_abs_error"]:.2e}, '
+              f'{e["quantize/mean_levels"]:.1f} levels per dimension (training split)')
     
     if e.PLOT_UMAP:
         

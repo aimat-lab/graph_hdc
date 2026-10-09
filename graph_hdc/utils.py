@@ -655,3 +655,52 @@ def render_latex(kwargs: dict,
         pdf_file_path = os.path.join(temp_path, 'main.pdf')
         shutil.copy(pdf_file_path, output_path)
 
+
+
+def quantize_equal_frequency(features: np.ndarray,
+                             train_rows: np.ndarray,
+                             bits: int,
+                             ) -> np.ndarray:
+    """
+    Quantizes every column of ``features`` to ``2 ** bits`` levels with equal-frequency (quantile) bins that
+    are fitted on the rows ``train_rows`` only, and returns the dequantized matrix (float32) in which each value
+    is replaced by the mean of the training values in its bin.
+
+    The bin edges of a column are the j / 2**bits quantiles (j = 1 ... 2**bits - 1) of its training values,
+    so every bin holds about the same number of training values. Identical values always share a level, so a
+    column with many tied training values can end up with fewer than 2**bits levels (a bin that stays empty in
+    the training data gets the midpoint of its edges). If there are at least as many levels as training rows,
+    every distinct training value becomes its own level: training values stay unchanged and every other value is
+    mapped to the nearest training value.
+
+    :param features: The (num_samples, num_features) matrix to quantize.
+    :param train_rows: The row indices of ``features`` from which the bins are fitted.
+    :param bits: The number of bits per value, i.e. the quantized matrix has ``2 ** bits`` levels per column.
+
+    :returns: A float32 array of the same shape as ``features``.
+    """
+    features = np.asarray(features, dtype=np.float64)
+    train_rows = np.asarray(train_rows)
+    if not np.isfinite(features).all():
+        raise ValueError('quantize_equal_frequency: features contain NaN or infinite values')
+    num_levels = 2 ** bits
+    quantized = np.empty(features.shape, dtype=np.float32)
+    for col in range(features.shape[1]):
+        values = features[:, col]
+        train = np.sort(values[train_rows])
+        if num_levels >= len(train):
+            levels = np.unique(train)
+            upper = np.clip(np.searchsorted(levels, values), 1, len(levels) - 1) if len(levels) > 1 else np.zeros(len(values), dtype=int)
+            lower = np.maximum(upper - 1, 0)
+            nearest = np.where(np.abs(values - levels[lower]) <= np.abs(levels[upper] - values), lower, upper)
+            quantized[:, col] = levels[nearest]
+            continue
+        edges = np.quantile(train, np.arange(1, num_levels) / num_levels)
+        codes = np.searchsorted(edges, values, side='right')
+        train_codes = codes[train_rows]
+        sums = np.bincount(train_codes, weights=values[train_rows], minlength=num_levels)
+        counts = np.bincount(train_codes, minlength=num_levels)
+        bounds = np.concatenate([[train[0]], edges, [train[-1]]])
+        centers = np.where(counts > 0, sums / np.maximum(counts, 1), (bounds[:-1] + bounds[1:]) / 2)
+        quantized[:, col] = centers[codes]
+    return quantized

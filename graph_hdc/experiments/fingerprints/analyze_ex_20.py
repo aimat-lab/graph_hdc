@@ -1,0 +1,130 @@
+"""
+Analysis of Experiment 20 (ex_20): bit-depth ablation of HDF (reviewer comment R2.2).
+
+Pairs the runs of ``_slurm_ex_20.py`` by (dataset, seed) and divides the test MAE of the MLP at each bit depth
+(QUANTIZE_BITS = 16, 8, 4, 2, 1) by the test MAE of the float32 run (QUANTIZE_BITS = None) of the same seed. All
+bit depths of a seed share the split, the codebooks and the MLP seed. The float32 run with another network seed
+(NN_SEED set, label 'retrained') gives the ratio that the run-to-run variation of the MLP training alone produces.
+Prefer the median ratio: the shared float32 denominator is noisy, which pushes the mean ratio above 1.
+
+    python analyze_ex_20.py [prefix] [--out FIGURE.pdf]     # default prefix: ex_20_bits
+
+Writes to ``_ex20/``: ``bits_<prefix>.md`` (table), ``bits_<prefix>.csv`` (all runs) and ``figure_bits_<prefix>.pdf``
+(box plots: x = bits per dimension, one box per dataset, y = MAE relative to float32). ``--out`` also copies the
+figure to the given path (e.g. the paper's figures folder).
+"""
+import os
+import sys
+import csv
+import shutil
+from collections import defaultdict
+
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+
+from analyze_ex_15 import iter_archives
+
+PATH = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(PATH, '_ex20')
+MODEL = 'neural_net2'
+BITS = [1, 2, 4, 8, 16, 32]  # 32 = float32 (QUANTIZE_BITS None)
+RETRAINED = 'retrained'      # float32 with another network seed (NN_SEED)
+ARMS = BITS + [RETRAINED]
+DATASETS = [('aqsoldb_logs', 'AqSolDB'), ('freesolv_hfe', 'FreeSolv'), ('bace_ic50', 'BACE')]
+COLORS = ['#7f7f7f', '#c49a3a', '#8c5aa6']
+
+
+def collect(prefix: str) -> dict:
+    """{(dataset, seed): {arm: mae}}; a retried run keeps the newest archive."""
+    runs = defaultdict(dict)
+    for _, meta, params, data in sorted(iter_archives(prefix), key=lambda t: t[1].get('start_time') or 0):
+        key = f'test_{MODEL}'
+        if key not in data.get('metrics', {}) or 'QUANTIZE_BITS' not in params:
+            continue
+        bits = params['QUANTIZE_BITS']
+        if params.get('NN_SEED') is not None:
+            arm = RETRAINED
+        else:
+            arm = bits if bits is not None else 32
+        # identical values share a level, so heavy ties could leave fewer than 2**bits levels per dimension
+        levels = data.get('quantize', {}).get('mean_levels')
+        if bits is not None and bits <= 8 and levels is not None and levels < 0.99 * 2 ** bits:
+            print(f'WARNING {params["NOTE"]} seed {params["SEED"]} {bits} bits: only {levels:.1f} levels per dimension')
+        runs[(params['NOTE'], params['SEED'])][arm] = data['metrics'][key]['mae']
+    return runs
+
+
+def main(prefix: str, out: str = None):
+    runs = collect(prefix)
+    relative = {}  # (dataset, bits) -> array of MAE ratios over the complete seeds
+    rows, records = [], []
+    for dataset, label in DATASETS:
+        seeds = sorted(s for (d, s), v in runs.items() if d == dataset and all(a in v for a in ARMS))
+        incomplete = sorted(s for (d, s), v in runs.items() if d == dataset and not all(a in v for a in ARMS))
+        if incomplete:
+            print(f'{label}: seeds {incomplete} are incomplete and left out')
+        if not seeds:
+            continue
+        for bits in ARMS:
+            ratio = np.array([runs[(dataset, s)][bits] / runs[(dataset, s)][32] for s in seeds])
+            relative[(dataset, bits)] = ratio
+            mae = np.array([runs[(dataset, s)][bits] for s in seeds])
+            q1, med, q3 = np.percentile(ratio, [25, 50, 75])
+            rows.append([label, bits, len(seeds), f'{mae.mean():.4g} ± {mae.std():.2g}',
+                         f'{med:.3f} [{q1:.3f}, {q3:.3f}]', f'{ratio.mean():.3f}'])
+        for s in seeds:
+            records += [[dataset, s, bits, runs[(dataset, s)][bits]] for bits in ARMS]
+
+    header = ['Dataset', 'Bits', 'n', 'MAE', 'MAE / float32 (median [IQR])', 'MAE / float32 (mean)']
+    lines = ['| ' + ' | '.join(header) + ' |', '|' + '---|' * len(header)]
+    lines += ['| ' + ' | '.join(str(c) for c in row) + ' |' for row in rows]
+    print(f'prefix {prefix}: {len(records)} runs in complete seeds\n')
+    print('\n'.join(lines))
+    if not records:
+        print('no complete seeds found, existing outputs are left unchanged')
+        return
+
+    os.makedirs(OUT, exist_ok=True)
+    with open(os.path.join(OUT, f'bits_{prefix}.md'), 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+    with open(os.path.join(OUT, f'bits_{prefix}.csv'), 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['dataset', 'seed', 'bits', 'mae'])
+        writer.writerows(records)
+
+    # --- figure: groups along x = bits per dimension, one box per dataset ---
+    present = [(d, l, c) for (d, l), c in zip(DATASETS, COLORS) if (d, BITS[0]) in relative]
+    width = 0.8 / len(present)
+    fig, ax = plt.subplots(figsize=(6.5, 3.2))
+    for j, (dataset, label, color) in enumerate(present):
+        positions = [i + (j - (len(present) - 1) / 2) * width for i in range(len(ARMS))]
+        ax.boxplot([relative[(dataset, b)] for b in ARMS], positions=positions, widths=width * 0.85,
+                   patch_artist=True, showfliers=True, medianprops=dict(color='black'),
+                   boxprops=dict(facecolor=color, alpha=0.8), flierprops=dict(markersize=3))
+    ax.axhline(1.0, color='black', linestyle='--', linewidth=0.8)
+    ax.axvline(len(BITS) - 0.5, color='gray', linestyle=':', linewidth=0.8)
+    ax.set_xticks(range(len(ARMS)))
+    ax.set_xticklabels([{32: '32\n(float32)', RETRAINED: 'float32,\nretrained'}.get(b, str(b)) for b in ARMS])
+    ax.set_xlabel('Bits per dimension')
+    ax.set_ylabel('MAE relative to float32')
+    ax.legend(handles=[Patch(facecolor=c, alpha=0.8, label=l) for _, l, c in present], frameon=False,
+              loc='upper right')
+    ax.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout()
+    fig_path = os.path.join(OUT, f'figure_bits_{prefix}.pdf')
+    fig.savefig(fig_path)
+    print(f'\nfigure: {fig_path}')
+    if out:
+        shutil.copy(fig_path, out)
+        print(f'copied to {out}')
+
+
+if __name__ == '__main__':
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    out = sys.argv[sys.argv.index('--out') + 1] if '--out' in sys.argv else None
+    if out in args:
+        args.remove(out)
+    main(args[0] if args else 'ex_20_bits', out)

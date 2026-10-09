@@ -2,7 +2,7 @@ import os
 import time
 import copy
 import random
-from typing import Any, List, Union, Tuple
+from typing import Any, List, Union, Tuple, Optional
 
 import joblib
 import torch
@@ -92,6 +92,11 @@ NUM_VAL: int = 0.1
 # :param SEED:
 #       The random seed to be used for the experiment.
 SEED: int = 1
+# :param NN_SEED:
+#       Optional separate seed for the neural network (neural_net2: weight initialization, internal validation
+#       split and batch order). None uses SEED. Setting it retrains the network on the same split and the same
+#       representation, which measures the run-to-run variation of the training itself (ex_20).
+NN_SEED: Optional[int] = None
 # :param USE_SMOTE:
 #       Whether to use the SMOTE algorithm to oversample the minority class in the dataset. This is only used for
 #       classification datasets. If set to True, the SMOTE algorithm will be applied to the training dataset after
@@ -846,7 +851,7 @@ def train_model__neural_net2(e: Experiment,
     # Seed python, numpy and torch so that the internal validation split, the weight initialization and
     # the batch order are reproducible for a given SEED (and the internal validation split is identical
     # to the one of the end-to-end GNNs, which seed the same way).
-    pl.seed_everything(e.SEED, workers=True)
+    pl.seed_everything(e.SEED if e.NN_SEED is None else e.NN_SEED, workers=True)
 
     num_val = max(2, int(0.05 * len(train_indices)))
     val_indices_ = random.sample(train_indices, k=num_val)
