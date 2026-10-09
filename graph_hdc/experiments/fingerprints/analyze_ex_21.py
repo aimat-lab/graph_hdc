@@ -118,15 +118,28 @@ def with_rmse(data: dict) -> dict:
     return data
 
 
-def bace(prefix: str) -> str:
-    runs = {(p['SEED'], arm(p)): with_rmse(d) for p, d in archives('predict_molecules__hdc', f'{prefix}_bace')}
+def prediction_section(title: str, runs: dict) -> str:
+    """Paired comparison with and without stereo, and the re-seeded reference, for one dataset."""
     metrics = [('mae', 1.0, 'lower'), ('rmse', 1.0, 'lower'), ('r2', 1.0, 'higher')]
-    lines = ['## BACE pIC50 (ex_14 configuration: D = 2048, L = 2)\n']
+    lines = [f'## {title} (ex_14 configuration: D = 2048, L = 2)\n']
     lines += paired_table(runs, metrics)
     lines += ['\nReference: the same representation without stereo, trained with another network seed (NN_SEED = '
               '1000 + seed). Only the MLP depends on the network seed; KNN rows are identical by construction.\n']
     lines += paired_table(runs, metrics, arm='plain_reseeded')
     return '\n'.join(lines) + '\n'
+
+
+def bace(prefix: str) -> str:
+    runs = {(p['SEED'], arm(p)): with_rmse(d) for p, d in archives('predict_molecules__hdc', f'{prefix}_bace')}
+    return prediction_section('BACE pIC50', runs)
+
+
+def props(prefix: str) -> str:
+    """Further datasets of the main comparison with the BACE design, one section per dataset (NOTE)."""
+    by_note = defaultdict(dict)
+    for p, d in archives('predict_molecules__hdc', f'{prefix}_props'):
+        by_note[p['NOTE']][(p['SEED'], arm(p))] = with_rmse(d)
+    return '\n'.join(prediction_section(note, runs) for note, runs in sorted(by_note.items()))
 
 
 def chiro(prefix: str) -> str:
@@ -150,7 +163,7 @@ def chiro(prefix: str) -> str:
 
 def main(prefix: str):
     text = '\n'.join([f'# ex_21: HDF without and with stereo descriptors (prefix {prefix})\n',
-                      collisions(prefix), bace(prefix), chiro(prefix)])
+                      collisions(prefix), bace(prefix), props(prefix), chiro(prefix)])
     print(text)
     os.makedirs(OUT, exist_ok=True)
     with open(os.path.join(OUT, f'summary_{prefix}.md'), 'w') as f:

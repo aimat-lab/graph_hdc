@@ -13,13 +13,15 @@ arms (the Morgan fingerprints that molecule_collisions.py computes as well are n
 * ``chiro``: the enantiomer docking ranking benchmark of Adams et al. (predict_enantiomers__hdc.py on the original
   splits) with the same HDF configuration and models, seeds 0-2 (codebooks, network initialization). One job per
   (seed, arm).
+* ``props``: the BACE design on further datasets of the main comparison (FreeSolv, AqSolDB). One job per (dataset,
+  seed) with the same three runs as for BACE.
 
 Job setup as in ex_20: CPU only, 2 threads, 4 CPUs per job, a private TMPDIR, caching disabled (no job writes shared
 cache files), this repository first on PYTHONPATH (so that a run from a git worktree uses the worktree's code), jobs
 pinned to euler. The datasets are loaded once, one after the other, before submitting.
 
     python prepare_chiro_docking.py    # once: writes data/chiro_docking/chiro_docking.csv
-    python _slurm_ex_21.py             # pre-load datasets, write group scripts, submit
+    python _slurm_ex_21.py [part ...]  # pre-load datasets, write group scripts, submit (default: all parts)
     python _slurm_ex_21.py --dry-run   # write group scripts and job scripts only
     python _slurm_ex_21.py --smoke     # write small group scripts (prefix ex_21_smoke) and print their paths, to run
                                        # them locally with bash
@@ -48,13 +50,17 @@ BACE = [ds for ds in DATASETS if ds[0] == 'bace_ic50'][0]
 BACE_SEEDS = list(range(10))
 NN_SEED_OFFSET = 1000
 CHIRO_SEEDS = [0, 1, 2]
+PROPS = [ds for ds in DATASETS if ds[0] in ('freesolv_hfe', 'aqsoldb_logs')]
+PROPS_SEEDS = list(range(10))
+PARTS = ['collisions', 'bace', 'chiro', 'props']
 
 AUTOSLURM_CONFIG = 'euler_3'
 NUM_THREADS = 2
 CPUS = 4
 # (memory, time limit) per part
 # (BACE: the HDF encoding with stereo peaks at about 6.1 GB, ex_20 without stereo at about 4.9 GB)
-RESOURCES = {'collisions': ('24000mb', '24:00:00'), 'bace': ('10000mb', '12:00:00'), 'chiro': ('16000mb', '24:00:00')}
+RESOURCES = {'collisions': ('24000mb', '24:00:00'), 'bace': ('10000mb', '12:00:00'), 'chiro': ('16000mb', '24:00:00'),
+             'props': ('10000mb', '12:00:00')}
 
 
 def _line(module: str, params: dict) -> str:
@@ -74,8 +80,16 @@ def hdf_params() -> dict:
     return {**params, '__CACHING__': False}
 
 
-def bace_command(prefix: str, seed: int, stereo: bool, nn_seed=None) -> str:
-    return _command('hdc', f'{prefix}_bace', seed, BACE, {**hdf_params(), 'STEREO': stereo, 'NN_SEED': nn_seed})
+def prediction_command(prefix: str, part: str, ds: tuple, seed: int, stereo: bool, nn_seed=None) -> str:
+    """predict_molecules__hdc.py with the ex_14 HDF configuration (parts "bace" and "props")."""
+    return _command('hdc', f'{prefix}_{part}', seed, ds, {**hdf_params(), 'STEREO': stereo, 'NN_SEED': nn_seed})
+
+
+def prediction_group(prefix: str, part: str, ds: tuple, seed: int) -> list:
+    """Both arms on the same split, codebooks and network seed, plus the re-seeded run without stereo."""
+    lines = [prediction_command(prefix, part, ds, seed, stereo) for stereo in ARMS]
+    lines.append(prediction_command(prefix, part, ds, seed, False, nn_seed=NN_SEED_OFFSET + seed))
+    return lines
 
 
 def chiro_command(prefix: str, seed: int, stereo: bool, num_data=None) -> str:
@@ -107,36 +121,46 @@ def write_group(name: str, lines: list) -> str:
     return path
 
 
-def groups(prefix: str, smoke: bool = False) -> dict:
-    """Group script paths per part. The smoke variant uses small datasets: BACE (as SMILES table) for the collisions,
-    one BACE seed and 2 % of the ChIRo pairs."""
+def groups(prefix: str, smoke: bool = False, parts: list = PARTS) -> dict:
+    """Group script paths of the given parts (only their scripts are written, so that the scripts of running jobs of
+    other parts are never rewritten). The smoke variant uses small datasets: BACE (as SMILES table) for the
+    collisions, one BACE seed, 2 % of the ChIRo pairs and one seed of FreeSolv."""
     tag = lambda stereo: 'stereo' if stereo else 'plain'
-    out = {'collisions': [], 'bace': [], 'chiro': []}
-    dataset, dims = ('bace_cls', [64]) if smoke else (COLLISION_DATASET, COLLISION_DIMS)
-    # largest D first: the longest jobs start first
-    for dim in sorted(dims, reverse=True):
-        for stereo in ARMS:
-            name = f'{prefix}_collisions__{dataset}__D{dim}__{tag(stereo)}'
-            out['collisions'].append(write_group(name, [collision_command(prefix, dataset, dim, stereo)]))
-    for seed in CHIRO_SEEDS[:1] if smoke else CHIRO_SEEDS:
-        for stereo in ARMS:
-            name = f'{prefix}_chiro__seed_{seed}__{tag(stereo)}'
-            line = chiro_command(prefix, seed, stereo, num_data=0.02 if smoke else None)
-            out['chiro'].append(write_group(name, [line]))
-    for seed in BACE_SEEDS[:1] if smoke else BACE_SEEDS:
-        name = f'{prefix}_bace__seed_{seed}'
-        lines = [bace_command(prefix, seed, stereo) for stereo in ARMS]
-        lines.append(bace_command(prefix, seed, False, nn_seed=NN_SEED_OFFSET + seed))
-        out['bace'].append(write_group(name, lines))
+    out = {part: [] for part in parts}
+    if 'collisions' in parts:
+        dataset, dims = ('bace_cls', [64]) if smoke else (COLLISION_DATASET, COLLISION_DIMS)
+        # largest D first: the longest jobs start first
+        for dim in sorted(dims, reverse=True):
+            for stereo in ARMS:
+                name = f'{prefix}_collisions__{dataset}__D{dim}__{tag(stereo)}'
+                out['collisions'].append(write_group(name, [collision_command(prefix, dataset, dim, stereo)]))
+    if 'chiro' in parts:
+        for seed in CHIRO_SEEDS[:1] if smoke else CHIRO_SEEDS:
+            for stereo in ARMS:
+                name = f'{prefix}_chiro__seed_{seed}__{tag(stereo)}'
+                line = chiro_command(prefix, seed, stereo, num_data=0.02 if smoke else None)
+                out['chiro'].append(write_group(name, [line]))
+    if 'bace' in parts:
+        for seed in BACE_SEEDS[:1] if smoke else BACE_SEEDS:
+            name = f'{prefix}_bace__seed_{seed}'
+            out['bace'].append(write_group(name, prediction_group(prefix, 'bace', BACE, seed)))
+    if 'props' in parts:
+        for ds in PROPS[:1] if smoke else PROPS:
+            for seed in PROPS_SEEDS[:1] if smoke else PROPS_SEEDS:
+                name = f'{prefix}_props__{ds[0]}__seed_{seed}'
+                out['props'].append(write_group(name, prediction_group(prefix, 'props', ds, seed)))
     return out
 
 
-def preload():
-    """Load every dataset once, one after the other (same calls as the experiments)."""
+def preload(parts: list):
+    """Load the datasets of the given parts once, one after the other (same calls as the experiments)."""
     from chem_mat_data import load_smiles_dataset
     from chem_mat_data.main import load_graph_dataset
-    print(f'pre-loaded {COLLISION_DATASET}: {len(load_smiles_dataset(COLLISION_DATASET))} rows')
-    print(f'pre-loaded {BACE[1]}: {len(load_graph_dataset(BACE[1], folder_path="/tmp"))} graphs')
+    if 'collisions' in parts:
+        print(f'pre-loaded {COLLISION_DATASET}: {len(load_smiles_dataset(COLLISION_DATASET))} rows')
+    names = ([BACE[1]] if 'bace' in parts else []) + ([ds[1] for ds in PROPS] if 'props' in parts else [])
+    for name in names:
+        print(f'pre-loaded {name}: {len(load_graph_dataset(name, folder_path="/tmp"))} graphs')
 
 
 if __name__ == '__main__':
@@ -144,19 +168,28 @@ if __name__ == '__main__':
     if not os.path.exists(CHIRO_CSV):
         sys.exit(f'{CHIRO_CSV} is missing, run prepare_chiro_docking.py first')
 
-    if '--smoke' in sys.argv:
-        for part, paths in groups(PREFIX_SMOKE, smoke=True).items():
+    # a misspelled flag must not lead to a real submission
+    flags = {arg for arg in sys.argv[1:] if arg.startswith('--')}
+    if flags - {'--dry-run', '--smoke'}:
+        sys.exit(f'unknown flag(s) {sorted(flags - {"--dry-run", "--smoke"})}, expected --dry-run or --smoke')
+    parts = [arg for arg in sys.argv[1:] if not arg.startswith('--')] or PARTS
+    unknown = set(parts) - set(PARTS)
+    if unknown:
+        sys.exit(f'unknown part(s) {sorted(unknown)}, expected some of {PARTS}')
+
+    if '--smoke' in flags:
+        for part, paths in groups(PREFIX_SMOKE, smoke=True, parts=parts).items():
             for path in paths:
                 print(part, path)
         sys.exit(0)
 
     from auto_slurm.aslurmx import ASlurmSubmitter
 
-    dry_run = '--dry-run' in sys.argv
+    dry_run = '--dry-run' in flags
     if not dry_run:
-        preload()
+        preload(parts)
 
-    for part, paths in groups(PREFIX).items():
+    for part, paths in groups(PREFIX, parts=parts).items():
         mem, time_limit = RESOURCES[part]
         submitter = ASlurmSubmitter(
             config_name=AUTOSLURM_CONFIG,
