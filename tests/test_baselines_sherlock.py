@@ -133,3 +133,17 @@ def test_bernoulli_entropy_sign_convention():
     assert np.argmin(ent) == 0
     assert ent[0] < ent[1]
     assert ent[0] < ent[2]
+
+
+def test_vocabulary_does_not_depend_on_corpus_order_or_parallelism():
+    """Ties in entropy are broken by the descriptor key, so the fingerprint is reproducible."""
+    reference = SherlockFingerprint(radius=3, size=64).fit(CORPUS, n_jobs=1)
+    for corpus, n_jobs in ((CORPUS[::-1], 1), (CORPUS, 2), (CORPUS[5:] + CORPUS[:5], 2)):
+        other = SherlockFingerprint(radius=3, size=64).fit(corpus, n_jobs=n_jobs)
+        assert other.bitinfo_to_index_ == reference.bitinfo_to_index_
+    # the corpus has ties at the cut-off, so this exercises the tie-break
+    entropy = dict(zip(reference.counts_, bernoulli_entropy(np.array(list(reference.counts_.values()), dtype=float),
+                                                             reference.corpus_size_)))
+    kept = set(reference.bitinfo_to_index_)
+    boundary = max(entropy[k] for k in kept)
+    assert any(entropy[k] == boundary for k in set(entropy) - kept)

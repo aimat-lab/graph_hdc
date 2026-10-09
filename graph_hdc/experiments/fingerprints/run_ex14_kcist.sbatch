@@ -85,7 +85,8 @@ export PYTORCH_ALLOC_CONF=expandable_segments:True
 
 # pycomex creates the namespace folder with a non-atomic "if not exists: mkdir", so concurrent first
 # runs of a module race; creating them up front removes the race.
-mkdir -p results/predict_molecules__gnn results/predict_molecules__gnn_random results/predict_molecules__hdc
+mkdir -p results/predict_molecules__gnn results/predict_molecules__gnn_random results/predict_molecules__hdc \
+         results/predict_molecules__fp results/predict_molecules__sherlock
 
 echo "=== ex14 STAGE=$EX14_STAGE host=$(hostname) tag=$TAG workers=$NUM_WORKERS threads=$THREADS $(date) ==="
 git -C "$CODE" log -1 --format='code: %h %s' || true
