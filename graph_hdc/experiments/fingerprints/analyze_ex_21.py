@@ -20,6 +20,7 @@ import glob
 from collections import defaultdict
 
 import numpy as np
+from scipy.stats import wilcoxon
 
 PATH = os.path.dirname(os.path.abspath(__file__))
 RESULTS = os.path.join(PATH, 'results')
@@ -83,8 +84,8 @@ def collisions(prefix: str) -> str:
 def paired_table(runs: dict, metrics: list, arm: str = 'stereo', reference: str = 'plain') -> list:
     """runs: {(seed, arm): data}; one row per (model, metric) with both arms and their paired difference over the
     seeds that have both."""
-    lines = [f'| model | metric | {reference} | {arm} | difference ({arm} - {reference}) | seeds better ({arm}) |',
-             '|---|---|---|---|---|---|']
+    lines = [f'| model | metric | {reference} | {arm} | difference ({arm} - {reference}) | seeds better ({arm}) '
+             f'| Wilcoxon p |', '|---|---|---|---|---|---|---|']
     seeds = sorted({seed for seed, a in runs if a == arm and (seed, reference) in runs})
     for model, label in MODELS.items():
         for metric, scale, better in metrics:
@@ -95,8 +96,12 @@ def paired_table(runs: dict, metrics: list, arm: str = 'stereo', reference: str 
             first, second = [get(s, reference) for s in both], [get(s, arm) for s in both]
             diff = [b - a for a, b in zip(first, second)]
             wins = sum((d < 0) if better == 'lower' else (d > 0) for d in diff)
+            # two-sided Wilcoxon signed-rank test paired by repetition (as in the GNN comparison of the SI); with
+            # fewer than 5 repetitions no test can reach p < 0.05
+            p = (f'{wilcoxon(second, first).pvalue:.3g}' if len(diff) >= 5 and any(d != 0 for d in diff)
+                 else '-')
             lines.append(f'| {label} | {metric} | {mean_sd(first, scale)} | {mean_sd(second, scale)} '
-                         f'| {mean_sd(diff, scale)} | {wins} of {len(diff)} |')
+                         f'| {mean_sd(diff, scale)} | {wins} of {len(diff)} | {p} |')
     return lines
 
 
