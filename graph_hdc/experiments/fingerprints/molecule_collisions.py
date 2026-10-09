@@ -68,6 +68,10 @@ WL_ITERATIONS: int = 2
 #       Hydrogen count of the HDF node attributes and of the 1-WL labels on the HDF graph: "total" counts all bonded
 #       hydrogens (RDKit GetTotalNumHs), "implicit" only implicit ones (0 for bracket atoms such as [nH]).
 HYDROGEN_COUNT: str = 'total'
+# :param SPECTRUM:
+#       Fourier magnitudes of the random HDF codebook vectors: "unit" (the HDF default since 2026-10-09) or
+#       "gaussian" (the original encoder, used by the runs ex_16_collisions and ex_16_collisions_totalh).
+SPECTRUM: str = 'unit'
 # :param SEED:
 #       Seed of the HDF codebooks, the atom permutations of the noise measurement and the random projections.
 SEED: int = 0
@@ -222,6 +226,9 @@ def close_pairs(x: np.ndarray, radius: float, num_projections: int, seed: int, c
 @experiment
 def experiment(e: Experiment):
 
+    if e.SPECTRUM not in ('gaussian', 'unit'):
+        raise ValueError(f'SPECTRUM must be "gaussian" or "unit", got {e.SPECTRUM!r}')
+
     # --- distinct molecules ---
     e.log(f'loading dataset "{e.DATASET_NAME}"...')
     df = load_smiles_dataset(e.DATASET_NAME)
@@ -272,6 +279,7 @@ def experiment(e: Experiment):
     max_diameter = max(int(np.max(Chem.GetDistanceMatrix(m))) for m in mols)
     e['dataset/max_size'] = max_size
     e['dataset/max_diameter'] = max_diameter
+    e['dataset/mean_num_atoms'] = float(np.mean([m.GetNumAtoms() for m in mols]))
 
     for dim in e.EMBEDDING_SIZES:
 
@@ -287,9 +295,11 @@ def experiment(e: Experiment):
         net = HyperNet(
             hidden_dim=dim,
             depth=e.NUM_LAYERS,
-            node_encoder_map=make_molecule_node_encoder_map_cont(dim=dim, seed=e.SEED),
+            node_encoder_map=make_molecule_node_encoder_map_cont(dim=dim, seed=e.SEED,
+                                                                 unit_modulus=(e.SPECTRUM == 'unit')),
             graph_encoder_map=make_molecule_graph_encoder_map_cont(dim=dim, seed=e.SEED, max_graph_size=max_size,
-                                                                   max_graph_diameter=max_diameter),
+                                                                   max_graph_diameter=max_diameter,
+                                                                   unit_modulus=(e.SPECTRUM == 'unit')),
             seed=e.SEED,
             normalize_all=True,
             bidirectional=True,
