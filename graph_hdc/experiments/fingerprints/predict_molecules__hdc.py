@@ -21,7 +21,7 @@ from rdkit.Chem import rdmolops
 from graph_hdc.models import HyperNet
 from graph_hdc.special.molecules import graph_dict_from_mol
 from graph_hdc.utils import quantize_equal_frequency
-from graph_hdc.special.spectrum import unit_spectrum, effective_components
+from graph_hdc.special.spectrum import effective_components
 from graph_hdc.special.molecules import (
     make_molecule_node_encoder_map,
     make_molecule_node_encoder_map_cont,
@@ -86,12 +86,13 @@ HYDROGEN_COUNT: str = 'total'
 #       always stores the unquantized vectors.
 QUANTIZE_BITS: Optional[int] = None
 # :param SPECTRUM:
-#       Fourier magnitudes of the random codebook vectors (ablation ex_22). "gaussian" (default, the original
-#       encoder): the element vectors and the base vectors of the fractional power encoders have random Fourier
-#       magnitudes. "unit": all of them get unit Fourier magnitudes with unchanged phases (unitary HRR, see
-#       graph_hdc/special/spectrum.py). Only for ENCODING_MODE "continuous". Embedding caches of "unit" runs carry a
-#       "__unitspec" suffix.
-SPECTRUM: str = 'gaussian'
+#       Fourier magnitudes of the random codebook vectors (the element vectors and the base vectors of the
+#       fractional power encoders), see ``unit_modulus`` of AtomEncoder and ContinuousEncoder. "unit" (default
+#       since 2026-10-09, ex_22): unit Fourier magnitudes with random phases (FHRR phasors). "gaussian": the random
+#       magnitudes of the original encoder, with which binding concentrates the embeddings on a few Fourier
+#       components. Only used in ENCODING_MODE "continuous". Embedding caches of "unit" runs carry a "__unitspec"
+#       suffix, so caches of the original encoder are never reused for it.
+SPECTRUM: str = 'unit'
 # :param GRAPH_ATTRIBUTES:
 #       Whether the encodings of the graph size and graph diameter are added to the embedding (default True, the
 #       original encoder). False keeps only the message passing part, normalized to unit length as in the original
@@ -183,20 +184,25 @@ def process_dataset(
     # for the decoding and the continuous mode which is the one that performs better for the regression 
     # tasks.
     
+    if e.SPECTRUM not in ('gaussian', 'unit'):
+        raise ValueError(f'SPECTRUM must be "gaussian" or "unit", got {e.SPECTRUM!r}')
+
     # updated mode with better regression performance.
     if e.ENCODING_MODE == 'continuous':
-        
+
         node_encoder_map = make_molecule_node_encoder_map_cont(
             dim=e.EMBEDDING_SIZE,
             seed=e.SEED,
+            unit_modulus=(e.SPECTRUM == 'unit'),
         )
         graph_encoder_map = make_molecule_graph_encoder_map_cont(
             dim=e.EMBEDDING_SIZE,
             seed=e.SEED,
             max_graph_size=stats['size']['max'],
             max_graph_diameter=stats['diameter']['max'],
+            unit_modulus=(e.SPECTRUM == 'unit'),
         )
-        
+
     # The previous mode.
     elif e.ENCODING_MODE == 'categorical':
         
@@ -206,16 +212,9 @@ def process_dataset(
         )
         graph_encoder_map = {}
 
-    # --- ablations of ex_22 (the defaults keep the original encoder) ---
-    if e.SPECTRUM not in ('gaussian', 'unit'):
-        raise ValueError(f'SPECTRUM must be "gaussian" or "unit", got {e.SPECTRUM!r}')
-    if e.SPECTRUM == 'unit' and e.ENCODING_MODE != 'continuous':
-        raise ValueError('SPECTRUM="unit" is only implemented for ENCODING_MODE="continuous"')
+    # --- ablation of ex_22 (the default keeps the size and diameter encodings) ---
     if not e.GRAPH_ATTRIBUTES:
         graph_encoder_map = {}
-    if e.SPECTRUM == 'unit':
-        node_encoder_map = unit_spectrum(node_encoder_map)
-        graph_encoder_map = unit_spectrum(graph_encoder_map)
 
 
     e.log('creating HyperNet encoder...')
@@ -256,7 +255,7 @@ def process_dataset(
         hdc_cache_name += '__bidir'
     if e.HYDROGEN_COUNT == 'total':
         hdc_cache_name += '__totalh'
-    if e.SPECTRUM == 'unit':
+    if e.ENCODING_MODE == 'continuous' and e.SPECTRUM == 'unit':
         hdc_cache_name += '__unitspec'
     if not e.GRAPH_ATTRIBUTES:
         hdc_cache_name += '__noglobal'

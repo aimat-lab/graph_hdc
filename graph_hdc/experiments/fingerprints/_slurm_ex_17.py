@@ -16,7 +16,8 @@ pair set. Each job runs NUM_WORKERS single-threaded worker processes on CPUS cor
 TMPDIR (chem_mat_data rewrites its metadata file in the temp folder on every load). The datasets are loaded
 once, sequentially, before submitting, so that no two jobs download the same file at the same time.
 Stage 2 runs once all chunks are done; it takes minutes and is started manually:
-``OMP_NUM_THREADS=2 python ged_exact_correlation.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --PAIRS_PREFIX="'ex_17'"``.
+``OMP_NUM_THREADS=2 python ged_exact_correlation.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --PAIRS_PREFIX="'ex_17'"``
+(the stage-2 run of 2026-10-08 used the original codebooks: add ``--SPECTRUM="'gaussian'"`` to reproduce it).
 
 Runtime probes (graph_hdc/experiments/fingerprints/_ged_timing_probe/, 2026-10-07/08, euler under load):
 random ZINC <= 12 pairs: median 122 s, mean 334 s, max 2750 s (96 of 96 exact within 1 h); random QM9

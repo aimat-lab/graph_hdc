@@ -2,7 +2,8 @@
 ex_22, GED part: correlation of the four HDF arms of ex_22 with the exact graph edit distance.
 
 Arms (as in _slurm_ex_22.py): the original encoder ("gaussian" spectra, with the graph size and diameter
-encodings), unit-modulus spectra (see graph_hdc/special/spectrum.py), and both without the size and diameter encodings.
+encodings), unit-modulus spectra (``unit_modulus`` of the encoders), and both without the size and diameter
+encodings.
 
 Pairs: the fixed GED-balanced subsets of ex_17 (reviewer comment R2.7; at most 100 pairs per exact GED value, drawn
 once with seed 0 by make_figure_ged_balanced_subset.py in the main checkout): QM9 and ZINC250k (<= 12 heavy atoms),
@@ -31,7 +32,6 @@ from graph_hdc.special.molecules import (
     make_molecule_graph_encoder_map_cont,
     make_molecule_node_encoder_map_cont,
 )
-from graph_hdc.special.spectrum import unit_spectrum
 
 RDLogger.DisableLog('rdApp.*')
 PATH = os.path.dirname(os.path.abspath(__file__))
@@ -59,9 +59,7 @@ def cosine_distance(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 def structure_part(graphs: list, dim: int, seed: int, spectrum: str) -> np.ndarray:
-    node_map = make_molecule_node_encoder_map_cont(dim=dim, seed=seed)
-    if spectrum == 'unit':
-        node_map = unit_spectrum(node_map)
+    node_map = make_molecule_node_encoder_map_cont(dim=dim, seed=seed, unit_modulus=(spectrum == 'unit'))
     hyper_net = HyperNet(hidden_dim=dim, depth=2, device='cpu', node_encoder_map=node_map, graph_encoder_map={},
                          seed=seed, normalize_all=True, bidirectional=True)
     results = hyper_net.forward_graphs([dict(g) for g in graphs], batch_size=600)
@@ -70,9 +68,8 @@ def structure_part(graphs: list, dim: int, seed: int, spectrum: str) -> np.ndarr
 
 def global_part(sizes: np.ndarray, diameters: np.ndarray, dim: int, seed: int, stats: dict, spectrum: str) -> np.ndarray:
     graph_map = make_molecule_graph_encoder_map_cont(dim=dim, seed=seed, max_graph_size=stats['max_size'],
-                                                     max_graph_diameter=stats['max_diameter'])
-    if spectrum == 'unit':
-        graph_map = unit_spectrum(graph_map)
+                                                     max_graph_diameter=stats['max_diameter'],
+                                                     unit_modulus=(spectrum == 'unit'))
     hv = (graph_map['graph_size'].encode_batch(torch.tensor(sizes, dtype=torch.float64))
           + graph_map['graph_diameter'].encode_batch(torch.tensor(diameters, dtype=torch.float64)))
     return hv.numpy()

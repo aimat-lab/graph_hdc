@@ -74,6 +74,21 @@ def generate_hermitian_symmetric_vector(k, rng=None):
     return torch.from_numpy(full_spectrum)
 
 
+def to_unit_modulus(spectrum: torch.Tensor) -> torch.Tensor:
+    """
+    Sets the magnitude of every complex Fourier coefficient in ``spectrum`` to one and keeps its phase
+    (coefficients that are exactly zero, which have no phase, become one). A Hermitian symmetric spectrum stays
+    Hermitian symmetric, so the corresponding time-domain vector stays real.
+
+    :param spectrum: Complex tensor of Fourier coefficients (the last dimension is the frequency axis).
+    :returns: Complex tensor of the same shape with unit-modulus entries.
+    """
+    magnitude = spectrum.abs()
+    nonzero = magnitude > 0
+    unit = spectrum / torch.where(nonzero, magnitude, torch.ones_like(magnitude))
+    return torch.where(nonzero, unit, torch.ones_like(unit))
+
+
 class AbstractEncoder:
     """
     Abstract base class for the property encoders. An encoder class is used to encode individual properties 
@@ -144,6 +159,13 @@ class ContinuousEncoder(AbstractEncoder):
     :type bandwidth: float
     :param seed: Random seed for reproducible encoder generation
     :type seed: Optional[int]
+    :param unit_modulus: If True (default), every Fourier coefficient of the base vector has magnitude one and
+        only its random phase is kept (FHRR phasors, a unitary base vector). A value then only rotates the
+        phases: every encoded value has the same norm, and the similarity of two values depends only on their
+        difference. False keeps the complex Gaussian spectrum of the original implementation, whose random
+        magnitudes are raised to the power value / bandwidth as well, so that binding concentrates the
+        hypervectors on a few Fourier components. Both versions use the same random draw (the same phases).
+    :type unit_modulus: bool
     """
     def __init__(
         self,
@@ -151,14 +173,18 @@ class ContinuousEncoder(AbstractEncoder):
         size: float,
         bandwidth: float,
         seed: Optional[int] = None,
+        unit_modulus: bool = True,
     ):
         self.dim = dim
         self.size = size
         self.bandwidth = bandwidth
         self.seed = seed
-        
+        self.unit_modulus = unit_modulus
+
         rng = np.random.default_rng(seed + 1) if seed is not None else None
         self.matrix = generate_hermitian_symmetric_vector(self.dim, rng=rng)
+        if unit_modulus:
+            self.matrix = to_unit_modulus(self.matrix)
 
     def encode(self, value: Any) -> torch.Tensor:
         """

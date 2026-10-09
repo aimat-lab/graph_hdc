@@ -13,18 +13,30 @@ from chem_mat_data.processing import MoleculeProcessing
 from graph_hdc.utils import AbstractEncoder
 from graph_hdc.utils import CategoricalIntegerEncoder
 from graph_hdc.utils import ContinuousEncoder
+from graph_hdc.utils import to_unit_modulus
 
 pt = Chem.GetPeriodicTable()
 
 
 class AtomEncoder(AbstractEncoder):
-    
+    """
+    Categorical encoder for the chemical element of an atom: one independent random hypervector per element in
+    ``atoms`` plus one for unknown elements.
+
+    :param unit_modulus: If True (default), the random element vectors are unitary: their Fourier coefficients
+        keep the phases of the Gaussian draw but all have magnitude one, as in FHRR. Binding (circular
+        convolution) with such vectors preserves norms and does not concentrate the bound hypervectors on a few
+        Fourier components. False keeps the Gaussian vectors of the original implementation. The vectors stay
+        nearly orthogonal either way.
+    """
+
     periodic_table = GetPeriodicTable()
-    
+
     def __init__(self,
                  dim: int,
                  atoms: List[Union[str, int]],
                  seed: int = 0,
+                 unit_modulus: bool = True,
                  ) -> None:
         AbstractEncoder.__init__(self, dim, seed)
         #self.periodic_table = GetPeriodicTable()
@@ -42,6 +54,10 @@ class AtomEncoder(AbstractEncoder):
         torch.manual_seed(seed)
         self.dist = torch.distributions.Normal(0.0, 1.0 / np.sqrt(dim))
         self.embeddings = self.dist.sample((self.num_categories, dim)).to(torch.float64)
+        self.unit_modulus = unit_modulus
+        if unit_modulus:
+            # same random draw, Fourier magnitudes set to one (the inverse FFT of a unit-modulus spectrum has norm 1)
+            self.embeddings = torch.fft.ifft(to_unit_modulus(torch.fft.fft(self.embeddings, dim=-1)), dim=-1).real
         # random = np.random.default_rng(seed)
         # self.embeddings: torch.Tensor = torch.tensor(random.normal(
         #     # This scaling is important to have normalized base vectors
@@ -230,24 +246,33 @@ def make_molecule_node_encoder_map_cont(
     dim: int,
     atoms: List[Union[str, int]] = [1.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 13.0, 14.0, 15.0, 16.0, 17.0, 20.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 32.0, 33.0, 34.0, 35.0, 38.0, 39.0, 40.0, 41.0, 42.0, 48.0, 50.0, 51.0, 52.0, 53.0, 58.0, 74.0, 80.0, 82.0, 83.0],
     seed: int = 0,
+    unit_modulus: bool = True,
 ) -> Dict[str, AbstractEncoder]:
+    """
+    Node encoders of HDF: the element (categorical) and the heavy-atom degree and hydrogen count (fractional
+    power encoding). ``unit_modulus`` (default True) gives all codebook vectors unit Fourier magnitudes (see
+    AtomEncoder and ContinuousEncoder); False reproduces the original encoder.
+    """
     return {
         'node_atoms': AtomEncoder(
             dim=dim,
             atoms=atoms,
             seed=seed+10,
-        ), 
+            unit_modulus=unit_modulus,
+        ),
         'node_degrees': ContinuousEncoder(
             dim=dim,
             size=10.0,
             bandwidth=2.0,
             seed=seed+20,
+            unit_modulus=unit_modulus,
         ),
         'node_valences': ContinuousEncoder(
             dim=dim,
             size=10.0,
             bandwidth=2.0,
             seed=seed+30,
+            unit_modulus=unit_modulus,
         ),
     }
     
@@ -257,22 +282,27 @@ def make_molecule_graph_encoder_map_cont(
     max_graph_size: float = 130.0,
     max_graph_diameter: float = 20.0,
     seed: int = None,
+    unit_modulus: bool = True,
 ) -> Dict[str, AbstractEncoder]:
     """
-    
+    Graph-level encoders of HDF: graph size and graph diameter (fractional power encoding). ``unit_modulus``
+    (default True) gives the base vectors unit Fourier magnitudes (see ContinuousEncoder); False reproduces the
+    original encoder.
     """
     return {
         'graph_size': ContinuousEncoder(
-            dim=dim, 
+            dim=dim,
             size=max_graph_size,
-            bandwidth=max(3.0, max_graph_size / 7.0), 
-            seed=seed
+            bandwidth=max(3.0, max_graph_size / 7.0),
+            seed=seed,
+            unit_modulus=unit_modulus,
         ),
         'graph_diameter': ContinuousEncoder(
             dim=dim,
             size=max_graph_diameter,
             bandwidth=max(2.0, max_graph_diameter / 5.0),
-            seed=seed+10
+            seed=seed+10,
+            unit_modulus=unit_modulus,
         ),
     }
 

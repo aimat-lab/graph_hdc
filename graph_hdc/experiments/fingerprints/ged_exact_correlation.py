@@ -123,6 +123,12 @@ BIDIRECTIONAL: bool = True
 #       this parameter existed) only counts implicit hydrogens, which is 0 for every atom written in brackets.
 HYDROGEN_COUNT: str = 'total'
 
+# :param SPECTRUM:
+#       Fourier magnitudes of the random HDF codebook vectors (see predict_molecules__hdc.py). "unit" (default
+#       since 2026-10-09): unit magnitudes with random phases. "gaussian": the original encoder, which the ex_17
+#       runs of 2026-10-08 used (before this parameter existed).
+SPECTRUM: str = 'unit'
+
 # :param MORGAN_RADIUS:
 #       The radius of the binary Morgan fingerprints.
 MORGAN_RADIUS: int = 2
@@ -249,16 +255,19 @@ def dataset_statistics(dataset_name: str) -> dict:
 
 def encode_hdf(smiles_list: List[str], dim: int, stats: dict, e: Experiment, seed: int) -> np.ndarray:
     """HDF embeddings (rows) of the molecules with codebook seed ``seed``, built like in molecule_similarity__hdc.py."""
+    if e.SPECTRUM not in ('gaussian', 'unit'):
+        raise ValueError(f'SPECTRUM must be "gaussian" or "unit", got {e.SPECTRUM!r}')
     hyper_net = HyperNet(
         hidden_dim=dim,
         depth=e.NUM_LAYERS,
         device=e.DEVICE,
-        node_encoder_map=make_molecule_node_encoder_map_cont(dim=dim, seed=seed),
+        node_encoder_map=make_molecule_node_encoder_map_cont(dim=dim, seed=seed, unit_modulus=(e.SPECTRUM == 'unit')),
         graph_encoder_map=make_molecule_graph_encoder_map_cont(
             dim=dim,
             seed=seed,
             max_graph_size=stats['max_size'],
             max_graph_diameter=stats['max_diameter'],
+            unit_modulus=(e.SPECTRUM == 'unit'),
         ),
         seed=seed,
         normalize_all=True,

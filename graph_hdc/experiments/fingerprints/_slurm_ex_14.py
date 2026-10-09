@@ -152,6 +152,11 @@ def _command(module: str, prefix: str, seed: int, ds: tuple, params: dict) -> st
     if module == 'hdc':
         full.setdefault('BIDIRECTIONAL', True)
         full.setdefault('HYDROGEN_COUNT', 'total')
+        # Unit-modulus codebooks became the HDF default on 2026-10-09 (ex_22). Every HDF archive of the experiments
+        # built with this function (ex_14, ex_15, ex_18, ex_20) used the original (gaussian) codebooks, so their commands
+        # pin them: resumed or missing runs match their archives. Switching an experiment to "unit" is a new round
+        # (add SPECTRUM to CURRENT and the "__unitspec" suffix to hdf_cache_name). ex_22 passes SPECTRUM itself.
+        full.setdefault('SPECTRUM', 'gaussian')
     # Relative script path: the command files are executed from this folder (see run_ex14_kcist.sbatch),
     # so the same files work locally and on the cluster.
     parts = ['python', f'predict_molecules__{module}.py']
