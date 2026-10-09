@@ -60,6 +60,17 @@ def test_unit_modulus_is_default():
         assert encoder.unit_modulus is True
 
 
+def test_categorical_encoder_map_keeps_original_element_vectors():
+    """The categorical encoder map (decoding) keeps the Gaussian element vectors unless asked otherwise."""
+    from graph_hdc.special.molecules import make_molecule_node_encoder_map
+    atoms = make_molecule_node_encoder_map(dim=DIM, seed=0)['node_atoms']
+    assert atoms.unit_modulus is False
+    assert torch.fft.fft(atoms.embeddings, dim=-1).abs().std() > 0.2
+    original = AtomEncoder(dim=DIM, atoms=atoms.atoms, seed=0, unit_modulus=False)
+    assert torch.equal(atoms.embeddings, original.embeddings)
+    assert make_molecule_node_encoder_map(dim=DIM, seed=0, unit_modulus=True)['node_atoms'].unit_modulus is True
+
+
 def test_factories_pass_unit_modulus_false():
     for encoder in make_molecule_node_encoder_map_cont(dim=DIM, seed=0, unit_modulus=False).values():
         assert encoder.unit_modulus is False

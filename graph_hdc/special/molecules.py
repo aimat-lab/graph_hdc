@@ -215,6 +215,7 @@ def make_molecule_node_encoder_map(
     #atoms: List[str] = ['C', 'O', 'N', 'S', 'P', 'F', 'Cl', 'Br', 'I'],
     #atoms: List[str] = [1.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 13.0, 14.0, 15.0, 16.0, 17.0, 20.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 32.0, 33.0, 34.0, 35.0, 38.0, 39.0, 40.0, 41.0, 42.0, 48.0, 50.0, 51.0, 52.0, 53.0, 58.0, 74.0, 80.0, 82.0, 83.0],
     seed: int = None,
+    unit_modulus: bool = False,
 ) -> dict:
     """
     This function returns a dictionary that will act as a "node_encoder_map" that can be supplied to a HyperNet encoder
@@ -229,12 +230,15 @@ def make_molecule_node_encoder_map(
       
     :param dim: The dimensionality of the hyperdimensional vectors to be used for encoding.
     :param atoms: A list of atom symbols that should be encoded.
-    
+    :param unit_modulus: Whether the element vectors get unit Fourier magnitudes (see AtomEncoder). Default False:
+        this categorical encoder map, which the decoding code uses, keeps the original Gaussian element vectors. The
+        unit-modulus default of 2026-10-09 applies to the continuous encoder maps (``make_molecule_*_map_cont``).
+
     :returns: A dictionary mapping node attribute names to their respective implementations of the AbstractEncoder
         interface.
     """
     return {
-        'node_atoms': AtomEncoder(dim=dim, atoms=atoms, seed=seed),
+        'node_atoms': AtomEncoder(dim=dim, atoms=atoms, seed=seed, unit_modulus=unit_modulus),
         'node_degrees': CategoricalIntegerEncoder(dim=dim, num_categories=8, seed=seed+10),
         'node_valences': CategoricalIntegerEncoder(dim=dim, num_categories=6, seed=seed+20),
         # 'node_degrees': ContinuousEncoder(dim=dim, size=10.0, bandwidth=2.0, seed=seed+10),
