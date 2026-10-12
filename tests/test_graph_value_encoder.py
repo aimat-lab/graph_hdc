@@ -22,14 +22,22 @@ SMILES = ['CCO', 'c1ccccc1O', 'CC(=O)Nc1ccc(O)cc1', 'CCCCCCCCCC(=O)O']
 
 
 def test_bandwidth_is_a_seventh_of_the_range_with_a_floor():
-    assert make_value_graph_encoder([-3.5, 0.0, 10.5], dim=DIM, seed=50).bandwidth == pytest.approx(2.0)
+    assert make_value_graph_encoder([-3.5, 0.0, 10.5], dim=DIM, seed=50, quantile=0.0).bandwidth == pytest.approx(2.0)
     assert make_value_graph_encoder([0.2, 1.1, 0.9], dim=DIM, seed=50).bandwidth == pytest.approx(1.0)
-    assert make_value_graph_encoder([0.2, 1.1], dim=DIM, seed=50, min_bandwidth=0.5).bandwidth == pytest.approx(0.5)
+    assert make_value_graph_encoder([0.2, 1.1], dim=DIM, seed=50, min_bandwidth=0.5,
+                                    quantile=0.0).bandwidth == pytest.approx(0.5)
+
+
+def test_bandwidth_ignores_a_few_extreme_values():
+    # the default range runs from the 1st to the 99th percentile
+    values = list(np.linspace(0.0, 14.0, 1000)) + [-200.0, 300.0]
+    assert make_value_graph_encoder(values, dim=DIM, seed=50).bandwidth == pytest.approx(2.0, rel=0.05)
+    assert make_value_graph_encoder(values, dim=DIM, seed=50, quantile=0.0).bandwidth == pytest.approx(500.0 / 7)
 
 
 def test_similarity_decreases_within_one_bandwidth():
     # unit-modulus fractional power encoding: sinc-shaped similarity that reaches about zero at one bandwidth
-    encoder = make_value_graph_encoder([0.0, 14.0], dim=4096, seed=50)  # bandwidth 2
+    encoder = make_value_graph_encoder([0.0, 14.0], dim=4096, seed=50, quantile=0.0)  # bandwidth 2
     codes = encoder.encode_batch(torch.tensor([1.0, 1.25, 1.5, 2.0, 3.0, 9.0], dtype=torch.float64)).numpy()
     codes /= np.linalg.norm(codes, axis=1, keepdims=True)
     sims = codes[1:] @ codes[0]

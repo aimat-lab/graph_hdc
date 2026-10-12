@@ -60,6 +60,9 @@ def arm_of(params: dict, prefix: str):
         return None
     if params.get('__PREFIX__') == prefix and params.get('GRAPH_CLOGP') is True:
         return 'hdf_clogp'
+    # the control of the smoke test: the ex_14 command re-run under the ex_26 prefix, without logP
+    if params.get('__PREFIX__') == prefix and params.get('GRAPH_CLOGP') is False:
+        return 'control'
     if params.get('__PREFIX__') == HDF_PREFIX and not params.get('GRAPH_CLOGP'):
         return 'hdf'
     return None
@@ -108,10 +111,24 @@ def main():
     print(f'{sum(k[0] == "hdf_clogp" for k in runs)} logP runs ({args.prefix}), '
           f'{sum(k[0] == "hdf" for k in runs)} HDF runs ({HDF_PREFIX}) in {folders}')
 
+    # control (smoke test): the ex_14 command re-run without logP must reproduce the ex_14 archive
+    for arm, note, seed in sorted(k for k in runs if k[0] == 'control'):
+        _, control, split_c = runs[('control', note, seed)]
+        if ('hdf', note, seed) not in runs:
+            print(f'control {note} seed {seed}: no ex_14 run to compare with')
+            continue
+        _, hdf, split_h = runs[('hdf', note, seed)]
+        diffs = {label: control[model][0] - hdf[model][0] for model, label in MODELS
+                 if model in control and model in hdf}
+        print(f'control {note} seed {seed}: split {"identical" if split_c == split_h else "DIFFERENT"}, MAE minus '
+              f'ex_14: ' + ', '.join(f'{label} {d:+.3g}' for label, d in diffs.items()))
+
     rows, lines, mismatches = [], [], []
     summary = {model: [] for model, _ in MODELS}
     for note in NOTES:
         seeds = sorted(seed for arm, n, seed in runs if arm == 'hdf_clogp' and n == note)
+        if 0 < len(seeds) < 10:
+            print(f'{note}: logP runs missing for seeds {sorted(set(range(10)) - set(seeds))}')
         pairs = []
         for seed in seeds:
             if ('hdf', note, seed) not in runs:

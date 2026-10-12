@@ -105,9 +105,10 @@ GRAPH_ATTRIBUTES: bool = True
 # :param GRAPH_CLOGP:
 #       Whether Crippen's logP of each molecule (RDKit MolLogP) is encoded as a further global attribute, next to the
 #       graph size and diameter (ex_26). It uses the same fractional power encoding, with a bandwidth of one seventh of
-#       the logP range of the dataset (at least 1, see ``make_value_graph_encoder``), and its hypervector is summed
-#       with those of the size and diameter. Requires ENCODING_MODE "continuous" and GRAPH_ATTRIBUTES. Embedding
-#       caches of True runs carry a "__clogp" suffix.
+#       the logP range of the dataset between its 1st and 99th percentile (at least 1, see
+#       ``make_value_graph_encoder``), and its hypervector is summed with those of the size and diameter. Requires
+#       ENCODING_MODE "continuous", GRAPH_ATTRIBUTES and SPECTRUM "unit". Embedding caches of True runs carry a
+#       "__clogp" suffix.
 GRAPH_CLOGP: bool = False
 # :param SPECTRUM_DIAGNOSTIC:
 #       If True, the median number of effective Fourier components of the embeddings (participation ratio of the
@@ -230,8 +231,10 @@ def process_dataset(
     # so the values are computed here, before the cached encoding, which then only attaches them to the graph dicts.
     clogp_of: Dict[int, float] = {}
     if e.GRAPH_CLOGP:
-        if e.ENCODING_MODE != 'continuous' or not e.GRAPH_ATTRIBUTES:
-            raise ValueError('GRAPH_CLOGP requires ENCODING_MODE "continuous" and GRAPH_ATTRIBUTES = True')
+        # the gaussian spectrum raises random magnitudes to the power logP / bandwidth (unbounded for negative logP)
+        if e.ENCODING_MODE != 'continuous' or not e.GRAPH_ATTRIBUTES or e.SPECTRUM != 'unit':
+            raise ValueError('GRAPH_CLOGP requires ENCODING_MODE "continuous", GRAPH_ATTRIBUTES = True and '
+                             'SPECTRUM "unit"')
         clogp_of = {index: float(Crippen.MolLogP(Chem.MolFromSmiles(data['graph_repr'])))
                     for index, data in index_data_map.items()}
         # seed offset 50: not used by any node or graph encoder of the maps above (offsets 0-30; the stereo encoder of
@@ -245,8 +248,8 @@ def process_dataset(
         e['clogp/min'] = min(clogp_of.values())
         e['clogp/max'] = max(clogp_of.values())
         e['clogp/bandwidth'] = graph_encoder_map['graph_clogp'].bandwidth
-        e.log(f' * GRAPH_CLOGP: logP from {e["clogp/min"]:.2f} to {e["clogp/max"]:.2f}, '
-              f'bandwidth {e["clogp/bandwidth"]:.2f}')
+        e.log(f' * GRAPH_CLOGP: logP from {e["clogp/min"]:.2f} to {e["clogp/max"]:.2f}, 1st-99th percentile range '
+              f'{graph_encoder_map["graph_clogp"].size:.2f}, bandwidth {e["clogp/bandwidth"]:.2f}')
 
 
     e.log('creating HyperNet encoder...')
