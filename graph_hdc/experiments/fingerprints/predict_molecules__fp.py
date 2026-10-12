@@ -1,6 +1,7 @@
+import networkx as nx
 import numpy as np
 from rdkit import Chem
-from rdkit.Chem import rdFingerprintGenerator
+from rdkit.Chem import rdFingerprintGenerator, rdmolops
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 
@@ -27,6 +28,14 @@ FINGERPRINT_RADIUS: int = 2
 #       graph_hdc.baselines.sort_and_slice. 'sort_slice' keeps the FINGERPRINT_SIZE substructures that occur
 #       in the most training molecules (no labels involved; validation and test molecules are not used).
 FINGERPRINT_TYPE: str = 'morgan'
+# :param GRAPH_DESCRIPTORS:
+#       Whether the two global descriptors that HDF encodes, the graph size (number of heavy atoms) and the
+#       graph diameter (longest shortest path), are appended to the fingerprint as two additional features
+#       (ex_25, reviewer comment R3.3: baseline fingerprints augmented with the same descriptors). Both are
+#       computed from the heavy-atom graph exactly as in HDF (graph_dict_from_mol, predict_molecules__hdc) and
+#       divided by their maximum over the dataset, from which HDF derives the bandwidths of their encodings, so
+#       that they lie in [0, 1] like the fingerprint bits. Default False: the fingerprint alone.
+GRAPH_DESCRIPTORS: bool = False
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -37,10 +46,44 @@ experiment = Experiment.extend(
     glob=globals()
 )
 
+def graph_descriptors(mol: Chem.Mol) -> tuple:
+    """
+    Graph size (number of heavy atoms) and graph diameter of a molecule, computed on the heavy-atom graph as for
+    the global descriptors of HDF (``graph_dict_from_mol`` and the dataset statistics of predict_molecules__hdc).
+    """
+    graph = nx.from_numpy_array(rdmolops.GetAdjacencyMatrix(mol))
+    return graph.number_of_nodes(), nx.diameter(graph)
+
+
+def append_graph_descriptors(e: Experiment, index_data_map: dict) -> None:
+    """
+    Append the graph size and the graph diameter, each divided by its maximum over the dataset, to the fingerprint
+    of every molecule (GRAPH_DESCRIPTORS). The maxima are those from which HDF derives its encoding bandwidths.
+    """
+    descriptors = {index: graph_descriptors(Chem.MolFromSmiles(graph['graph_repr']))
+                   for index, graph in index_data_map.items()}
+    max_size = max(size for size, _ in descriptors.values())
+    max_diameter = max(diameter for _, diameter in descriptors.values())
+    e.log(f'appending graph size (max {max_size}) and graph diameter (max {max_diameter}) as two features...')
+    for index, graph in index_data_map.items():
+        size, diameter = descriptors[index]
+        graph['graph_features'] = np.concatenate([graph['graph_features'], [size / max_size, diameter / max_diameter]])
+    e['graph_descriptors/max_size'] = max_size
+    e['graph_descriptors/max_diameter'] = max_diameter
+
+
 @experiment.hook('process_dataset', replace=True, default=False)
 def process_dataset(e: Experiment,
                     index_data_map: dict
                     ) -> None:
+
+    encode_fingerprints(e, index_data_map)
+    if e.GRAPH_DESCRIPTORS:
+        append_graph_descriptors(e, index_data_map)
+
+
+def encode_fingerprints(e: Experiment, index_data_map: dict) -> None:
+    """Store the fingerprint of FINGERPRINT_TYPE of every molecule as its "graph_features"."""
 
     if e.FINGERPRINT_TYPE == 'sort_slice':
         # The vocabulary is fitted on the training molecules of this split, then all molecules are encoded.
