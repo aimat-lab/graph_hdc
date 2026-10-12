@@ -46,6 +46,7 @@ import subprocess
 import sys
 import time
 import zlib
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -354,9 +355,14 @@ def encode(library: str, sizes: List[int], campaigns: List[int], workers: int, t
     if not jobs:
         return
     set_thread_env(threads)
-    with mp.get_context('spawn').Pool(min(workers, len(jobs)), initializer=_encode_init,
-                                      initargs=(library, threads)) as pool:
-        for i, (path, seconds) in enumerate(pool.imap_unordered(_encode_one, jobs), start=1):
+    # ProcessPoolExecutor (unlike multiprocessing.Pool) fails with BrokenProcessPool when a worker dies, e.g.
+    # killed for memory, instead of waiting forever. Every worker holds the PyG graphs of the library (about
+    # 5 GB for ZINC250k), so use at most ~32 workers on a 400 GB allocation.
+    with ProcessPoolExecutor(min(workers, len(jobs)), mp_context=mp.get_context('spawn'),
+                             initializer=_encode_init, initargs=(library, threads)) as executor:
+        futures = [executor.submit(_encode_one, job) for job in jobs]
+        for i, future in enumerate(as_completed(futures), start=1):
+            path, seconds = future.result()
             log(f'  [{i}/{len(jobs)}] {os.path.basename(path)} in {seconds:.1f} s')
 
 
@@ -409,15 +415,33 @@ def make_tasks(objectives: Optional[List[str]] = None, sizes: Optional[List[int]
 _WORKER = {}
 
 
-def _worker_init(threads: int, gpus: int):
+def _worker_init(threads: int, gpus: int, gpu_min_molecules: int = GPU_MIN_MOLECULES):
     import torch
     os.environ['OMP_NUM_THREADS'] = str(threads)
     torch.set_num_threads(threads)
-    # pool workers are numbered 1, 2, ... (also replacements of finished workers): spread them over the GPUs
+    # worker processes are numbered 1, 2, ... in the order of their creation: spread them over the GPUs
     identity = mp.current_process()._identity
     _WORKER['gpu'] = (identity[0] - 1) % gpus if gpus > 0 and identity else None
     _WORKER['threads'] = threads
+    _WORKER['gpu_min_molecules'] = gpu_min_molecules
     _WORKER['features'] = {}
+
+
+def _warmup(_) -> int:
+    """Imports the BO stack and fits one tiny GP, so that the workers are ready before a timed measurement."""
+    import torch
+    from graph_hdc.bo import fit_gp, make_gp
+    x = torch.rand(10, 4, dtype=torch.float64)
+    fit_gp(make_gp('hdf_matern', x, x[:, :1]))
+    return os.getpid()
+
+
+def resolve_gpus(gpus: int) -> int:
+    """The number of GPUs to use: ``gpus``, or all visible ones if negative."""
+    if gpus >= 0:
+        return gpus
+    import torch
+    return torch.cuda.device_count()
 
 
 def load_features(objective: str, method: str, size: Optional[int], campaign: int) -> Optional[np.ndarray]:
@@ -451,6 +475,8 @@ def load_features(objective: str, method: str, size: Optional[int], campaign: in
 
 
 def run_task(task: dict) -> dict:
+    import botorch
+    import gpytorch
     import torch
     from graph_hdc.bo import run_campaign
     path = result_path(task)
@@ -460,7 +486,8 @@ def run_task(task: dict) -> dict:
     data = np.load(os.path.join(DATA, 'objectives', f'{task["objective"]}.npz'))
     num_molecules = len(data['objective'])
     gpu = _WORKER.get('gpu')
-    device = f'cuda:{gpu}' if gpu is not None and num_molecules > GPU_MIN_MOLECULES else 'cpu'
+    use_gpu = gpu is not None and num_molecules > _WORKER.get('gpu_min_molecules', GPU_MIN_MOLECULES)
+    device = f'cuda:{gpu}' if use_gpu else 'cpu'
     start = time.time()
     features = load_features(task['objective'], task['method'], task['size'], task['campaign'])
     time_features = time.time() - start
@@ -482,6 +509,7 @@ def run_task(task: dict) -> dict:
         'objective_max': float(data['objective_max']), 'objective_min': float(data['objective_min']),
         'device': device, 'threads': _WORKER.get('threads'), 'host': socket.gethostname(),
         'git': _WORKER.setdefault('git', git_commit()), 'torch': torch.__version__,
+        'botorch': botorch.__version__, 'gpytorch': gpytorch.__version__,
         'seconds_features': time_features, 'seconds_total': time.time() - start,
         'finished': time.strftime('%Y-%m-%d %H:%M:%S'),
     }
@@ -492,7 +520,10 @@ def run_task(task: dict) -> dict:
     return {**task, 'status': 'done', 'seconds': meta['seconds_total'], 'device': device}
 
 
-def run(workers: int, threads: int, gpus: int, shard: int, num_shards: int, limit: Optional[int] = None) -> None:
+def run(workers: int, threads: int, gpus: int, shard: int, num_shards: int, limit: Optional[int] = None,
+        gpu_min_molecules: int = GPU_MIN_MOLECULES) -> int:
+    """Runs the open campaigns of one shard of the task list; returns the number of failed campaigns."""
+    gpus = resolve_gpus(gpus)
     with open(os.path.join(ROOT, 'tasks.jsonl')) as file:
         tasks = [json.loads(line) for line in file]
     # round-robin over the cost-sorted list gives every shard the same mix of long and short campaigns
@@ -503,14 +534,18 @@ def run(workers: int, threads: int, gpus: int, shard: int, num_shards: int, limi
     log(f'shard {shard}/{num_shards}: {len(tasks)} open campaigns, {workers} workers x {threads} threads, '
         f'{gpus} GPUs, host {socket.gethostname()}, code {git_commit()}')
     if not tasks:
-        return
+        return 0
     set_thread_env(threads)
-    context = mp.get_context('spawn')
     failed = 0
     start = time.time()
-    with context.Pool(workers, initializer=_worker_init, initargs=(threads, gpus)) as pool:
-        results = pool.imap_unordered(_run_task_safe, tasks, chunksize=1)
-        for i, result in enumerate(results, start=1):
+    # The executor hands out the tasks in the submitted (longest-first) order. A worker that dies (e.g. killed
+    # for memory) breaks the executor with BrokenProcessPool and ends the job instead of hanging it; finished
+    # campaigns are kept, and resubmitting the stage resumes the rest.
+    with ProcessPoolExecutor(workers, mp_context=mp.get_context('spawn'), initializer=_worker_init,
+                             initargs=(threads, gpus, gpu_min_molecules)) as executor:
+        futures = [executor.submit(_run_task_safe, task) for task in tasks]
+        for i, future in enumerate(as_completed(futures), start=1):
+            result = future.result()
             if result['status'] == 'error':
                 failed += 1
                 log(f'  !!! {result["objective"]} {result["method"]} D={result["size"]} c{result["campaign"]}: '
@@ -518,6 +553,7 @@ def run(workers: int, threads: int, gpus: int, shard: int, num_shards: int, limi
             if i % 50 == 0 or i == len(tasks):
                 log(f'  {i}/{len(tasks)} campaigns, {failed} failed, {(time.time() - start) / 60:.1f} min')
     log(f'shard {shard}: finished, {failed} failed')
+    return failed
 
 
 def _run_task_safe(task: dict) -> dict:
@@ -529,6 +565,15 @@ def _run_task_safe(task: dict) -> dict:
 
 
 # == CALIBRATION ==
+
+# (objective, size, device) of the single-worker timings: ZINC250k at every size on the GPU and at one size on the
+# CPU, AqSolDB on the CPU and on the GPU (device "cuda" falls back to the CPU without GPUs)
+CALIBRATION_SINGLE = [('solubility', 8, 'cpu'), ('solubility', 64, 'cpu'), ('solubility', 512, 'cpu'),
+                      ('qed', 64, 'cpu'), ('solubility', 64, 'cuda'), ('solubility', 512, 'cuda'),
+                      ('qed', 8, 'cuda'), ('qed', 64, 'cuda'), ('qed', 512, 'cuda')]
+# (objective, method, size, device) of the throughput mix: small libraries on the CPU, ZINC250k on the GPU
+CALIBRATION_MIX = [('solubility', 'hdf_matern', 64, 'cpu'), ('lipophilicity', 'morgan_tanimoto', 512, 'cpu'),
+                   ('freesolv', 'morgan_pca', 128, 'cpu'), ('qed', 'morgan_tanimoto', 64, 'cuda')]
 
 def _calibrate_task(job):
     """Times ``rounds`` BO rounds of one configuration at the full-budget number of observations."""
@@ -552,46 +597,55 @@ def _calibrate_task(job):
             'fit': float(np.median(result['fit_seconds'])), 'acq': float(np.median(result['acq_seconds']))}
 
 
-def calibrate(workers_list: List[int], threads_list: List[int], gpus: int, rounds: int) -> None:
+def calibrate(workers_list: List[int], threads_list: List[int], gpus: int, rounds: int,
+              throughput_rounds: int) -> None:
     """
     Two measurements for planning the full run on a node: (1) single-worker seconds per round of every GP
-    method on the largest and a mid-sized library at several sizes and thread counts, and (2) the throughput of
-    the node (BO rounds per second) with W concurrent workers on a representative mix of campaigns.
+    method on the largest and a mid-sized library at several sizes and thread counts (CPU and GPU acquisition),
+    and (2) the throughput of the node (BO rounds per second) with W concurrent workers on a representative mix
+    of campaigns, measured after all workers have started and imported the BO stack.
     """
-    report = {'host': socket.gethostname(), 'code': git_commit(), 'single': [], 'throughput': []}
+    gpus = resolve_gpus(gpus)
+    cores = len(os.sched_getaffinity(0))
+    report = {'host': socket.gethostname(), 'code': git_commit(), 'cores': cores, 'gpus': gpus,
+              'single': [], 'throughput': []}
     context = mp.get_context('spawn')
 
     # (1) single-worker timings
+    configs = [c for c in CALIBRATION_SINGLE if c[2] == 'cpu' or gpus > 0]
     for threads in threads_list:
-        # ZINC250k on the GPU at every size (and on the CPU at one size for comparison), AqSolDB on the CPU
         jobs = [(objective, method, size, rounds, device)
-                for method in ('hdf_matern', 'morgan_tanimoto', 'morgan_pca')
-                for objective, size, device in
-                [('solubility', s, 'cpu') for s in (8, 64, 512)] + [('qed', 64, 'cpu')] +
-                ([('qed', s, 'cuda') for s in (8, 64, 512)] if gpus > 0 else [])]
+                for method in ('hdf_matern', 'morgan_tanimoto', 'morgan_pca') for objective, size, device in configs]
         set_thread_env(threads)
-        with context.Pool(1, initializer=_worker_init, initargs=(threads, gpus)) as pool:
-            for timing in pool.imap(_calibrate_task, jobs):
+        with ProcessPoolExecutor(1, mp_context=context, initializer=_worker_init,
+                                 initargs=(threads, gpus, 0)) as executor:
+            executor.submit(_warmup, 0).result()
+            for job in jobs:
+                timing = executor.submit(_calibrate_task, job).result()
                 report['single'].append(timing)
                 log(f'  single: {json.dumps(timing)}')
 
-    # (2) throughput with W concurrent workers: every worker runs the same mix of small-library campaigns
-    # (CPU) and ZINC campaigns (GPU acquisition)
-    mix = [('solubility', 'hdf_matern', 64, rounds, 'cpu'), ('lipophilicity', 'morgan_tanimoto', 512, rounds, 'cpu'),
-           ('freesolv', 'morgan_pca', 128, rounds, 'cpu'), ('qed', 'morgan_tanimoto', 64, rounds, 'cuda')]
+    # (2) throughput with W concurrent workers: every configuration runs the same mix of small-library campaigns
+    # (CPU) and ZINC campaigns (GPU acquisition), two per worker
+    mix = [(objective, method, size, throughput_rounds, device) for objective, method, size, device in CALIBRATION_MIX]
     for workers in workers_list:
         for threads in threads_list:
-            if workers * threads > (os.cpu_count() or 1):
+            if workers * threads > cores:
                 continue
             jobs = [mix[i % len(mix)] for i in range(2 * workers)]
             set_thread_env(threads)
-            start = time.perf_counter()
-            with context.Pool(workers, initializer=_worker_init, initargs=(threads, gpus)) as pool:
-                timings = list(pool.imap_unordered(_calibrate_task, jobs))
-            seconds = time.perf_counter() - start
+            with ProcessPoolExecutor(workers, mp_context=context, initializer=_worker_init,
+                                     initargs=(threads, gpus, 0)) as executor:
+                list(executor.map(_warmup, range(workers)))
+                start = time.perf_counter()
+                timings = list(executor.map(_calibrate_task, jobs))
+                seconds = time.perf_counter() - start
             entry = {'workers': workers, 'threads': threads, 'jobs': len(jobs), 'seconds': seconds,
-                     'rounds_per_second': len(jobs) * rounds / seconds,
-                     'mean_job_seconds': float(np.mean([t['seconds'] for t in timings]))}
+                     'rounds_per_second': len(jobs) * throughput_rounds / seconds,
+                     'mean_job_seconds': float(np.mean([t['seconds'] for t in timings])),
+                     'mean_job_seconds_by_objective': {o: float(np.mean([t['seconds'] for t in timings
+                                                                          if t['objective'] == o]))
+                                                       for o in sorted({t['objective'] for t in timings})}}
             report['throughput'].append(entry)
             log(f'  throughput: {json.dumps(entry)}')
 
@@ -618,7 +672,11 @@ def status() -> None:
 
 
 def collect() -> None:
-    """One row per finished campaign with its metrics (normalized-regret AUC, final regret, hit) and timings."""
+    """
+    One row per finished campaign with its metrics and timings: the normalized-regret AUC, the final regret,
+    whether the regret reached 0.05 ("hit") and the number of BO rounds after the initial design until it did
+    ("first_hit", 0 = already in the initial design, -1 = never).
+    """
     from graph_hdc.bo import normalized_regret, regret_auc
     with open(os.path.join(ROOT, 'tasks.jsonl')) as file:
         tasks = [json.loads(line) for line in file]
@@ -638,6 +696,9 @@ def collect() -> None:
             'fit_failures': int(result['fit_failures']), 'device': meta['device'],
             'seconds_total': meta['seconds_total'], 'git': meta['git'],
         })
+    if not rows:
+        log(f'no finished campaigns among {len(tasks)}')
+        return
     path = os.path.join(ROOT, 'campaigns.tsv')
     with open(path, 'w') as file:
         file.write('\t'.join(rows[0]) + '\n')
@@ -674,15 +735,18 @@ def main(argv=None):
     p = sub.add_parser('run')
     p.add_argument('--workers', type=int, required=True)
     p.add_argument('--threads', type=int, default=1)
-    p.add_argument('--gpus', type=int, default=0)
+    p.add_argument('--gpus', type=int, default=-1, help='number of GPUs, -1 = all visible')
+    p.add_argument('--gpu-min-molecules', type=int, default=GPU_MIN_MOLECULES,
+                   help='libraries larger than this run their acquisition on a GPU')
     p.add_argument('--shard', type=int, default=0)
     p.add_argument('--num-shards', type=int, default=1)
     p.add_argument('--limit', type=int, default=None)
     p = sub.add_parser('calibrate')
     p.add_argument('--workers-list', nargs='+', type=int, default=[16, 32, 64])
     p.add_argument('--threads-list', nargs='+', type=int, default=[1, 2])
-    p.add_argument('--gpus', type=int, default=0)
+    p.add_argument('--gpus', type=int, default=-1, help='number of GPUs, -1 = all visible')
     p.add_argument('--rounds', type=int, default=5)
+    p.add_argument('--throughput-rounds', type=int, default=20)
     sub.add_parser('status')
     sub.add_parser('collect')
     args = parser.parse_args(argv)
@@ -702,13 +766,16 @@ def main(argv=None):
                 file.write(json.dumps(task) + '\n')
         log(f'{len(tasks)} campaigns -> {os.path.join(ROOT, "tasks.jsonl")}')
     elif args.stage == 'run':
-        run(args.workers, args.threads, args.gpus, args.shard, args.num_shards, args.limit)
+        failed = run(args.workers, args.threads, args.gpus, args.shard, args.num_shards, args.limit,
+                     args.gpu_min_molecules)
+        return 1 if failed else 0
     elif args.stage == 'calibrate':
-        calibrate(args.workers_list, args.threads_list, args.gpus, args.rounds)
+        calibrate(args.workers_list, args.threads_list, args.gpus, args.rounds, args.throughput_rounds)
     elif args.stage == 'status':
         status()
     elif args.stage == 'collect':
         collect()
+    return 0
 
 
 if __name__ == '__main__':

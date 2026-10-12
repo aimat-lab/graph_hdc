@@ -31,7 +31,6 @@ import numpy as np
 import torch
 import gpytorch
 from botorch.acquisition.analytic import _log_ei_helper
-from botorch.exceptions import ModelFittingError
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import SingleTaskGP
 from botorch.models.transforms.outcome import Standardize
@@ -138,10 +137,12 @@ def make_gp(method: str, train_x: torch.Tensor, train_y: torch.Tensor) -> Single
 def fit_gp(gp: SingleTaskGP) -> bool:
     """
     Fits the hyperparameters of ``gp`` by maximizing the exact marginal log likelihood (BoTorch's
-    ``fit_gpytorch_mll``, L-BFGS-B with its retry logic). BoTorch's warnings about input scaling are expected
-    here (the inputs are deliberately not min-max scaled) and are silenced.
+    ``fit_gpytorch_mll``, L-BFGS-B with its retry logic; the retries draw from the global torch RNG, which
+    ``run_campaign`` seeds). BoTorch's warnings about input scaling are expected here (the inputs are
+    deliberately not min-max scaled) and are silenced.
 
-    :returns: False if BoTorch gave up (the model then keeps its last parameters), True otherwise.
+    :returns: False if the fit failed (BoTorch gave up, or any other error such as a failed Cholesky
+        decomposition), True otherwise. After a failure the caller should not trust the parameters of ``gp``.
     """
     mll = ExactMarginalLogLikelihood(gp.likelihood, gp)
     with warnings.catch_warnings():
@@ -149,7 +150,7 @@ def fit_gp(gp: SingleTaskGP) -> bool:
         try:
             fit_gpytorch_mll(mll)
             return True
-        except ModelFittingError:
+        except Exception:
             return False
 
 
@@ -206,13 +207,15 @@ def log_ei_scores(gp: SingleTaskGP,
     return scores
 
 
-def pick_best(scores: torch.Tensor, rng: np.random.Generator) -> int:
+def pick_best(scores: torch.Tensor, rng: np.random.Generator, tolerance: float = 1e-9) -> int:
     """
-    The index of the highest entry of ``scores``. Exact ties (e.g. molecules with identical fingerprints) are
-    broken uniformly at random with ``rng`` instead of by library order.
+    The index of the highest entry of ``scores``. Ties are broken uniformly at random with ``rng`` instead of by
+    library order. Molecules with identical feature vectors (e.g. Morgan collisions at small sizes) are true
+    ties, but their scores can differ in the last bits when they are computed in different chunks, so every
+    score within ``tolerance`` (relative) of the maximum counts as tied.
     """
     best = scores.max()
-    ties = torch.nonzero(scores == best).flatten().cpu().numpy()
+    ties = torch.nonzero(scores >= best - tolerance * (1 + best.abs())).flatten().cpu().numpy()
     if len(ties) == 1:
         return int(ties[0])
     return int(ties[rng.integers(len(ties))])
@@ -252,6 +255,9 @@ def run_campaign(method: str,
     objective = np.asarray(objective, dtype=np.float64)
     num_molecules = len(objective)
     rng = np.random.default_rng(seed)
+    # BoTorch's fit retries sample from the global torch RNG: seed it, so a campaign does not depend on what
+    # its worker process ran before
+    torch.manual_seed(seed)
     observed: List[int] = [int(i) for i in initial]
     if len(set(observed)) != len(observed):
         raise ValueError('the initial design contains duplicates')
@@ -283,7 +289,10 @@ def run_campaign(method: str,
             time_start = time.perf_counter()
             gp = make_gp(method, train_x, train_y)
             if not fit_gp(gp):
+                # continue with the default hyperparameters of a fresh model (what BoTorch itself restores
+                # after giving up)
                 fit_failures += 1
+                gp = make_gp(method, train_x, train_y)
             for name, value in gp_hyperparameters(gp).items():
                 hyperparameters.setdefault(name, []).append(value)
             time_fit = time.perf_counter()
@@ -334,4 +343,4 @@ def regret_auc(regret: np.ndarray) -> float:
     regret = np.asarray(regret, dtype=np.float64)
     if len(regret) < 2:
         return float(regret[0])
-    return float(np.trapz(regret) / (len(regret) - 1))
+    return float((regret[:-1] + regret[1:]).sum() / 2 / (len(regret) - 1))

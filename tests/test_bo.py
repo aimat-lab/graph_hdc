@@ -98,8 +98,24 @@ def test_log_ei_scores_match_botorch(method):
     assert torch.allclose(scores, log_ei_scores(gp, torch.tensor(x), best_f=best_f, chunk_size=1000), atol=1e-12)
 
 
+def test_log_ei_scores_match_botorch_lazy_path():
+    # more than 4096 candidates in one chunk make gpytorch evaluate the posterior lazily
+    from botorch.acquisition.analytic import LogExpectedImprovement
+    from graph_hdc.bo import fit_gp, log_ei_scores, make_gp
+    rng = np.random.default_rng(6)
+    x = rng.normal(size=(6000, 8))
+    y = np.sin(3 * x[:, 0]) + x[:, 1]
+    gp = make_gp('hdf_matern', torch.tensor(x[:50]), torch.tensor(y[:50])[:, None])
+    fit_gp(gp)
+    gp.eval()
+    reference = LogExpectedImprovement(gp, best_f=float(y[:50].max()))(torch.tensor(x).unsqueeze(-2)).detach()
+    scores = log_ei_scores(gp, torch.tensor(x), best_f=float(y[:50].max()), chunk_size=6000)
+    assert torch.allclose(scores, reference, rtol=1e-5, atol=1e-6)
+    assert torch.equal(torch.topk(scores, 10).indices, torch.topk(reference, 10).indices)
+
+
 def test_pick_best_breaks_ties_among_maxima():
-    scores = torch.tensor([0.1, 0.9, 0.3, 0.9, 0.9])
+    scores = torch.tensor([0.1, 0.9, 0.3, 0.9, 0.9 - 1e-12], dtype=torch.float64)
     picks = {pick_best(scores, np.random.default_rng(seed)) for seed in range(30)}
     assert picks == {1, 3, 4}
 

@@ -10,10 +10,13 @@
 #
 # Variables come from the submitting environment. Do NOT use --export=ALL,VAR=...: on KCIST that makes most nodes
 # fail the job start with "user env retrieval failed requeued held" (sbatch exports the environment by default).
-# Submit from the fingerprints folder of the pinned checkout (CODE), e.g.
+# Submit from the fingerprints folder of the pinned checkout (CODE). The log folder _ex24/ must exist before the
+# first submission (it is git-ignored, and SLURM does not create the folder of --output):
 #
+#   mkdir -p _ex24
 #   EX24_STAGE=featurize WORKERS=64 sbatch --job-name=ex24feat --gres=gpu:0 --time=02:00:00 run_ex24_kcist.sbatch
 #   EX24_STAGE=encode WORKERS=32 THREADS=2 sbatch --job-name=ex24enc --gres=gpu:0 --dependency=afterok:<feat> run_ex24_kcist.sbatch
+#     (each encode worker holds the PyG graphs of the library, ~5 GB for ZINC250k: keep WORKERS at about 32)
 #   EX24_STAGE=calibrate sbatch --job-name=ex24cal --dependency=afterok:<enc> --time=03:00:00 run_ex24_kcist.sbatch
 #   python bo_benchmark.py tasks          # on the login node, after featurize
 #   EX24_STAGE=run WORKERS=64 THREADS=1 sbatch --job-name=ex24run --array=0-3 run_ex24_kcist.sbatch
@@ -37,7 +40,7 @@ VENV="${VENV:-$REPO/.venv}"
 FP="$CODE/graph_hdc/experiments/fingerprints"
 WORKERS="${WORKERS:-64}"
 THREADS="${THREADS:-1}"
-GPUS="${GPUS:-$(nvidia-smi -L 2>/dev/null | wc -l)}"
+GPUS="${GPUS:--1}"   # -1: all GPUs visible to the job (torch.cuda.device_count())
 SHARD="${SLURM_ARRAY_TASK_ID:-0}"
 NUM_SHARDS="${SLURM_ARRAY_TASK_COUNT:-1}"
 CALIBRATE_ARGS="${CALIBRATE_ARGS:-}"
