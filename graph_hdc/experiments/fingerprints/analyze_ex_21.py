@@ -184,8 +184,10 @@ def chiro(prefix: str) -> str:
         for model in MODELS:
             record = data.get('metrics', {}).get(f'test_{model}', {})
             if 'num_pairs' in record:
-                ties[(model, a)].append(f'{record["num_tied_pairs"]}/{record["num_pairs"]}')
-    lines.append('\nTied test pairs (predictions closer than TIE_TOLERANCE): '
+                ties[(model, a)].append(f'{record["num_tied_pairs"]}/{record["num_pairs"]} '
+                                        f'({record.get("num_identical_pairs", "?")} identical)')
+    lines.append('\nTied test pairs (predictions closer than TIE_TOLERANCE; in parentheses the pairs whose two '
+                 'enantiomers have identical representations): '
                  + '; '.join(f'{MODELS[m]} {a}: {", ".join(v)}' for (m, a), v in sorted(ties.items())))
     lines.append('\nReference (Adams et al., Table 2 and 3), ranking accuracy in %. Their protocol differs from ours: '
                  'trained graph neural networks, the epoch selected by the validation ranking accuracy, both '
@@ -232,6 +234,14 @@ def cmrt(prefix: str) -> str:
         metrics = [('ranking_accuracy', 100.0, 'higher'), ('accuracy', 100.0, 'higher')]
         lines += paired_table(runs, metrics)
         lines += morgan_tables(runs, metrics)
+        identical = defaultdict(list)
+        for (seed, a), data in sorted(runs.items()):
+            record = data.get('metrics', {}).get('test_neural_net2', {})
+            if 'num_identical_pairs' in record:
+                identical[a].append(record['num_identical_pairs'])
+        if identical:
+            lines.append('\nTest pairs whose two enantiomers have identical representations (per seed): '
+                         + '; '.join(f'{a}: {values}' for a, values in sorted(identical.items())))
         lines.append(f'\nRule "the R enantiomer elutes first" on the same test molecules: '
                      f'{mean_sd(list(rule[split_mode].values()), 100.0, 1)}')
     lines.append('\nReference (Baimacheva et al., Table 3), per-molecule test accuracy of a random forest:\n')
