@@ -14,6 +14,7 @@ from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 from chem_mat_data.processing import MoleculeProcessing, OneHotEncoder
 from rdkit import Chem
+from rdkit.Chem import Crippen
 from rdkit.Chem import rdFingerprintGenerator
 from rdkit.Chem import rdmolops
 
@@ -28,6 +29,7 @@ from graph_hdc.special.molecules import (
 )
 from graph_hdc.special.molecules import (
     make_molecule_graph_encoder_map_cont,
+    make_value_graph_encoder,
 )
 import pandas as pd
 
@@ -100,6 +102,13 @@ SPECTRUM: str = 'unit'
 #       norm of the sum-pooled readout would still carry the molecule size. Embedding caches of False runs carry a
 #       "__noglobal" suffix.
 GRAPH_ATTRIBUTES: bool = True
+# :param GRAPH_CLOGP:
+#       Whether Crippen's logP of each molecule (RDKit MolLogP) is encoded as a further global attribute, next to the
+#       graph size and diameter (ex_26). It uses the same fractional power encoding, with a bandwidth of one seventh of
+#       the logP range of the dataset (at least 1, see ``make_value_graph_encoder``), and its hypervector is summed
+#       with those of the size and diameter. Requires ENCODING_MODE "continuous" and GRAPH_ATTRIBUTES. Embedding
+#       caches of True runs carry a "__clogp" suffix.
+GRAPH_CLOGP: bool = False
 # :param SPECTRUM_DIAGNOSTIC:
 #       If True, the median number of effective Fourier components of the embeddings (participation ratio of the
 #       power spectrum, over at most 1000 molecules) is stored as "embedding/effective_components" (ex_22).
@@ -216,6 +225,29 @@ def process_dataset(
     if not e.GRAPH_ATTRIBUTES:
         graph_encoder_map = {}
 
+    # --- Crippen's logP as a further global attribute (ex_26) ---
+    # The encoder needs the logP range of the whole dataset (like the size and diameter encoders need their maxima),
+    # so the values are computed here, before the cached encoding, which then only attaches them to the graph dicts.
+    clogp_of: Dict[int, float] = {}
+    if e.GRAPH_CLOGP:
+        if e.ENCODING_MODE != 'continuous' or not e.GRAPH_ATTRIBUTES:
+            raise ValueError('GRAPH_CLOGP requires ENCODING_MODE "continuous" and GRAPH_ATTRIBUTES = True')
+        clogp_of = {index: float(Crippen.MolLogP(Chem.MolFromSmiles(data['graph_repr'])))
+                    for index, data in index_data_map.items()}
+        # seed offset 50: not used by any node or graph encoder of the maps above (offsets 0-30; the stereo encoder of
+        # the branch revision/stereo uses 40)
+        graph_encoder_map['graph_clogp'] = make_value_graph_encoder(
+            list(clogp_of.values()),
+            dim=e.EMBEDDING_SIZE,
+            seed=e.SEED + 50,
+            unit_modulus=(e.SPECTRUM == 'unit'),
+        )
+        e['clogp/min'] = min(clogp_of.values())
+        e['clogp/max'] = max(clogp_of.values())
+        e['clogp/bandwidth'] = graph_encoder_map['graph_clogp'].bandwidth
+        e.log(f' * GRAPH_CLOGP: logP from {e["clogp/min"]:.2f} to {e["clogp/max"]:.2f}, '
+              f'bandwidth {e["clogp/bandwidth"]:.2f}')
+
 
     e.log('creating HyperNet encoder...')
     e.log(f' * DEVICE: {e.DEVICE}')
@@ -259,6 +291,8 @@ def process_dataset(
         hdc_cache_name += '__unitspec'
     if not e.GRAPH_ATTRIBUTES:
         hdc_cache_name += '__noglobal'
+    if e.GRAPH_CLOGP:
+        hdc_cache_name += '__clogp'
     @experiment.cache.cached(name=hdc_cache_name)
     def process_dataset():
         
@@ -278,7 +312,9 @@ def process_dataset(
             mol: Chem.Mol = Chem.MolFromSmiles(smiles)
             
             graph = graph_dict_from_mol(mol, hydrogens=e.HYDROGEN_COUNT)
-            
+            if e.GRAPH_CLOGP:
+                graph['graph_clogp'] = clogp_of[index]
+
             del graph['graph_labels']
             index_data_map[index].update(graph)
             

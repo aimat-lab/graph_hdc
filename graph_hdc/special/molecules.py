@@ -310,7 +310,37 @@ def make_molecule_graph_encoder_map_cont(
         ),
     }
 
-    
+
+def make_value_graph_encoder(
+    values: List[float],
+    dim: int,
+    seed: int,
+    unit_modulus: bool = True,
+    min_bandwidth: float = 1.0,
+) -> ContinuousEncoder:
+    """
+    Fractional power encoder for a further continuous graph-level attribute, for example Crippen's logP (ex_26). It is
+    built like the graph size encoder of ``make_molecule_graph_encoder_map_cont``: the bandwidth is one seventh of the
+    range of ``values`` (the attribute over the whole dataset), but at least ``min_bandwidth``. Add the encoder to the
+    graph encoder map under the key of the graph dict entry that holds the value (e.g. "graph_clogp"); HyperNet then
+    sums its hypervector with those of the graph size and diameter.
+
+    :param values: The attribute values of all molecules of the dataset (only their range is used).
+    :param dim: The dimension of the hypervectors.
+    :param seed: The seed of the random base vector. Use an offset that no other encoder of the map uses.
+    :param unit_modulus: Whether the base vector has unit Fourier magnitudes (see ContinuousEncoder).
+    :param min_bandwidth: The lower bound of the bandwidth, in units of the attribute.
+    """
+    low, high = float(min(values)), float(max(values))
+    return ContinuousEncoder(
+        dim=dim,
+        size=high - low,
+        bandwidth=max(min_bandwidth, (high - low) / 7.0),
+        seed=seed,
+        unit_modulus=unit_modulus,
+    )
+
+
 def mol_from_graph_dict(graph: dict) -> Chem.Mol:
     """
     Create an RDKit molecule from a graph dict representation.

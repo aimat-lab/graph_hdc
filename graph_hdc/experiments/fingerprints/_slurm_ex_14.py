@@ -283,6 +283,8 @@ def hdf_cache_name(params: dict) -> str:
         name += '__unitspec'
     if params.get('GRAPH_ATTRIBUTES') is False:
         name += '__noglobal'
+    if params.get('GRAPH_CLOGP'):
+        name += '__clogp'
     return name
 
 
