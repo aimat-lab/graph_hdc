@@ -18,16 +18,20 @@ validation split and batch order; same split and codebooks).
 unchanged (only validation and test values are snapped to the nearest training value). The 16-bit arm is a check of
 the procedure, not a compression.
 
+Rounds (``ROUNDS``, selected with ``--round``): ``ex_20_bits`` (2026-10-09, commit 136d6bc) used the original HDF
+codebooks with random spectral magnitudes (SPECTRUM='gaussian'). ``ex_20_bits_unit`` (default) repeats the same design
+with the unit-modulus codebooks that are the HDF default since graph_hdc d740800 (SPECTRUM='unit').
+
 Datasets: FreeSolv, AqSolDB and BACE; seeds 0-9. Each SLURM job runs one group script from ``_ex20/jobs/`` (the
 seven runs of one dataset and seed, one after the other). Job setup as in ex_15: CPU only, 2 threads, 4 CPUs per
 job, private TMPDIR, caching disabled (no job writes shared cache files), datasets pre-loaded to /tmp before
 submitting. The group scripts put the repository that contains this file first on PYTHONPATH, so a run from a git
 worktree uses the worktree's graph_hdc package (the venv's editable install points to the main checkout).
 
-    python _slurm_ex_20.py             # pre-load datasets, write group scripts, submit
-    python _slurm_ex_20.py --dry-run   # write group scripts and job scripts only
-    python _slurm_ex_20.py --smoke     # write one group script (FreeSolv, seed 0, prefix ex_20_smoke) and print
-                                       # its path, to run it locally with bash
+    python _slurm_ex_20.py [--round PREFIX]             # pre-load datasets, write group scripts, submit
+    python _slurm_ex_20.py [--round PREFIX] --dry-run   # write group scripts and job scripts only
+    python _slurm_ex_20.py [--round PREFIX] --smoke     # write one group script (FreeSolv, seed 0, prefix
+                                                        # <PREFIX>_smoke) and print its path, to run it with bash
 """
 import os
 import sys
@@ -43,8 +47,12 @@ VENV = os.path.join(REPO, '.venv')
 if not os.path.isdir(VENV):
     VENV = '/media/ssd2/Programming/graph_hdc/.venv'
 
-PREFIX = 'ex_20_bits'
-PREFIX_SMOKE = 'ex_20_smoke'
+# round prefix -> HDF codebooks (SPECTRUM of predict_molecules__hdc.py)
+ROUNDS = {
+    'ex_20_bits': 'gaussian',       # original codebooks, 2026-10-09 (commit 136d6bc)
+    'ex_20_bits_unit': 'unit',      # unit-modulus codebooks, the HDF default since d740800
+}
+PREFIX = 'ex_20_bits_unit'
 SEEDS = list(range(10))
 BITS = [None, 16, 8, 4, 2, 1]
 NN_SEED_OFFSET = 1000
@@ -56,9 +64,10 @@ NUM_THREADS = 2
 CPUS = 4
 
 
-def commands(prefix: str, ds: tuple, seed: int) -> list:
+def commands(prefix: str, ds: tuple, seed: int, spectrum: str) -> list:
     module, params = VARIANTS['hdf']
-    params = {**params, 'MODELS': ['neural_net2'], '__CACHING__': False}
+    # SPECTRUM is passed explicitly (_command only fills in 'gaussian' if it is missing)
+    params = {**params, 'MODELS': ['neural_net2'], '__CACHING__': False, 'SPECTRUM': spectrum}
     lines = [_command(module, prefix, seed, ds, {**params, 'QUANTIZE_BITS': bits}) for bits in BITS]
     # float32 with another network seed: the run-to-run variation of the MLP training itself
     lines.append(_command(module, prefix, seed, ds, {**params, 'QUANTIZE_BITS': None,
@@ -86,16 +95,19 @@ def write_group(name: str, lines: list) -> str:
     return path
 
 
-def groups(prefix: str, datasets: list, seeds: list) -> list:
-    return [write_group(f'{prefix}__{ds[0]}__seed_{seed}', commands(prefix, ds, seed))
+def groups(prefix: str, datasets: list, seeds: list, spectrum: str) -> list:
+    return [write_group(f'{prefix}__{ds[0]}__seed_{seed}', commands(prefix, ds, seed, spectrum))
             for ds in datasets for seed in seeds]
 
 
 if __name__ == '__main__':
 
+    prefix = sys.argv[sys.argv.index('--round') + 1] if '--round' in sys.argv else PREFIX
+    spectrum = ROUNDS[prefix]
+
     if '--smoke' in sys.argv:
         ds = [d for d in DATASETS_BITS if d[0] == 'freesolv_hfe']
-        print(groups(PREFIX_SMOKE, ds, [0])[0])
+        print(groups(f'{prefix}_smoke', ds, [0], spectrum)[0])
         sys.exit(0)
 
     from auto_slurm.aslurmx import ASlurmSubmitter
@@ -104,7 +116,7 @@ if __name__ == '__main__':
     if not dry_run:
         preload(DATASETS_BITS)
 
-    paths = groups(PREFIX, DATASETS_BITS, SEEDS)
+    paths = groups(prefix, DATASETS_BITS, SEEDS, spectrum)
     submitter = ASlurmSubmitter(
         config_name=AUTOSLURM_CONFIG,
         batch_size=1,
@@ -127,5 +139,6 @@ if __name__ == '__main__':
 
     runs = (len(BITS) + 1) * len(SEEDS) * len(DATASETS_BITS)
     print(f'{runs} runs ({len(DATASETS_BITS)} datasets x {len(SEEDS)} seeds x ({len(BITS)} bit depths + 1 re-seeded '
-          f'float32)) in {submitter.count_jobs()} job(s), config {AUTOSLURM_CONFIG}, venv {VENV}')
+          f'float32)) in {submitter.count_jobs()} job(s), prefix {prefix}, SPECTRUM {spectrum!r}, '
+          f'config {AUTOSLURM_CONFIG}, venv {VENV}')
     submitter.submit()

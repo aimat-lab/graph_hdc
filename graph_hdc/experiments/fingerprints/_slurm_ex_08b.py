@@ -66,11 +66,12 @@ SIZE_PARAMETER = {'fp': 'FINGERPRINT_SIZE', 'hdc': 'EMBEDDING_SIZE'}
 # per molecule at D=2048 on 2 threads (review measurement), so about 3 h in total; 12 h leaves room on the
 # loaded machine.
 ARMS = [
-    ('ex_08_b', 'hdc', {**HDC, 'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total', 'GED_CANONICAL_QUERY': True},
-     '12:00:00'),
+    # both HDF arms ran with the original (gaussian) codebooks; unit-modulus codebooks became the default later
+    ('ex_08_b', 'hdc', {**HDC, 'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total', 'GED_CANONICAL_QUERY': True,
+                        'SPECTRUM': 'gaussian'}, '12:00:00'),
     ('ex_08_b', 'fp', {**FP, 'GED_CANONICAL_QUERY': True}, '02:00:00'),
-    ('ex_08_b_repro', 'hdc', {**HDC, 'BIDIRECTIONAL': False, 'HYDROGEN_COUNT': 'implicit', 'GED_CANONICAL_QUERY': True},
-     '12:00:00'),
+    ('ex_08_b_repro', 'hdc', {**HDC, 'BIDIRECTIONAL': False, 'HYDROGEN_COUNT': 'implicit', 'GED_CANONICAL_QUERY': True,
+                              'SPECTRUM': 'gaussian'}, '12:00:00'),
     ('ex_08_b_repro', 'fp', {**FP, 'GED_CANONICAL_QUERY': False}, '02:00:00'),
 ]
 

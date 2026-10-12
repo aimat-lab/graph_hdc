@@ -4,10 +4,15 @@ Analysis of Experiment 20 (ex_20): bit-depth ablation of HDF (reviewer comment R
 Pairs the runs of ``_slurm_ex_20.py`` by (dataset, seed) and divides the test MAE of the MLP at each bit depth
 (QUANTIZE_BITS = 16, 8, 4, 2, 1) by the test MAE of the float32 run (QUANTIZE_BITS = None) of the same seed. All
 bit depths of a seed share the split, the codebooks and the MLP seed. The float32 run with another network seed
-(NN_SEED set, label 'retrained') gives the ratio that the run-to-run variation of the MLP training alone produces.
+(NN_SEED set, label 'other seed') gives the ratio that the run-to-run variation of the MLP training alone produces.
 Prefer the median ratio: the shared float32 denominator is noisy, which pushes the mean ratio above 1.
 
-    python analyze_ex_20.py [prefix] [--out FIGURE.pdf]     # default prefix: ex_20_bits
+    python analyze_ex_20.py [prefix] [--out FIGURE.pdf] [--spectrum gaussian|unit]   # default: ex_20_bits_unit
+
+The archives of ex_20_bits (2026-10-09) use the original HDF codebooks with random spectral magnitudes
+(SPECTRUM='gaussian'; archives from before the SPECTRUM parameter existed count as 'gaussian'). Since graph_hdc
+d740800, HDF defaults to unit-modulus codebooks (SPECTRUM='unit'). The analysis never mixes the two: if a prefix
+contains both, --spectrum selects one.
 
 Writes to ``_ex20/``: ``bits_<prefix>.md`` (table), ``bits_<prefix>.csv`` (all runs) and ``figure_bits_<prefix>.pdf``
 (box plots: x = bits per dimension, one box per dataset, y = MAE relative to float32). ``--out`` also copies the
@@ -23,6 +28,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 from matplotlib.patches import Patch
 
 from analyze_ex_15 import iter_archives
@@ -31,18 +37,36 @@ PATH = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(PATH, '_ex20')
 MODEL = 'neural_net2'
 BITS = [1, 2, 4, 8, 16, 32]  # 32 = float32 (QUANTIZE_BITS None)
-RETRAINED = 'retrained'      # float32 with another network seed (NN_SEED)
+RETRAINED = 'other seed'     # float32 with another network seed (NN_SEED)
 ARMS = BITS + [RETRAINED]
 DATASETS = [('aqsoldb_logs', 'AqSolDB'), ('freesolv_hfe', 'FreeSolv'), ('bace_ic50', 'BACE')]
-COLORS = ['#7f7f7f', '#c49a3a', '#8c5aa6']
+
+# Figure style of the paper's box plots (analyze_ex_08.ipynb / analyze_ex_07.ipynb): Roboto Condensed 11 pt, boxes
+# with black edges, light y-grid, arrow in the y-label for the better direction. The datasets get colour-blind-safe
+# Okabe-Ito colours (yellow, orange, reddish purple) that avoid the paper's method colours (blue = Morgan,
+# green = HDF, gray = random).
+COLORS = ['#F0E442', '#E69F00', '#CC79A7']
+FONT_SIZE = 11
+FIGSIZE = (6.0, 3.4)
 
 
-def collect(prefix: str) -> dict:
+def collect(prefix: str, spectrum: str = None) -> dict:
     """{(dataset, seed): {arm: mae}}; a retried run keeps the newest archive."""
+    archives = sorted(iter_archives(prefix), key=lambda t: t[1].get('start_time') or 0)
+    spectra = defaultdict(int)
+    for _, _, params, _ in archives:
+        spectra[params.get('SPECTRUM') or 'gaussian'] += 1
+    if spectrum is None:
+        if len(spectra) > 1:
+            raise SystemExit(f'prefix {prefix} mixes HDF codebooks {dict(spectra)}; select one with --spectrum')
+        spectrum = next(iter(spectra), 'gaussian')
+    print(f'HDF codebooks: SPECTRUM={spectrum!r} ({spectra.get(spectrum, 0)} archives)')
     runs = defaultdict(dict)
-    for _, meta, params, data in sorted(iter_archives(prefix), key=lambda t: t[1].get('start_time') or 0):
+    for _, meta, params, data in archives:
         key = f'test_{MODEL}'
         if key not in data.get('metrics', {}) or 'QUANTIZE_BITS' not in params:
+            continue
+        if (params.get('SPECTRUM') or 'gaussian') != spectrum:
             continue
         bits = params['QUANTIZE_BITS']
         if params.get('NN_SEED') is not None:
@@ -57,8 +81,8 @@ def collect(prefix: str) -> dict:
     return runs
 
 
-def main(prefix: str, out: str = None):
-    runs = collect(prefix)
+def main(prefix: str, out: str = None, spectrum: str = None):
+    runs = collect(prefix, spectrum)
     relative = {}  # (dataset, bits) -> array of MAE ratios over the complete seeds
     rows, records = [], []
     for dataset, label in DATASETS:
@@ -96,26 +120,43 @@ def main(prefix: str, out: str = None):
         writer.writerows(records)
 
     # --- figure: groups along x = bits per dimension, one box per dataset ---
+    plt.style.use('default')
+    if any('Roboto Condensed' in f.name for f in font_manager.fontManager.ttflist):
+        plt.rcParams['font.family'] = 'Roboto Condensed'
+    plt.rcParams['font.size'] = FONT_SIZE
+
     present = [(d, l, c) for (d, l), c in zip(DATASETS, COLORS) if (d, BITS[0]) in relative]
     width = 0.8 / len(present)
-    fig, ax = plt.subplots(figsize=(6.5, 3.2))
+    fig, ax = plt.subplots(figsize=FIGSIZE)
+    # gray dashed reference line with a small italic label (as in Fig. 3a), placed in the gap between the 16- and
+    # 32-bit groups
+    ax.axhline(1.0, color='gray', linestyle='--', linewidth=1.1, alpha=0.8, zorder=0)
+    ax.annotate('float32', xy=(BITS.index(16) + 0.5, 1.0), xytext=(0, 3), textcoords='offset points', ha='center',
+                va='bottom', fontsize=FONT_SIZE - 3, color='gray', style='italic')
     for j, (dataset, label, color) in enumerate(present):
         positions = [i + (j - (len(present) - 1) / 2) * width for i in range(len(ARMS))]
         ax.boxplot([relative[(dataset, b)] for b in ARMS], positions=positions, widths=width * 0.85,
-                   patch_artist=True, showfliers=True, medianprops=dict(color='black'),
-                   boxprops=dict(facecolor=color, alpha=0.8), flierprops=dict(markersize=3))
-    ax.axhline(1.0, color='black', linestyle='--', linewidth=0.8)
-    ax.axvline(len(BITS) - 0.5, color='gray', linestyle=':', linewidth=0.8)
+                   patch_artist=True, showfliers=True, manage_ticks=False,
+                   boxprops=dict(facecolor=color, alpha=0.95, edgecolor='black', linewidth=1.5),
+                   medianprops=dict(color='black', linewidth=1.5),
+                   whiskerprops=dict(color='black', linewidth=1.5),
+                   capprops=dict(color='black', linewidth=1.5),
+                   flierprops=dict(marker='o', markerfacecolor='black', markeredgecolor='black', markersize=4,
+                                   alpha=0.5))
+    ax.axvline(len(BITS) - 0.5, color='gray', linestyle=':', linewidth=1.2)
     ax.set_xticks(range(len(ARMS)))
-    ax.set_xticklabels([{32: '32\n(float32)', RETRAINED: 'float32,\nretrained'}.get(b, str(b)) for b in ARMS])
-    ax.set_xlabel('Bits per dimension')
-    ax.set_ylabel('MAE relative to float32')
-    ax.legend(handles=[Patch(facecolor=c, alpha=0.8, label=l) for _, l, c in present], frameon=False,
-              loc='upper right')
-    ax.spines[['top', 'right']].set_visible(False)
+    ax.set_xticklabels([{32: '32\n(float32)', RETRAINED: 'float32,\nother seed'}.get(b, str(b)) for b in ARMS])
+    ax.set_xlim(-0.6, len(ARMS) - 0.4)
+    ax.set_xlabel('Bits per dimension', fontsize=FONT_SIZE + 1)
+    ax.set_title('Bit-depth ablation of HDF', fontsize=FONT_SIZE + 1, pad=8)
+    ax.set_ylabel('MAE / MAE$_{\\mathrm{float32}}$ $\\downarrow$', fontsize=FONT_SIZE + 1)
+    ax.grid(True, alpha=0.3, axis='y')
+    # framed legend; upper right because the lower right would cover the boxes of the other-seed group
+    handles = [Patch(facecolor=c, alpha=0.95, edgecolor='black', label=l) for _, l, c in present]
+    ax.legend(handles=handles, loc='upper right', fontsize=FONT_SIZE, framealpha=0.9)
     fig.tight_layout()
     fig_path = os.path.join(OUT, f'figure_bits_{prefix}.pdf')
-    fig.savefig(fig_path)
+    fig.savefig(fig_path, bbox_inches='tight', dpi=300)
     print(f'\nfigure: {fig_path}')
     if out:
         shutil.copy(fig_path, out)
@@ -123,8 +164,7 @@ def main(prefix: str, out: str = None):
 
 
 if __name__ == '__main__':
-    args = [a for a in sys.argv[1:] if not a.startswith('--')]
     out = sys.argv[sys.argv.index('--out') + 1] if '--out' in sys.argv else None
-    if out in args:
-        args.remove(out)
-    main(args[0] if args else 'ex_20_bits', out)
+    spectrum = sys.argv[sys.argv.index('--spectrum') + 1] if '--spectrum' in sys.argv else None
+    args = [a for a in sys.argv[1:] if not a.startswith('--') and a not in (out, spectrum)]
+    main(args[0] if args else 'ex_20_bits_unit', out, spectrum)

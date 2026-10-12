@@ -126,6 +126,9 @@ def _command(module: str, prefix: str, seed: int, num_data: float,
     if module == 'hdc':
         params.setdefault('BIDIRECTIONAL', True)
         params.setdefault('HYDROGEN_COUNT', 'total')
+        # Unit-modulus codebooks became the HDF default on 2026-10-09 (ex_22); the Table 1 archives used the
+        # original (gaussian) codebooks, so resumed runs pin them until the table is re-run with "unit".
+        params.setdefault('SPECTRUM', 'gaussian')
     parts = ['python', os.path.join(PATH, f'predict_molecules__{module}.py')]
     parts += [f'--{k}="{v!r}"' for k, v in params.items()]
     return ' '.join(parts)

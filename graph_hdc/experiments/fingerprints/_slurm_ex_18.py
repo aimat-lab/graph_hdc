@@ -90,7 +90,9 @@ MLP = {
 }
 # (variant name, experiment module suffix, parameters)
 REPRESENTATIONS = [
-    ('hdf', 'hdc', {**VARIANTS['hdf'][1], **MLP, 'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total'}),
+    # SPECTRUM: the ex_18 archives used the original (gaussian) codebooks (unit became the default on 2026-10-09)
+    ('hdf', 'hdc', {**VARIANTS['hdf'][1], **MLP, 'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total',
+                    'SPECTRUM': 'gaussian'}),
     ('morgan', 'fp', {**MLP, 'FINGERPRINT_TYPE': 'morgan', 'FINGERPRINT_SIZE': 2048, 'FINGERPRINT_RADIUS': 2}),
     ('secfp', 'fp', {**MLP, 'FINGERPRINT_TYPE': 'secfp', 'FINGERPRINT_SIZE': 2048, 'FINGERPRINT_RADIUS': 3}),
     ('map4', 'fp', {**MLP, 'FINGERPRINT_TYPE': 'map4', 'FINGERPRINT_SIZE': 2048, 'FINGERPRINT_RADIUS': 2}),

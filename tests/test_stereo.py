@@ -82,6 +82,20 @@ def test_stereo_encoder_none_is_binding_identity():
     assert encoder.decode(encoder.encode(4)) == 4
 
 
+def test_stereo_encoder_unit_modulus():
+    import torch
+    unit = StereoEncoder(dim=64, seed=3, unit_modulus=True)
+    magnitudes = torch.fft.fft(unit.embeddings, dim=-1).abs()
+    assert torch.allclose(magnitudes, torch.ones_like(magnitudes), atol=1e-10)
+    identity = np.zeros(64)
+    identity[0] = 1.0
+    assert np.array_equal(unit.encode(0).numpy(), identity)
+    # the same random draw: the phases agree with the Gaussian codebook
+    gaussian = StereoEncoder(dim=64, seed=3, unit_modulus=False)
+    phases = lambda e: torch.angle(torch.fft.fft(e.embeddings[1:], dim=-1))
+    assert torch.allclose(torch.cos(phases(unit)), torch.cos(phases(gaussian)), atol=1e-8)
+
+
 def test_stereo_encoder_does_not_touch_global_rng():
     import torch
     torch.manual_seed(123)

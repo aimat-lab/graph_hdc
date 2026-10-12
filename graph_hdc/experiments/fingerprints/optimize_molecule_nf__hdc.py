@@ -95,6 +95,14 @@ BIDIRECTIONAL: bool = True
 #       counts implicit hydrogens, which is 0 for every atom written in brackets ([nH], [NH3+], [C@@H], ...).
 #       Embedding caches of "total" runs carry a "__totalh" suffix.
 HYDROGEN_COUNT: str = 'total'
+# :param SPECTRUM:
+#       Fourier magnitudes of the random codebook vectors (the element vectors and the base vectors of the
+#       fractional power encoders), see ``unit_modulus`` of AtomEncoder and ContinuousEncoder. "unit" (default
+#       since 2026-10-09, ex_22): unit Fourier magnitudes with random phases (FHRR phasors). "gaussian": the random
+#       magnitudes of the original encoder, with which binding concentrates the embeddings on a few Fourier
+#       components. Only used in ENCODING_MODE "continuous". Embedding caches of "unit" runs carry a "__unitspec"
+#       suffix, so caches of the original encoder are never reused for it.
+SPECTRUM: str = 'unit'
 
 # :param DEVICE:
 #       The device to use for computation ('cpu' or 'cuda:0'). If CUDA is available,
@@ -204,18 +212,22 @@ def process_dataset(e: Experiment,
 
     # === CONSTRUCT HYPERNET ENCODER ===
 
+    if e.SPECTRUM not in ('gaussian', 'unit'):
+        raise ValueError(f'SPECTRUM must be "gaussian" or "unit", got {e.SPECTRUM!r}')
     if e.ENCODING_MODE == 'continuous':
         # Continuous mode with FHRR encodings for better regression performance
         # and smoother optimization landscapes
         node_encoder_map = make_molecule_node_encoder_map_cont(
             dim=e.EMBEDDING_SIZE,
             seed=e.SEED,
+            unit_modulus=(e.SPECTRUM == 'unit'),
         )
         graph_encoder_map = make_molecule_graph_encoder_map_cont(
             dim=e.EMBEDDING_SIZE,
             seed=e.SEED,
             max_graph_size=stats['size']['max'],
             max_graph_diameter=stats['diameter']['max'],
+            unit_modulus=(e.SPECTRUM == 'unit'),
         )
 
     elif e.ENCODING_MODE == 'categorical':
@@ -256,7 +268,7 @@ def process_dataset(e: Experiment,
         name=f'hdc_embeddings_{e.DATASET_NAME}__'
              f'numdata_{e.NUM_DATA}__'
              f'seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}__'
-             f'mode_{e.ENCODING_MODE}{"__bidir" if e.BIDIRECTIONAL else ""}{"__totalh" if e.HYDROGEN_COUNT == "total" else ""}'
+             f'mode_{e.ENCODING_MODE}{"__bidir" if e.BIDIRECTIONAL else ""}{"__totalh" if e.HYDROGEN_COUNT == "total" else ""}{"__unitspec" if e.ENCODING_MODE == "continuous" and e.SPECTRUM == "unit" else ""}'
     )
     def process_dataset_cached():
         """
