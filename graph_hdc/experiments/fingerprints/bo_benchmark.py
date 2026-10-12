@@ -10,7 +10,9 @@ repeats the size sweep of ex_07 with a kernel that suits each representation and
                   solubility     maximal AqSolDB solubility (logS)
                   lipophilicity  maximal lipophilicity (logD)
                   freesolv       minimal FreeSolv hydration free energy
-                  beet           maximal honey-bee LD50 (BEET, exact values only)
+                  beet           maximal honey-bee LD50 (BEET, exact values only, log10 scale: the raw values
+                                 span 0.0015-3980 ug/bee, and on that scale 124 of 128 molecules lie at
+                                 normalized regret >= 0.91 behind four outliers)
     methods       hdf_matern       HDF (standard configuration) + Matern-5/2
                   morgan_tanimoto  Morgan radius 2, binary, folded to D bits + Tanimoto
                   morgan_pca       Morgan-2048 -> first D PCA components + Matern-5/2
@@ -83,7 +85,8 @@ OBJECTIVES = {
                           num_initial=20, num_rounds=150),
     'freesolv': dict(library='freesolv', property='freesolv', mode='minimize', target=None,
                      num_initial=20, num_rounds=80),
-    'beet': dict(library='beet', property='beet', mode='maximize', target=None, num_initial=10, num_rounds=40),
+    'beet': dict(library='beet', property='beet', mode='maximize', target=None, num_initial=10, num_rounds=40,
+                 transform='log10'),
 }
 
 GP_METHODS = ['hdf_matern', 'morgan_tanimoto', 'morgan_pca', 'hdf_linear']
@@ -275,14 +278,20 @@ def featurize(library: str, workers: int) -> None:
     for objective, ospec in OBJECTIVES.items():
         if ospec['library'] != library:
             continue
-        objective_array = objective_values(properties[ospec['property']], ospec['mode'], ospec['target'])
+        prop = properties[ospec['property']]
+        if ospec.get('transform') == 'log10':
+            if (prop <= 0).any():
+                raise ValueError(f'{objective}: log10 transform of non-positive values')
+            prop = np.log10(prop)
+        objective_array = objective_values(prop, ospec['mode'], ospec['target'])
         initial = np.stack([
             np.random.default_rng([24, zlib.crc32(objective.encode()), k]).choice(
                 len(smiles_list), size=ospec['num_initial'], replace=False)
             for k in range(NUM_CAMPAIGNS)
         ])
         np.savez(os.path.join(DATA, 'objectives', f'{objective}.npz'),
-                 values=properties[ospec['property']], objective=objective_array, initial=initial,
+                 values=properties[ospec['property']], transform=ospec.get('transform') or 'none',
+                 objective=objective_array, initial=initial,
                  objective_max=objective_array.max(), objective_min=objective_array.min())
         log(f'{objective}: {len(smiles_list)} candidates, objective range [{objective_array.min():.4g}, '
             f'{objective_array.max():.4g}], best molecule {smiles_list[int(objective_array.argmax())]}')

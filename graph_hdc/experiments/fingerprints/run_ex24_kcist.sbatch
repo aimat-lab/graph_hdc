@@ -44,6 +44,7 @@ GPUS="${GPUS:--1}"   # -1: all GPUs visible to the job (torch.cuda.device_count(
 SHARD="${SLURM_ARRAY_TASK_ID:-0}"
 NUM_SHARDS="${SLURM_ARRAY_TASK_COUNT:-1}"
 CALIBRATE_ARGS="${CALIBRATE_ARGS:-}"
+FEATURIZE_ARGS="${FEATURIZE_ARGS:-}"   # e.g. "--libraries beet"
 
 source "$VENV/bin/activate"
 export PYTHONPATH="$CODE"
@@ -65,7 +66,7 @@ python -c "import os, sys, graph_hdc; sys.exit(not os.path.realpath(graph_hdc.__
     || { echo "!!! graph_hdc is not imported from CODE=$CODE"; exit 2; }
 
 case "$EX24_STAGE" in
-    featurize) python bo_benchmark.py featurize --workers "$WORKERS" ;;
+    featurize) python bo_benchmark.py featurize --workers "$WORKERS" $FEATURIZE_ARGS ;;
     encode)    python bo_benchmark.py encode --workers "$WORKERS" --threads "$THREADS" ;;
     calibrate) python bo_benchmark.py calibrate --gpus "$GPUS" $CALIBRATE_ARGS ;;
     run)       python bo_benchmark.py run --workers "$WORKERS" --threads "$THREADS" --gpus "$GPUS" \
