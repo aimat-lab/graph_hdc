@@ -10,8 +10,9 @@ exists in ex_25 and in ex_14 / ex_19 (only in the smoke test, which re-runs the 
 that they reproduce), the ex_14 / ex_19 record is used and both results are printed.
 
 All runs of a (target, seed) must have used the same split (train, validation and test indices, in order), on which the
-paired tests rely. The reference split is that of the ex_14 / ex_19 run where one exists, otherwise the most frequent
-one; runs with another split are printed and excluded.
+paired tests rely. The split depends only on the dataset and the seed, so the reference split of a (DATASET_NAME, seed)
+is that of its ex_14 / ex_19 runs, of any target of the dataset (otherwise the most frequent one). Of the runs of an
+(arm, target, seed), the newest one on the reference split is used; runs on another split are printed and left out.
 
 Paired contrasts per target, over the seeds that both arms have (relative change of the test MAE, (b - a) / a, mean
 over the seeds with a t-interval; seeds where b is better; two-sided Wilcoxon signed-rank test; Holm-corrected over the
@@ -46,8 +47,8 @@ from collections import Counter
 import numpy as np
 from scipy.stats import wilcoxon, t as t_dist
 
-from analyze_ex_14 import holm, si_cell, HARTREE_EV, ROW_META as EX14_ROW_META
-from _slurm_ex_25 import TABLE1_NOTES, EX14_NOTES, MLP, arm_of_params
+from analyze_ex_14 import holm, HARTREE_EV, ROW_META as EX14_ROW_META
+from _slurm_ex_25 import TABLE1_NOTES, EX14_NOTES, MLP, DATASETS, arm_of_params
 
 PATH = os.path.dirname(os.path.abspath(__file__))
 RESULTS = os.path.join(PATH, 'results')
@@ -61,11 +62,17 @@ CONTRASTS = [('hdf_noglobal', 'hdf'), ('morgan_desc', 'morgan'), ('morgan_desc',
 # the triangles of the table: column -> reference column
 TABLE_MARKS = {'hdf_noglobal': 'hdf', 'morgan_desc': 'morgan'}
 FIELDS = ['arm', 'dataset', 'seed', 'mae', 'r2', 'source']
+# DATASET_NAME of every target: the split depends only on it and the seed
+DATASET_OF = {ds[0]: ds[1] for ds in DATASETS}
 
 # Table rows in the order of Table 1: dataset name, quantity, unit and the factor that converts the raw MAE into that
 # unit, as in the SI tables of ex_14 (QM9 energies are in hartree, the gaps and the ZPVE given in millihartree, the
-# COMPAS-3X energies are in eV). ClogP is computed by mixin_clogp after the labels of AqSolDB have been standardized,
-# so its MAE, like in Table 1, is multiplied by the standard deviation of logS in the training split.
+# COMPAS-3X energies are in eV). Two caveats inherited from Table 1:
+# * ClogP is computed by mixin_clogp after the labels of AqSolDB have been standardized, so its MAE, like in Table 1,
+#   is multiplied by the standard deviation of logS in the training split (about 2.3).
+# * The HOPV15 targets of Table 1 (TARGET_INDEX 5 "PCE" and 4 "Voc") are two band gaps in eV: in the labels of
+#   hopv15_exp, columns 0-3 are Voc, Jsc, FF and PCE (column 3 = column 0 x 1 x 2 / 100) and columns 4 and 5 range from
+#   1.1 to 3.3. The labels below follow Table 1 until the paper is corrected.
 ROW_META = {
     **EX14_ROW_META,
     'hopv15_voc': ('HOPV15', '$V_{oc}$', 'V', 1.0),
@@ -78,6 +85,27 @@ ROW_META = {
     'qm9_enthalpy': ('QM9', r'$\Delta H$', 'Ha', 1.0),
 }
 assert set(ROW_META) >= set(TABLE1_NOTES) and ROW_META['compas_gap'][3] == 1000.0 / HARTREE_EV
+# decimals of the table cells: three as in the SI tables of ex_14, four for the small COMPAS-3X dipole errors
+DECIMALS = {'compas_dipole': 4}
+
+
+def si_cell(values: list, bold: bool, mark: str = None, significant: bool = False, digits: int = 3) -> str:
+    """Mean with the std set below in gray, as analyze_ex_14.si_cell, with a given number of decimals."""
+    mean, std = np.mean(values), np.std(values)
+    text = f'{mean:.{digits}f}'
+    if bold:
+        text = f'\\mathbf{{{text}}}'
+    if mark:
+        macro = {('down', True): 'trilowsig', ('up', True): 'trihighsig',
+                 ('down', False): 'trilow', ('up', False): 'trihigh'}[(mark, significant)]
+        text += f'^{{\\{macro}}}'
+    return f'$\\underset{{\\color{{darkgray}} \\pm{std:.{digits}f}}}{{{text}}}$'
+
+
+def row_label(dataset: str) -> str:
+    """Dataset and quantity for the markdown outputs (the quantity once if both are the same, as for ClogP)."""
+    name, quantity, unit, _ = ROW_META[dataset]
+    return (name if name == quantity else f'{name} {quantity}') + (f' [{unit}]' if unit else '')
 
 
 def archives(prefixes: tuple):
@@ -106,13 +134,13 @@ def mlp_matches(params: dict) -> bool:
             and params.get('NUM_DATA') == 1.0 and params.get('NUM_TEST') == 0.1 and params.get('NN_SEED') is None)
 
 
-def collect(prefix: str):
+def collect(prefix: str) -> dict:
     """
-    Records {arm, dataset, seed, mae, r2, source} and their splits per (arm, dataset, seed). A newer archive of the same
-    run and source replaces an older one (e.g. a retry). From ex_14 / ex_19 only hdf / morgan on the ex_14 targets.
+    Candidate runs per (arm, target, seed), as lists of (start time, source prefix, record, split), with the records
+    {arm, dataset, seed, mae, r2, source}. From ex_14 / ex_19 only hdf / morgan on the ex_14 targets.
     """
-    found = {}   # (source, arm, dataset, seed) -> (record, split)
-    for _, module, params, folder in archives((prefix, HDF_PREFIX, MORGAN_PREFIX)):
+    candidates = {}
+    for start, module, params, folder in archives((prefix, HDF_PREFIX, MORGAN_PREFIX)):
         source = params['__PREFIX__']
         arm = arm_of_params(module, params)
         note = params.get('NOTE')
@@ -132,40 +160,58 @@ def collect(prefix: str):
         split = tuple(tuple(indices.get(part) or ()) for part in ('train', 'val', 'test'))
         record = {'arm': arm, 'dataset': note, 'seed': params['SEED'], 'mae': metric['mae'], 'r2': metric['r2'],
                   'source': source}
-        found[(source, arm, note, params['SEED'])] = (record, split)
+        candidates.setdefault((arm, note, params['SEED']), []).append((start, source, record, split))
+    return candidates
 
-    # one record per (arm, dataset, seed): ex_14 / ex_19 first; the ex_25 duplicates (smoke test) are compared
+
+def reference_splits(candidates: dict) -> dict:
+    """
+    The reference split per (DATASET_NAME, seed). The split depends only on the dataset and the seed (the cached
+    dataset order and the seeded sampling), not on the target, so that the ex_14 / ex_19 runs of any target of the
+    dataset define it; this also covers the 8 targets without ex_14 runs (e.g. hopv15_voc through hopv15_pce, clogp
+    through aqsoldb_logs). Without such runs, the most frequent split of the dataset and seed is used.
+    """
+    pooled = {}
+    for (arm, note, seed), runs in candidates.items():
+        for start, source, record, split in runs:
+            if split[2]:
+                pooled.setdefault((DATASET_OF[note], seed), []).append((source, split))
+    references = {}
+    for key, runs in sorted(pooled.items()):
+        reused = Counter(split for source, split in runs if source in (HDF_PREFIX, MORGAN_PREFIX))
+        if len(reused) > 1:
+            print(f'WARNING: the ex_14 / ex_19 runs of {key} have {len(reused)} different splits')
+        references[key] = (reused or Counter(split for _, split in runs)).most_common(1)[0][0]
+    return references
+
+
+def choose(candidates: dict, prefix: str) -> dict:
+    """
+    One record per (arm, target, seed): the ex_14 / ex_19 run if there is one, otherwise the newest ex_25 run, in
+    both cases the newest one whose split is the reference split (so that a later run with another split cannot
+    replace a correct one). Runs without a matching split are printed and left out. Where an arm of a (target, seed)
+    exists in both sources (the smoke test), the two results are printed.
+    """
+    references = reference_splits(candidates)
     chosen = {}
-    for (source, arm, note, seed), (record, split) in found.items():
-        key = (arm, note, seed)
-        if key in chosen:
-            continue
-        reused = [(r, s) for (src, a, n, sd), (r, s) in found.items() if (a, n, sd) == key and src != prefix]
-        own = found.get((prefix, arm, note, seed))
-        if reused and own:
-            (ref, ref_split), (new, new_split) = reused[0], own
-            print(f'REPRODUCTION {arm} {note} seed {seed}: {ref["source"]} MAE {ref["mae"]:.6g}, {prefix} MAE '
-                  f'{new["mae"]:.6g} ({100 * (new["mae"] - ref["mae"]) / ref["mae"]:+.3f}%), '
-                  f'split {"identical" if new_split == ref_split else "DIFFERENT"}')
-        chosen[key] = reused[0] if reused else own
-    return chosen
-
-
-def check_splits(chosen: dict) -> set:
-    """Keys (arm, dataset, seed) whose split differs from the reference split of their (dataset, seed); printed."""
-    by_pair = {}
-    for (arm, note, seed), (record, split) in chosen.items():
-        by_pair.setdefault((note, seed), []).append((arm, record['source'], split))
-    excluded = set()
-    for (note, seed), runs in sorted(by_pair.items()):
-        reused = [split for arm, source, split in runs if source in (HDF_PREFIX, MORGAN_PREFIX)]
-        reference = reused[0] if reused else Counter(split for *_, split in runs).most_common(1)[0][0]
-        for arm, source, split in runs:
-            if not split[2] or split != reference:
-                excluded.add((arm, note, seed))
+    for (arm, note, seed), runs in sorted(candidates.items()):
+        reference = references.get((DATASET_OF[note], seed))
+        # ex_14 / ex_19 first, newest first within a source
+        ordered = sorted(runs, key=lambda r: (r[1] == prefix, -r[0]))
+        matching = [r for r in ordered if r[3][2] and r[3] == reference]
+        for start, source, record, split in ordered:
+            if (start, source, record, split) not in matching:
                 print(f'SPLIT MISMATCH: {arm} ({source}) {note} seed {seed}: '
                       + ('no recorded test indices' if not split[2] else 'differs from the reference split'))
-    return excluded
+        if not matching:
+            continue
+        chosen[(arm, note, seed)] = matching[0][2]
+        own = [r for r in matching if r[1] == prefix]
+        if own and matching[0][1] != prefix:
+            ref, new = matching[0][2], own[0][2]
+            print(f'REPRODUCTION {arm} {note} seed {seed}: {ref["source"]} MAE {ref["mae"]:.6g}, {prefix} MAE '
+                  f'{new["mae"]:.6g} ({100 * (new["mae"] - ref["mae"]) / ref["mae"]:+.3f}%), same split')
+    return chosen
 
 
 def by_seed(records: list, arm: str, dataset: str) -> dict:
@@ -212,19 +258,18 @@ def write_contrasts(records: list, rows: list, prefix: str):
     lines = ['Test MAE of the MLP (mean +- std over the seeds, number of seeds), in the units of the table', '',
              '| Target | ' + ' | '.join(label for _, label in ARMS) + ' |', '|---|' + '---|' * len(ARMS)]
     for dataset in TABLE1_NOTES:
-        name, quantity, unit, scale = ROW_META[dataset]
+        scale = ROW_META[dataset][3]
         cells = []
         for arm, _ in ARMS:
             values = [scale * v for v in by_seed(records, arm, dataset).values()]
             cells.append(f'{np.mean(values):.4g} +- {np.std(values):.2g} ({len(values)})' if values else '--')
-        lines.append(f'| {name} {quantity}' + (f' [{unit}]' if unit else '') + ' | ' + ' | '.join(cells) + ' |')
+        lines.append(f'| {row_label(dataset)} | ' + ' | '.join(cells) + ' |')
     lines += ['', 'Paired change of the test MAE of the first arm relative to the second (negative = lower error); '
               'Holm over the four contrasts of a target', '',
               '| Target | Contrast | n | Change (mean, 95% CI) | first arm better in | Wilcoxon p | Holm p |',
               '|---|---|---|---|---|---|---|']
     for c in rows:
-        name, quantity, *_ = ROW_META[c['dataset']]
-        lines.append(f'| {name} {quantity} | {c["arm"]} vs. {c["reference"]} | {c["n"]} | {c["rel_change"]:+.1f}% '
+        lines.append(f'| {row_label(c["dataset"])} | {c["arm"]} vs. {c["reference"]} | {c["n"]} | {c["rel_change"]:+.1f}% '
                      f'[{c["ci_low"]:+.1f}, {c["ci_high"]:+.1f}] | {c["better"]}/{c["n"]} | {fmt_p(c["p"])} | '
                      f'{fmt_p(c["p_holm"])} |')
     content = '\n'.join(lines) + '\n'
@@ -257,7 +302,8 @@ def write_table(records: list, rows: list, prefix: str):
                 mark = 'down' if means[arm] < means[reference] else 'up'
                 p = p_holm.get((dataset, arm, reference))
                 significant = p is not None and p < 0.05
-            text = si_cell(cells[arm], bold=(arm == best), mark=mark, significant=bool(significant))
+            text = si_cell(cells[arm], bold=(arm == best), mark=mark, significant=bool(significant),
+                           digits=DECIMALS.get(dataset, 3))
             if len(cells[arm]) < 10:
                 text += f' ({len(cells[arm])})'   # flags incomplete cells (fewer seeds than planned)
             out.append(text)
@@ -281,11 +327,12 @@ def main(prefix: str, csv_path: str = None):
                         'r2': float(row['r2']) if row['r2'] else None} for row in csv.DictReader(f)]
         print(f'loaded {len(records)} records from {csv_path}')
     else:
-        chosen = collect(prefix)
-        excluded = check_splits(chosen)
-        print(f'split check: {len(excluded)} runs without the split of their (target, seed)'
-              + (' -- EXCLUDED' if excluded else ''))
-        records = [record for key, (record, _) in sorted(chosen.items()) if key not in excluded]
+        candidates = collect(prefix)
+        chosen = choose(candidates, prefix)
+        missing = sorted(set(candidates) - set(chosen))
+        print(f'split check: {len(missing)} (arm, target, seed) without a run on the reference split'
+              + (f' -- LEFT OUT: {missing}' if missing else ''))
+        records = [record for key, record in sorted(chosen.items())]
         sources = Counter((r['source'], r['arm']) for r in records)
         print('records per source and arm: ' + ', '.join(f'{s} {a} {n}' for (s, a), n in sorted(sources.items())))
         with open(os.path.join(OUT, f'results_{prefix}.csv'), 'w', newline='') as f:
