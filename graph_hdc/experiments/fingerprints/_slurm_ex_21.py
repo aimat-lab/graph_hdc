@@ -1,24 +1,27 @@
 """
-Scheduler for Experiment 21 (ex_21): the optional stereo attribute of HDF (``STEREO``).
+Scheduler for Experiment 21 (ex_21): the optional stereo attribute of HDF (``STEREO``), with Morgan fingerprints
+without and with chirality (RDKit includeChirality) as a reference.
 
-Every part compares HDF without and with the CIP stereo descriptors of the atoms; nothing else changes between the two
-arms (the Morgan fingerprints that molecule_collisions.py computes as well are not changed either).
+Rounds: prefix ex_21 (2026-10-09) used the original (gaussian) HDF codebooks and no Morgan arms; prefix ex_21u
+(2026-10-12, current) uses the unit-modulus codebooks that became the HDF default (SPECTRUM = "unit") and adds the
+Morgan arms. Every part compares HDF without and with the CIP stereo descriptors of the atoms, and binary Morgan
+fingerprints (D = 2048, radius 2) without and with chirality, on the same splits and with the same models.
 
 * ``collisions``: molecule_collisions.py on ZINC250k with stereoisomers counted as distinct molecules (DEDUPLICATION =
-  "isomeric"), at D = 256 and 2048. One job per (arm, D).
+  "isomeric"), at D = 256 and 2048; the stereo arm also switches on the chirality of the Morgan fingerprints. One job
+  per (arm, D).
 * ``bace``: BACE pIC50 with the HDF configuration of ex_14 (D = 2048, L = 2, MLP + KNN), seeds 0-9. One job per seed
-  runs both arms on the same split, with the same codebooks and the same network seed, and a third run without stereo
-  with another network seed (NN_SEED = 1000 + seed, as in ex_20), whose difference to the first run shows how much the
-  MLP results vary from the network initialization alone.
-* ``chiro``: the enantiomer docking ranking benchmark of Adams et al. (predict_enantiomers__hdc.py on the original
-  splits) with the same HDF configuration and models, seeds 0-2 (codebooks, network initialization). One job per
-  (seed, arm).
+  runs both HDF arms on the same split, with the same codebooks and the same network seed, a third HDF run without
+  stereo with another network seed (NN_SEED = 1000 + seed, as in ex_20), whose difference to the first run shows how
+  much the MLP results vary from the network initialization alone, and the two Morgan arms.
 * ``props``: the BACE design on further datasets of the main comparison (FreeSolv, AqSolDB). One job per (dataset,
-  seed) with the same three runs as for BACE.
+  seed).
+* ``chiro``: the enantiomer docking ranking benchmark of Adams et al. (predict_enantiomers__hdc.py and
+  predict_enantiomers__fp.py on the original splits) with the same configuration and models, seeds 0-2 (codebooks,
+  network initialization). One job per (seed, HDF arm), and one job per seed for both Morgan arms.
 * ``cmrt``: the elution order of enantiomers on the chiral column Chiralpak AD-H (CMRT subset of Baimacheva et al.,
-  predict_enantiomers__hdc.py with prepare_cmrt_elution.py) with the same HDF configuration and models, on the
-  authors' split (seeds 0-9: codebooks, network initialization) and on random splits by pair with 194 test pairs
-  (seeds 0-9). One job per (split, seed) runs both arms.
+  prepared by prepare_cmrt_elution.py), on the authors' split (seeds 0-9: codebooks, network initialization) and on
+  random splits by pair with 194 test pairs (seeds 0-9). One job per (split, seed) runs all four arms.
 
 Job setup as in ex_20: CPU only, 2 threads, 4 CPUs per job, a private TMPDIR, caching disabled (no job writes shared
 cache files), this repository first on PYTHONPATH (so that a run from a git worktree uses the worktree's code), jobs
@@ -34,7 +37,7 @@ pinned to euler. The datasets are loaded once, one after the other, before submi
 import os
 import sys
 
-from _slurm_ex_14 import DATASETS, VARIANTS, _command
+from _slurm_ex_14 import DATASETS, DOWNSTREAM, VARIANTS, _command
 
 PATH = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(PATH, '..', '..', '..'))
@@ -46,9 +49,10 @@ if not os.path.isdir(VENV):
 CHIRO_CSV = os.path.join(REPO, 'data', 'chiro_docking', 'chiro_docking.csv')
 CMRT_CSV = os.path.join(REPO, 'data', 'cmrt_elution', 'cmrt_adh.csv')
 
-PREFIX = 'ex_21'
+PREFIX = 'ex_21u'
 PREFIX_SMOKE = 'ex_21_smoke'
 ARMS = [False, True]
+SPECTRUM = 'unit'
 
 COLLISION_DATASET = 'zinc250k'
 COLLISION_DIMS = [256, 2048]
@@ -81,48 +85,53 @@ def _line(module: str, params: dict) -> str:
 def collision_command(prefix: str, dataset: str, dim: int, stereo: bool) -> str:
     return _line('molecule_collisions.py', {
         '__DEBUG__': False, '__PREFIX__': f'{prefix}_collisions', 'DATASET_NAME': dataset, 'EMBEDDING_SIZES': [dim],
-        'HYDROGEN_COUNT': 'total', 'DEDUPLICATION': 'isomeric', 'STEREO': stereo,
+        'HYDROGEN_COUNT': 'total', 'DEDUPLICATION': 'isomeric', 'STEREO': stereo, 'MORGAN_CHIRALITY': stereo,
+        'SPECTRUM': SPECTRUM,
     })
 
 
-def hdf_params() -> dict:
-    """The HDF configuration of ex_14 (encoder, MLP and KNN settings), caching disabled."""
+def hdf_params(stereo: bool) -> dict:
+    """The HDF configuration of ex_14 (encoder, MLP and KNN settings) with the current codebooks, caching disabled."""
     _module, params = VARIANTS['hdf']
-    return {**params, '__CACHING__': False}
+    return {**params, 'SPECTRUM': SPECTRUM, 'STEREO': stereo, '__CACHING__': False}
 
 
-def prediction_command(prefix: str, part: str, ds: tuple, seed: int, stereo: bool, nn_seed=None) -> str:
-    """predict_molecules__hdc.py with the ex_14 HDF configuration (parts "bace" and "props")."""
-    return _command('hdc', f'{prefix}_{part}', seed, ds, {**hdf_params(), 'STEREO': stereo, 'NN_SEED': nn_seed})
+def morgan_params(chirality: bool) -> dict:
+    """Binary Morgan fingerprints of the same size as HDF (2048 bits, radius 2) with the MLP and KNN of ex_14."""
+    return {**DOWNSTREAM, 'FINGERPRINT_TYPE': 'morgan', 'FINGERPRINT_SIZE': 2048, 'FINGERPRINT_RADIUS': 2,
+            'FINGERPRINT_CHIRALITY': chirality, '__CACHING__': False}
 
 
 def prediction_group(prefix: str, part: str, ds: tuple, seed: int) -> list:
-    """Both arms on the same split, codebooks and network seed, plus the re-seeded run without stereo."""
-    lines = [prediction_command(prefix, part, ds, seed, stereo) for stereo in ARMS]
-    lines.append(prediction_command(prefix, part, ds, seed, False, nn_seed=NN_SEED_OFFSET + seed))
+    """predict_molecules__hdc/__fp.py (parts "bace" and "props"): both HDF arms on the same split, codebooks and
+    network seed, the re-seeded HDF run without stereo, and the two Morgan arms on the same split."""
+    lines = [_command('hdc', f'{prefix}_{part}', seed, ds, {**hdf_params(stereo), 'NN_SEED': None})
+             for stereo in ARMS]
+    lines.append(_command('hdc', f'{prefix}_{part}', seed, ds,
+                          {**hdf_params(False), 'NN_SEED': NN_SEED_OFFSET + seed}))
+    lines += [_command('fp', f'{prefix}_{part}', seed, ds, morgan_params(chirality)) for chirality in ARMS]
     return lines
 
 
-def chiro_command(prefix: str, seed: int, stereo: bool, num_data=None) -> str:
-    params = {
-        '__DEBUG__': False, '__PREFIX__': f'{prefix}_chiro', 'SEED': seed, 'CHIRO_CSV': CHIRO_CSV,
-        'NUM_DATA': num_data, 'NN_NUM_WORKERS': 0, **hdf_params(),
-        'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total', 'STEREO': stereo,
-    }
-    return _line('predict_enantiomers__hdc.py', params)
+def pair_command(module: str, prefix: str, part: str, seed: int, representation: dict, extra: dict) -> str:
+    """predict_enantiomers__<module>.py for the pair benchmarks (parts "chiro" and "cmrt")."""
+    params = {'__DEBUG__': False, '__PREFIX__': f'{prefix}_{part}', 'SEED': seed, 'NN_NUM_WORKERS': 0,
+              **extra, **representation}
+    if module == 'hdc':
+        params.update({'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total'})
+    return _line(f'predict_enantiomers__{module}.py', params)
 
 
-def cmrt_command(prefix: str, split_mode: str, seed: int, stereo: bool, num_data=None) -> str:
+def chiro_extra(num_data=None) -> dict:
+    return {'CHIRO_CSV': CHIRO_CSV, 'NUM_DATA': num_data}
+
+
+def cmrt_extra(split_mode: str, num_data=None) -> dict:
     """Elution order on Chiralpak AD-H: regression of the first-eluted label (1/0), ranking accuracy over the pairs
     and accuracy of the predictions thresholded at 0.5 (as the classification accuracy of Baimacheva et al.)."""
-    params = {
-        '__DEBUG__': False, '__PREFIX__': f'{prefix}_cmrt', 'SEED': seed, 'PAIRS_CSV': CMRT_CSV,
-        'TARGET_COLUMN': 'first_eluted', 'SPLIT_MODE': split_mode, 'NUM_TEST': CMRT_NUM_TEST_PAIRS,
-        'DATASET_NAME': 'cmrt_adh', 'DATASET_NAME_ID': 'cmrt_adh',
-        'ACCURACY_THRESHOLD': 0.5, 'NUM_DATA': num_data, 'NN_NUM_WORKERS': 0, **hdf_params(),
-        'BIDIRECTIONAL': True, 'HYDROGEN_COUNT': 'total', 'STEREO': stereo,
-    }
-    return _line('predict_enantiomers__hdc.py', params)
+    return {'PAIRS_CSV': CMRT_CSV, 'TARGET_COLUMN': 'first_eluted', 'SPLIT_MODE': split_mode,
+            'NUM_TEST': CMRT_NUM_TEST_PAIRS, 'DATASET_NAME': 'cmrt_adh', 'DATASET_NAME_ID': 'cmrt_adh',
+            'ACCURACY_THRESHOLD': 0.5, 'NUM_DATA': num_data}
 
 
 def write_group(name: str, lines: list) -> str:
@@ -148,7 +157,7 @@ def write_group(name: str, lines: list) -> str:
 def groups(prefix: str, smoke: bool = False, parts: list = PARTS) -> dict:
     """Group script paths of the given parts (only their scripts are written, so that the scripts of running jobs of
     other parts are never rewritten). The smoke variant uses small datasets: BACE (as SMILES table) for the
-    collisions, one BACE seed, 2 % of the ChIRo pairs and one seed of FreeSolv."""
+    collisions, one BACE seed, 2 % of the ChIRo pairs, one seed of FreeSolv and one seed per CMRT split."""
     tag = lambda stereo: 'stereo' if stereo else 'plain'
     out = {part: [] for part in parts}
     if 'collisions' in parts:
@@ -159,11 +168,16 @@ def groups(prefix: str, smoke: bool = False, parts: list = PARTS) -> dict:
                 name = f'{prefix}_collisions__{dataset}__D{dim}__{tag(stereo)}'
                 out['collisions'].append(write_group(name, [collision_command(prefix, dataset, dim, stereo)]))
     if 'chiro' in parts:
+        num_data = 0.02 if smoke else None
         for seed in CHIRO_SEEDS[:1] if smoke else CHIRO_SEEDS:
             for stereo in ARMS:
-                name = f'{prefix}_chiro__seed_{seed}__{tag(stereo)}'
-                line = chiro_command(prefix, seed, stereo, num_data=0.02 if smoke else None)
+                name = f'{prefix}_chiro__seed_{seed}__hdf_{tag(stereo)}'
+                line = pair_command('hdc', prefix, 'chiro', seed, hdf_params(stereo), chiro_extra(num_data))
                 out['chiro'].append(write_group(name, [line]))
+            # the two Morgan arms are fast enough for one job
+            lines = [pair_command('fp', prefix, 'chiro', seed, morgan_params(chirality), chiro_extra(num_data))
+                     for chirality in ARMS]
+            out['chiro'].append(write_group(f'{prefix}_chiro__seed_{seed}__morgan', lines))
     if 'bace' in parts:
         for seed in BACE_SEEDS[:1] if smoke else BACE_SEEDS:
             name = f'{prefix}_bace__seed_{seed}'
@@ -177,7 +191,10 @@ def groups(prefix: str, smoke: bool = False, parts: list = PARTS) -> dict:
         for split_mode, seeds in CMRT_SPLITS:
             for seed in seeds[:1] if smoke else seeds:
                 name = f'{prefix}_cmrt__{split_mode}__seed_{seed}'
-                lines = [cmrt_command(prefix, split_mode, seed, stereo) for stereo in ARMS]
+                lines = [pair_command('hdc', prefix, 'cmrt', seed, hdf_params(stereo), cmrt_extra(split_mode))
+                         for stereo in ARMS]
+                lines += [pair_command('fp', prefix, 'cmrt', seed, morgan_params(chirality), cmrt_extra(split_mode))
+                          for chirality in ARMS]
                 out['cmrt'].append(write_group(name, lines))
     return out
 

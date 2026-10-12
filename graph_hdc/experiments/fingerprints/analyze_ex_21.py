@@ -11,7 +11,7 @@ Collects the archives of the three parts of ``_slurm_ex_21.py`` and writes ``_ex
 * enantiomer docking ranking (Adams et al., 3 seeds): test ranking accuracy and MAE of MLP and KNN, next to the values
   that Adams et al. report for their models.
 
-    python analyze_ex_21.py [prefix]      # default prefix: ex_21
+    python analyze_ex_21.py [prefix]      # default prefix: ex_21u (ex_21: first round)
 """
 import os
 import sys
@@ -65,20 +65,24 @@ def collisions(prefix: str) -> str:
         for dim, record in data.get('hdf', {}).items():
             rows[(params['DATASET_NAME'], int(dim), bool(params['STEREO']))] = (params, data, record)
     lines = ['## Collisions (stereoisomers counted as distinct molecules)\n',
-             'The Morgan fingerprints are the unchanged ones of the paper (without chirality), so every pair of '
-             'molecules that differ only in their stereochemistry collides for them by construction.\n',
+             'Without MORGAN_CHIRALITY (round ex_21, and the plain arm of ex_21u), every pair of molecules that differ '
+             'only in their stereochemistry collides for the Morgan fingerprints by construction.\n',
              '| dataset | D | HDF | molecules | differ only in stereo | molecules in HDF collisions | of which stereo-only '
-             '| HDF collisions split by 1-WL | noise max | Morgan (unchanged) |',
-             '|---|---|---|---|---|---|---|---|---|---|']
+             '| HDF collisions split by 1-WL | noise max | Morgan chirality | molecules in Morgan collisions '
+             '| of which stereo-only |',
+             '|---|---|---|---|---|---|---|---|---|---|---|---|']
     for (dataset, dim, stereo), (params, data, record) in sorted(rows.items()):
         hdf = record['collisions']
-        morgan = data.get('morgan', {}).get(str(dim), {}).get('collisions', {})
+        morgan_record = data.get('morgan', {}).get(str(dim), {})
+        morgan = morgan_record.get('collisions', {})
         lines.append(
             f'| {dataset} | {dim} | {"with stereo" if stereo else "without stereo"} '
             f'| {data["dataset"]["num_molecules"]} | {data["dataset"]["stereo_groups"]["num_in_collisions"]} '
             f'| {hdf["num_in_collisions"]} ({hdf["collision_rate"]:.4%}) | {record["num_in_stereo_only_collisions"]} '
             f'| {record["num_in_hdf_collisions_split_by_wl"]} | {record["noise_max"]:.1e} '
-            f'| {morgan.get("collision_rate", float("nan")):.4%} |')
+            f'| {"yes" if params.get("MORGAN_CHIRALITY") else "no"} '
+            f'| {morgan.get("num_in_collisions", "-")} ({morgan.get("collision_rate", float("nan")):.4%}) '
+            f'| {morgan_record.get("num_in_stereo_only_collisions", "-")} |')
     return '\n'.join(lines) + '\n'
 
 
@@ -112,11 +116,39 @@ def arm(params: dict) -> str:
     return 'plain' if params.get('NN_SEED') is None else 'plain_reseeded'
 
 
+def morgan_arm(params: dict) -> str:
+    return 'morgan_chiral' if params.get('FINGERPRINT_CHIRALITY') else 'morgan_plain'
+
+
 def with_rmse(data: dict) -> dict:
     for key, values in data.get('metrics', {}).items():
         if 'mse' in values:
             values['rmse'] = float(np.sqrt(values['mse']))
     return data
+
+
+def runs_by(stem: str, prefix: str, key=lambda params: None) -> dict:
+    """{key: {(seed, arm): data}} with the HDF runs (module <stem>__hdc) and the Morgan runs (<stem>__fp)."""
+    grouped = defaultdict(dict)
+    for module, arm_of in ((f'{stem}__hdc', arm), (f'{stem}__fp', morgan_arm)):
+        for params, data in archives(module, prefix):
+            grouped[key(params)][(params['SEED'], arm_of(params))] = with_rmse(data)
+    return grouped
+
+
+# comparisons with the Morgan fingerprints (only shown if both arms have runs)
+MORGAN_COMPARISONS = [
+    ('morgan_chiral', 'morgan_plain', 'Morgan fingerprints with vs. without chirality'),
+    ('stereo', 'morgan_chiral', 'HDF with stereo vs. Morgan fingerprints with chirality'),
+]
+
+
+def morgan_tables(runs: dict, metrics: list) -> list:
+    lines = []
+    for arm_, reference, title in MORGAN_COMPARISONS:
+        if any(a == arm_ for _, a in runs) and any(a == reference for _, a in runs):
+            lines += [f'\n{title}:\n'] + paired_table(runs, metrics, arm=arm_, reference=reference)
+    return lines
 
 
 def prediction_section(title: str, runs: dict) -> str:
@@ -127,26 +159,26 @@ def prediction_section(title: str, runs: dict) -> str:
     lines += ['\nReference: the same representation without stereo, trained with another network seed (NN_SEED = '
               '1000 + seed). Only the MLP depends on the network seed; KNN rows are identical by construction.\n']
     lines += paired_table(runs, metrics, arm='plain_reseeded')
+    lines += morgan_tables(runs, metrics)
     return '\n'.join(lines) + '\n'
 
 
 def bace(prefix: str) -> str:
-    runs = {(p['SEED'], arm(p)): with_rmse(d) for p, d in archives('predict_molecules__hdc', f'{prefix}_bace')}
-    return prediction_section('BACE pIC50', runs)
+    return prediction_section('BACE pIC50', runs_by('predict_molecules', f'{prefix}_bace')[None])
 
 
 def props(prefix: str) -> str:
     """Further datasets of the main comparison with the BACE design, one section per dataset (NOTE)."""
-    by_note = defaultdict(dict)
-    for p, d in archives('predict_molecules__hdc', f'{prefix}_props'):
-        by_note[p['NOTE']][(p['SEED'], arm(p))] = with_rmse(d)
+    by_note = runs_by('predict_molecules', f'{prefix}_props', key=lambda params: params['NOTE'])
     return '\n'.join(prediction_section(note, runs) for note, runs in sorted(by_note.items()))
 
 
 def chiro(prefix: str) -> str:
-    runs = {(p['SEED'], arm(p)): with_rmse(d) for p, d in archives('predict_enantiomers__hdc', f'{prefix}_chiro')}
+    runs = runs_by('predict_enantiomers', f'{prefix}_chiro')[None]
+    metrics = [('ranking_accuracy', 100.0, 'higher'), ('mae', 1.0, 'lower')]
     lines = ['## Enantiomer docking ranking (Adams et al., original splits)\n']
-    lines += paired_table(runs, [('ranking_accuracy', 100.0, 'higher'), ('mae', 1.0, 'lower')])
+    lines += paired_table(runs, metrics)
+    lines += morgan_tables(runs, metrics)
     ties = defaultdict(list)
     for (seed, a), data in runs.items():
         for model in MODELS:
@@ -187,9 +219,9 @@ def r_first_rule(params: dict, data: dict) -> float:
 
 def cmrt(prefix: str) -> str:
     """Elution order on Chiralpak AD-H, one table per split mode (the authors' split, random splits by pair)."""
-    by_split, rule = defaultdict(dict), defaultdict(dict)
+    by_split = runs_by('predict_enantiomers', f'{prefix}_cmrt', key=lambda params: params['SPLIT_MODE'])
+    rule = defaultdict(dict)
     for p, d in archives('predict_enantiomers__hdc', f'{prefix}_cmrt'):
-        by_split[p['SPLIT_MODE']][(p['SEED'], arm(p))] = d
         rule[p['SPLIT_MODE']][p['SEED']] = r_first_rule(p, d)
     lines = ['## Elution order on Chiralpak AD-H (CMRT subset of Baimacheva et al.)\n',
              'ranking_accuracy: fraction of test pairs whose predictions are in the elution order (ties count half); '
@@ -197,7 +229,9 @@ def cmrt(prefix: str) -> str:
              '(the metric of Baimacheva et al.).\n']
     for split_mode, runs in sorted(by_split.items()):
         lines.append(f'\n### Split: {split_mode}\n')
-        lines += paired_table(runs, [('ranking_accuracy', 100.0, 'higher'), ('accuracy', 100.0, 'higher')])
+        metrics = [('ranking_accuracy', 100.0, 'higher'), ('accuracy', 100.0, 'higher')]
+        lines += paired_table(runs, metrics)
+        lines += morgan_tables(runs, metrics)
         lines.append(f'\nRule "the R enantiomer elutes first" on the same test molecules: '
                      f'{mean_sd(list(rule[split_mode].values()), 100.0, 1)}')
     lines.append('\nReference (Baimacheva et al., Table 3), per-molecule test accuracy of a random forest:\n')
@@ -215,4 +249,4 @@ def main(prefix: str):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1] if len(sys.argv) > 1 else 'ex_21')
+    main(sys.argv[1] if len(sys.argv) > 1 else 'ex_21u')

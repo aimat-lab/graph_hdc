@@ -23,8 +23,9 @@ and cross-tabulated with the HDF collisions.
 
 Stereochemistry (experiment ex_21): with DEDUPLICATION = "isomeric", molecules are distinct when their canonical
 isomeric SMILES differ, so that stereoisomers count as different molecules. STEREO adds the CIP stereo descriptors to
-the HDF atom attributes (and to the 1-WL labels). HDF collisions among molecules that differ only in their
-stereochemistry are reported separately ("stereo-only" collisions).
+the HDF atom attributes (and to the 1-WL labels), MORGAN_CHIRALITY adds them to the Morgan atom invariants (RDKit
+includeChirality). Collisions among molecules that differ only in their stereochemistry are reported separately
+("stereo-only" collisions). SPECTRUM selects the HDF codebooks (unit-modulus since 2026-10-09; ex_16 used "gaussian").
 """
 import inspect
 import random
@@ -82,6 +83,13 @@ DEDUPLICATION: str = 'flat'
 #       Whether HDF encodes the CIP stereo descriptor of every atom (graph_dict_from_mol(stereo=True)). The 1-WL
 #       labels then include the descriptors as well, so that 1-WL on the HDF graph remains the reference for HDF.
 STEREO: bool = False
+# :param MORGAN_CHIRALITY:
+#       Whether the Morgan fingerprints include the CIP descriptors of the stereocenters (RDKit includeChirality).
+MORGAN_CHIRALITY: bool = False
+# :param SPECTRUM:
+#       Fourier magnitudes of the random HDF codebook vectors (see predict_molecules__hdc.py): "unit" (the HDF default
+#       since 2026-10-09) or "gaussian" (the original encoder, used for ex_16).
+SPECTRUM: str = 'unit'
 # :param SEED:
 #       Seed of the HDF codebooks, the atom permutations of the noise measurement and the random projections.
 SEED: int = 0
@@ -251,8 +259,10 @@ def experiment(e: Experiment):
     if e.DEDUPLICATION not in ('flat', 'isomeric'):
         raise ValueError(f'unknown DEDUPLICATION "{e.DEDUPLICATION}", expected "flat" or "isomeric"')
     # with "flat", the molecules are rebuilt from SMILES without stereochemistry, so there is nothing to encode
-    if e.STEREO and e.DEDUPLICATION != 'isomeric':
-        raise ValueError('STEREO requires DEDUPLICATION = "isomeric"')
+    if (e.STEREO or e.MORGAN_CHIRALITY) and e.DEDUPLICATION != 'isomeric':
+        raise ValueError('STEREO and MORGAN_CHIRALITY require DEDUPLICATION = "isomeric"')
+    if e.SPECTRUM not in ('gaussian', 'unit'):
+        raise ValueError(f'SPECTRUM must be "gaussian" or "unit", got {e.SPECTRUM!r}')
     e.log(f'loading dataset "{e.DATASET_NAME}"...')
     df = load_smiles_dataset(e.DATASET_NAME)
     raw = [str(s).strip() for s in df['smiles']]
@@ -315,9 +325,12 @@ def experiment(e: Experiment):
 
         # --- Morgan ---
         start = time.time()
-        generator = rdFingerprintGenerator.GetMorganGenerator(radius=e.MORGAN_RADIUS, fpSize=dim)
+        generator = rdFingerprintGenerator.GetMorganGenerator(radius=e.MORGAN_RADIUS, fpSize=dim,
+                                                              includeChirality=e.MORGAN_CHIRALITY)
         keys = [np.packbits(generator.GetFingerprintAsNumPy(m)).tobytes() for m in mols]
-        e[f'morgan/{dim}/collisions'] = summarize(groups_from_keys(keys), n, smiles, e.NUM_EXAMPLES)
+        groups = groups_from_keys(keys)
+        e[f'morgan/{dim}/collisions'] = summarize(groups, n, smiles, e.NUM_EXAMPLES)
+        e[f'morgan/{dim}/num_in_stereo_only_collisions'] = num_in_stereo_only_groups(groups, flat)
         e[f'morgan/{dim}/time'] = time.time() - start
         e.log(f'D={dim} Morgan: collision rate {e[f"morgan/{dim}/collisions"]["collision_rate"]:.5f}')
 
@@ -325,9 +338,11 @@ def experiment(e: Experiment):
         net = HyperNet(
             hidden_dim=dim,
             depth=e.NUM_LAYERS,
-            node_encoder_map=make_molecule_node_encoder_map_cont(dim=dim, seed=e.SEED, stereo=e.STEREO),
+            node_encoder_map=make_molecule_node_encoder_map_cont(dim=dim, seed=e.SEED, stereo=e.STEREO,
+                                                                 unit_modulus=(e.SPECTRUM == 'unit')),
             graph_encoder_map=make_molecule_graph_encoder_map_cont(dim=dim, seed=e.SEED, max_graph_size=max_size,
-                                                                   max_graph_diameter=max_diameter),
+                                                                   max_graph_diameter=max_diameter,
+                                                                   unit_modulus=(e.SPECTRUM == 'unit')),
             seed=e.SEED,
             normalize_all=True,
             bidirectional=True,

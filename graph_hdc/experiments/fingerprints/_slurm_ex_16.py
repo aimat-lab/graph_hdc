@@ -31,7 +31,9 @@ WAIT_FOR_JOB_NAMES = ['ex15_bidir']
 
 def command(dataset: str, dim: int) -> str:
     params = {'__DEBUG__': False, '__PREFIX__': PREFIX, 'DATASET_NAME': dataset, 'EMBEDDING_SIZES': [dim],
-              'HYDROGEN_COUNT': HYDROGEN_COUNT}
+              'HYDROGEN_COUNT': HYDROGEN_COUNT,
+              # ex_16 used the original codebooks; unit-modulus codebooks became the default of molecule_collisions.py
+              'SPECTRUM': 'gaussian'}
     return ' '.join(['python', 'molecule_collisions.py'] + [f'--{k}="{v!r}"' for k, v in params.items()])
 
 

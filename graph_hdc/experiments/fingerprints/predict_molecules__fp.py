@@ -27,6 +27,13 @@ FINGERPRINT_RADIUS: int = 2
 #       graph_hdc.baselines.sort_and_slice. 'sort_slice' keeps the FINGERPRINT_SIZE substructures that occur
 #       in the most training molecules (no labels involved; validation and test molecules are not used).
 FINGERPRINT_TYPE: str = 'morgan'
+# :param FINGERPRINT_CHIRALITY:
+#       Whether the Morgan fingerprints ('morgan', 'count_morgan') are computed with RDKit's ``includeChirality``,
+#       which takes the CIP descriptors (R/S) of the stereocenters into account. RDKit does not distinguish every
+#       pair of stereoisomers this way (in ex_21, some enantiomers keep identical fingerprints at radius 2). The
+#       default (False) ignores stereochemistry, as in all fingerprints of the paper; True is the stereo-aware
+#       reference for the optional stereo attribute of HDF (ex_21).
+FINGERPRINT_CHIRALITY: bool = False
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -42,6 +49,10 @@ def process_dataset(e: Experiment,
                     index_data_map: dict
                     ) -> None:
 
+    if e.FINGERPRINT_CHIRALITY and e.FINGERPRINT_TYPE not in ('morgan', 'count_morgan'):
+        raise ValueError(f'FINGERPRINT_CHIRALITY is only implemented for Morgan fingerprints, '
+                         f'not for "{e.FINGERPRINT_TYPE}"')
+
     if e.FINGERPRINT_TYPE == 'sort_slice':
         # The vocabulary is fitted on the training molecules of this split, then all molecules are encoded.
         fingerprint = SortAndSliceFingerprint(size=e.FINGERPRINT_SIZE, radius=e.FINGERPRINT_RADIUS)
@@ -56,8 +67,9 @@ def process_dataset(e: Experiment,
 
     if e.FINGERPRINT_TYPE == 'morgan':
         gen = rdFingerprintGenerator.GetMorganGenerator(
-            radius=e.FINGERPRINT_RADIUS, 
+            radius=e.FINGERPRINT_RADIUS,
             fpSize=e.FINGERPRINT_SIZE,
+            includeChirality=e.FINGERPRINT_CHIRALITY,
         )
         
     elif e.FINGERPRINT_TYPE == 'rdkit':
@@ -82,6 +94,7 @@ def process_dataset(e: Experiment,
         gen = rdFingerprintGenerator.GetMorganGenerator(
             radius=e.FINGERPRINT_RADIUS,
             fpSize=e.FINGERPRINT_SIZE,
+            includeChirality=e.FINGERPRINT_CHIRALITY,
         )
 
     elif e.FINGERPRINT_TYPE == 'secfp':
