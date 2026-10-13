@@ -168,11 +168,17 @@ def _parse_row(args):
     RDLogger.DisableLog('rdApp.*')
     smiles, values = args
     mol = Chem.MolFromSmiles(str(smiles))
-    # The same filter as the original BO experiment: valid, at least two atoms and one bond, one component.
-    # HDF needs the last two (single atoms have no messages, the graph diameter needs a connected graph).
-    if mol is None or mol.GetNumAtoms() < 2 or mol.GetNumBonds() < 1 or len(Chem.GetMolFrags(mol)) > 1:
+    if mol is None:
         return None
-    return Chem.MolToSmiles(mol, isomericSmiles=False), values
+    canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
+    # The same filter as the original BO experiment: valid, at least two atoms and one bond, one component.
+    # HDF needs the last two (single atoms have no messages, the graph diameter needs a connected graph). The
+    # filter applies to the stereo-free canonical SMILES as it is featurized later: without isotopes, the
+    # deuterium atoms of e.g. heavy water ([2H]O[2H] -> [H]O[H]) become plain hydrogens, which RDKit drops.
+    heavy = Chem.MolFromSmiles(canonical)
+    if heavy is None or heavy.GetNumAtoms() < 2 or heavy.GetNumBonds() < 1 or len(Chem.GetMolFrags(heavy)) > 1:
+        return None
+    return canonical, values
 
 
 _GENERATORS = {}
