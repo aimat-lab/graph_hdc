@@ -13,12 +13,17 @@ repeats the size sweep of ex_07 with a kernel that suits each representation and
                   beet           maximal honey-bee LD50 (BEET, exact values only, log10 scale: the raw values
                                  span 0.0015-3980 ug/bee, and on that scale 124 of 128 molecules lie at
                                  normalized regret >= 0.91 behind four outliers)
+                  qm9_gap        minimal HOMO-LUMO gap on QM9 (DFT)
+                  qm9_dipole     maximal dipole moment on QM9 (DFT; one molecule at 29.6 D stretches the scale,
+                                 so hits at regret <= 0.05 mean finding that one molecule)
+                  melting_point  maximal melting point (open melting point dataset)
     methods       hdf_matern       HDF (standard configuration) + Matern-5/2
                   morgan_tanimoto  Morgan radius 2, binary, folded to D bits + Tanimoto
                   morgan_pca       Morgan-2048 -> first D PCA components + Matern-5/2
                   random           random search
                   hdf_linear       HDF + linear (cosine) kernel, every objective except qed (SI)
-    sizes         D = 8, 16, 32, 64, 128, 512
+    sizes         D = 8, 16, 32, 64, 128, 512, 1024 (the PCA needs more molecules than components: no
+                  morgan_pca cell above num_molecules - 1 components)
     campaigns     25 per (objective, method, size); campaign k shares its initial molecules across methods
                   and uses its own HDF codebook (seed 1000 + 100 k)
     budget        20 initial molecules + 150 rounds of one molecule; freesolv 20 + 80; beet 10 + 40. The
@@ -58,7 +63,7 @@ ROOT = os.environ.get('EX24_ROOT', os.path.join(PATH, '_ex24'))
 DATA = os.path.join(ROOT, 'data')
 RUNS = os.path.join(ROOT, 'runs')
 
-SIZES = [8, 16, 32, 64, 128, 512]
+SIZES = [8, 16, 32, 64, 128, 512, 1024]
 NUM_CAMPAIGNS = 25
 HDF_DEPTH = 2
 MORGAN_RADIUS = 2
@@ -76,6 +81,8 @@ LIBRARIES = {
     'freesolv': {'smiles': 'smiles', 'properties': {'freesolv': 'expt'}},
     'lipophilicity': {'smiles': 'smiles', 'properties': {'lipophilicity': 'exp'}},
     'beet': {'smiles': 'SMILES', 'properties': {'beet': 'Experimental value'}},
+    'qm9_smiles': {'smiles': 'smiles', 'properties': {'qm9_gap': 'gap', 'qm9_dipole': 'mu'}},
+    'open_melting_point': {'smiles': 'smiles', 'properties': {'melting_point': 'target'}},
 }
 
 OBJECTIVES = {
@@ -89,6 +96,12 @@ OBJECTIVES = {
                      num_initial=20, num_rounds=80),
     'beet': dict(library='beet', property='beet', mode='maximize', target=None, num_initial=10, num_rounds=40,
                  transform='log10'),
+    'qm9_gap': dict(library='qm9_smiles', property='qm9_gap', mode='minimize', target=None,
+                    num_initial=20, num_rounds=150),
+    'qm9_dipole': dict(library='qm9_smiles', property='qm9_dipole', mode='maximize', target=None,
+                       num_initial=20, num_rounds=150),
+    'melting_point': dict(library='open_melting_point', property='melting_point', mode='maximize', target=None,
+                          num_initial=20, num_rounds=150),
 }
 
 GP_METHODS = ['hdf_matern', 'morgan_tanimoto', 'morgan_pca', 'hdf_linear']
@@ -264,6 +277,7 @@ def featurize(library: str, workers: int) -> None:
         'num_candidates': len(smiles_list),
         'num_filtered': num_invalid,
         'max_graph_size': int(max(g['graph_size'] for g in graphs)),
+        'num_atoms': int(sum(g['graph_size'] for g in graphs)),
         'max_graph_diameter': int(max(g['graph_diameter'] for g in graphs)),
         'pca_components': int(num_components),
         'pca_explained_by_size': {str(s): float(pca.explained_variance_ratio_[:s].sum())
@@ -305,10 +319,17 @@ def featurize(library: str, workers: int) -> None:
 _ENCODE_STATE = {}
 
 
-def _encode_init(library: str, threads: int):
+def _encode_init(threads: int):
     import torch
-    from graph_hdc.graph import data_list_from_graph_dicts
     torch.set_num_threads(threads)
+
+
+def _encode_load(library: str) -> None:
+    """Loads the PyG graphs of ``library`` into the worker (replacing the previously loaded library)."""
+    from graph_hdc.graph import data_list_from_graph_dicts
+    if _ENCODE_STATE.get('library') == library:
+        return
+    _ENCODE_STATE.clear()
     with open(os.path.join(DATA, library, 'graphs.pkl'), 'rb') as file:
         graphs = pickle.load(file)
     with open(os.path.join(DATA, library, 'meta.json')) as file:
@@ -345,8 +366,9 @@ def encode_hdf(data_list, size: int, seed: int, max_size: float, max_diameter: f
 
 
 def _encode_one(job):
-    size, campaign = job
-    library, meta = _ENCODE_STATE['library'], _ENCODE_STATE['meta']
+    library, size, campaign = job
+    _encode_load(library)
+    meta = _ENCODE_STATE['meta']
     path = os.path.join(DATA, library, f'hdf_{size}_c{campaign}.npy')
     if os.path.exists(path):
         return path, 0.0
@@ -359,22 +381,34 @@ def _encode_one(job):
     return path, time.perf_counter() - start
 
 
-def encode(library: str, sizes: List[int], campaigns: List[int], workers: int, threads: int) -> None:
-    jobs = [(size, campaign) for size in sorted(sizes, reverse=True) for campaign in campaigns
-            if not os.path.exists(os.path.join(DATA, library, f'hdf_{size}_c{campaign}.npy'))]
-    log(f'{library}: {len(jobs)} HDF encodings to compute with {workers} workers x {threads} threads')
+def encode(libraries: List[str], sizes: List[int], campaigns: List[int], workers: int, threads: int) -> None:
+    """
+    HDF embeddings of every (library, size, campaign) that is still missing, in one worker pool over all
+    libraries, the most expensive encodings first (cost ~ number of atoms x size), so that the long ZINC250k
+    encodings run alongside the many short ones instead of leaving workers idle.
+    """
+    jobs = []
+    for library in libraries:
+        meta = library_meta(library)
+        num_atoms = meta.get('num_atoms', meta['num_candidates'] * 20)
+        for size in sizes:
+            for campaign in campaigns:
+                if not os.path.exists(os.path.join(DATA, library, f'hdf_{size}_c{campaign}.npy')):
+                    jobs.append((num_atoms * size, (library, size, campaign)))
+    jobs = [job for _, job in sorted(jobs, key=lambda item: -item[0])]
+    log(f'{len(jobs)} HDF encodings to compute with {workers} workers x {threads} threads')
     if not jobs:
         return
     set_thread_env(threads)
     # ProcessPoolExecutor (unlike multiprocessing.Pool) fails with BrokenProcessPool when a worker dies, e.g.
-    # killed for memory, instead of waiting forever. Every worker holds the PyG graphs of the library (about
-    # 5 GB for ZINC250k), so use at most ~32 workers on a 400 GB allocation.
+    # killed for memory, instead of waiting forever. A worker holds the PyG graphs of one library at a time
+    # (about 5 GB for ZINC250k).
     with ProcessPoolExecutor(min(workers, len(jobs)), mp_context=mp.get_context('spawn'),
-                             initializer=_encode_init, initargs=(library, threads)) as executor:
-        futures = [executor.submit(_encode_one, job) for job in jobs]
+                             initializer=_encode_init, initargs=(threads, )) as executor:
+        futures = {executor.submit(_encode_one, job): job for job in jobs}
         for i, future in enumerate(as_completed(futures), start=1):
             path, seconds = future.result()
-            log(f'  [{i}/{len(jobs)}] {os.path.basename(path)} in {seconds:.1f} s')
+            log(f'  [{i}/{len(jobs)}] {futures[future][0]} {os.path.basename(path)} in {seconds:.1f} s')
 
 
 # == TASKS ==
@@ -766,8 +800,7 @@ def main(argv=None):
         for library in args.libraries:
             featurize(library, args.workers)
     elif args.stage == 'encode':
-        for library in args.libraries:
-            encode(library, args.sizes, parse_campaigns(args.campaigns), args.workers, args.threads)
+        encode(args.libraries, args.sizes, parse_campaigns(args.campaigns), args.workers, args.threads)
     elif args.stage == 'tasks':
         tasks = make_tasks(args.objectives, args.sizes,
                            parse_campaigns(args.campaigns) if args.campaigns else None)

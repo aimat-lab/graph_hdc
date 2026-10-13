@@ -48,6 +48,7 @@ NUM_SHARDS="${SLURM_ARRAY_TASK_COUNT:-1}"
 CALIBRATE_ARGS="${CALIBRATE_ARGS:-}"
 FEATURIZE_ARGS="${FEATURIZE_ARGS:-}"   # e.g. "--libraries beet"
 RUN_ARGS="${RUN_ARGS:-}"               # e.g. "--gpu-min-molecules 20000"
+ENCODE_ARGS="${ENCODE_ARGS:-}"         # e.g. "--campaigns 0-12" (one part of the codebooks per node)
 
 source "$VENV/bin/activate"
 export PYTHONPATH="$CODE"
@@ -70,7 +71,7 @@ python -c "import os, sys, graph_hdc; sys.exit(not os.path.realpath(graph_hdc.__
 
 case "$EX24_STAGE" in
     featurize) python bo_benchmark.py featurize --workers "$WORKERS" $FEATURIZE_ARGS ;;
-    encode)    python bo_benchmark.py encode --workers "$WORKERS" --threads "$THREADS" ;;
+    encode)    python bo_benchmark.py encode --workers "$WORKERS" --threads "$THREADS" $ENCODE_ARGS ;;
     calibrate) python bo_benchmark.py calibrate --gpus "$GPUS" $CALIBRATE_ARGS ;;
     run)       python bo_benchmark.py run --workers "$WORKERS" --threads "$THREADS" --gpus "$GPUS" \
                    --shard "$SHARD" --num-shards "$NUM_SHARDS" $RUN_ARGS ;;

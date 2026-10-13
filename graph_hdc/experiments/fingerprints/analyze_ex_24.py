@@ -8,7 +8,7 @@ Reads ``_ex24/campaigns.tsv`` (``python bo_benchmark.py collect``) and writes to
   and the mean seconds per campaign.
 - ``tests.tsv`` / ``tests.md``: paired two-sided Wilcoxon signed-rank tests (campaign k against campaign k, same
   initial molecules) of HDF + Matern against Morgan + Tanimoto and against Morgan-PCA + Matern on the AUC, per
-  objective and size, Holm-corrected within each objective (2 comparisons x 6 sizes). The comparisons of every
+  objective and size, Holm-corrected within each objective (2 comparisons x 7 sizes). The comparisons of every
   method with random search are reported in the same table as a separate family per objective.
 - ``auc_vs_size.png`` / ``.pdf``: quick-look figure (median AUC with interquartile band against the size, random
   search as a dashed line), one panel per objective. The layout of the paper figure is decided once the results
@@ -26,9 +26,11 @@ PATH = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.environ.get('EX24_ROOT', os.path.join(PATH, '_ex24'))
 OUT = os.path.join(ROOT, 'analysis')
 
-OBJECTIVES = ['clogp', 'qed', 'solubility', 'lipophilicity', 'freesolv', 'beet']
+OBJECTIVES = ['clogp', 'qed', 'solubility', 'lipophilicity', 'freesolv', 'beet', 'qm9_gap', 'qm9_dipole',
+              'melting_point']
 TITLES = {'clogp': 'ClogP (AqSolDB)', 'qed': 'QED (ZINC250k)', 'solubility': 'Solubility (AqSolDB)',
-          'lipophilicity': 'Lipophilicity', 'freesolv': 'FreeSolv', 'beet': 'BEET'}
+          'lipophilicity': 'Lipophilicity', 'freesolv': 'FreeSolv', 'beet': 'BEET', 'qm9_gap': 'HOMO-LUMO gap (QM9)',
+          'qm9_dipole': 'Dipole moment (QM9)', 'melting_point': 'Melting point'}
 METHODS = ['hdf_matern', 'morgan_tanimoto', 'morgan_pca', 'hdf_linear', 'random']
 LABELS = {'hdf_matern': 'HDF (Matérn)', 'morgan_tanimoto': 'Morgan (Tanimoto)',
           'morgan_pca': 'Morgan-2048 PCA (Matérn)', 'hdf_linear': 'HDF (linear)', 'random': 'Random search'}
