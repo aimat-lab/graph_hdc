@@ -100,6 +100,12 @@ SPECTRUM: str = 'unit'
 #       norm of the sum-pooled readout would still carry the molecule size. Embedding caches of False runs carry a
 #       "__noglobal" suffix.
 GRAPH_ATTRIBUTES: bool = True
+# :param CODEBOOK_SEED:
+#       Seed of the random codebooks (element vectors and fractional power encoders). None (default): SEED, i.e. new
+#       codebooks in every repetition. An integer fixes one codebook for all repetitions, as the SI describes HDF (the
+#       dictionaries are drawn once), so that the encoding of a full dataset is computed once and shared by all split
+#       seeds (cache key "codebook_<seed>" instead of "seed_<SEED>"; ex_27).
+CODEBOOK_SEED: Optional[int] = None
 # :param SPECTRUM_DIAGNOSTIC:
 #       If True, the median number of effective Fourier components of the embeddings (participation ratio of the
 #       power spectrum, over at most 1000 molecules) is stored as "embedding/effective_components" (ex_22).
@@ -184,6 +190,9 @@ def process_dataset(
     # for the decoding and the continuous mode which is the one that performs better for the regression 
     # tasks.
     
+    # the codebooks depend on CODEBOOK_SEED if given, otherwise on the split seed as before
+    codebook_seed = e.SEED if e.CODEBOOK_SEED is None else e.CODEBOOK_SEED
+
     if e.SPECTRUM not in ('gaussian', 'unit'):
         raise ValueError(f'SPECTRUM must be "gaussian" or "unit", got {e.SPECTRUM!r}')
 
@@ -192,12 +201,12 @@ def process_dataset(
 
         node_encoder_map = make_molecule_node_encoder_map_cont(
             dim=e.EMBEDDING_SIZE,
-            seed=e.SEED,
+            seed=codebook_seed,
             unit_modulus=(e.SPECTRUM == 'unit'),
         )
         graph_encoder_map = make_molecule_graph_encoder_map_cont(
             dim=e.EMBEDDING_SIZE,
-            seed=e.SEED,
+            seed=codebook_seed,
             max_graph_size=stats['size']['max'],
             max_graph_diameter=stats['diameter']['max'],
             unit_modulus=(e.SPECTRUM == 'unit'),
@@ -208,7 +217,7 @@ def process_dataset(
         
         node_encoder_map = make_molecule_node_encoder_map(
             dim=e.EMBEDDING_SIZE,
-            seed=e.SEED,
+            seed=codebook_seed,
         )
         graph_encoder_map = {}
 
@@ -231,7 +240,7 @@ def process_dataset(
         device=e.DEVICE,
         node_encoder_map=node_encoder_map,
         graph_encoder_map=graph_encoder_map,
-        seed=e.SEED,
+        seed=codebook_seed,
         normalize_all=True,
         bidirectional=e.BIDIRECTIONAL,
     )
@@ -248,9 +257,13 @@ def process_dataset(
     # so we add NUM_DATA to the key to prevent a subsampled run from colliding with a full-data run. Full-data
     # runs keep the original key so existing embedding caches remain valid.
     if e.NUM_DATA is None or e.NUM_DATA == 1.0:
-        hdc_cache_name = f'hdc_{e.DATASET_NAME}__seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}'
+        # the full-data encoding does not depend on the split seed, only on the codebooks
+        seed_key = f'seed_{e.SEED}' if e.CODEBOOK_SEED is None else f'codebook_{e.CODEBOOK_SEED}'
+        hdc_cache_name = f'hdc_{e.DATASET_NAME}__{seed_key}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}'
     else:
-        hdc_cache_name = f'hdc_{e.DATASET_NAME}__numdata_{e.NUM_DATA}__seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}'
+        # a subsample depends on the split seed (which molecules are drawn) and on the codebooks
+        seed_key = f'seed_{e.SEED}' + ('' if e.CODEBOOK_SEED is None else f'__codebook_{e.CODEBOOK_SEED}')
+        hdc_cache_name = f'hdc_{e.DATASET_NAME}__numdata_{e.NUM_DATA}__{seed_key}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}'
     if e.BIDIRECTIONAL:
         hdc_cache_name += '__bidir'
     if e.HYDROGEN_COUNT == 'total':

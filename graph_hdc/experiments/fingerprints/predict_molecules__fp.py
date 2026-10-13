@@ -28,6 +28,12 @@ FINGERPRINT_RADIUS: int = 2
 #       graph_hdc.baselines.sort_and_slice. 'sort_slice' keeps the FINGERPRINT_SIZE substructures that occur
 #       in the most training molecules (no labels involved; validation and test molecules are not used).
 FINGERPRINT_TYPE: str = 'morgan'
+# :param FINGERPRINT_MAX_DISTANCE:
+#       'atom' only: the largest topological distance of the atom pairs (RDKit maxDistance, default 30).
+FINGERPRINT_MAX_DISTANCE: int = 30
+# :param FINGERPRINT_TORSION_ATOMS:
+#       'torsion' only: the number of atoms of a topological torsion (RDKit torsionAtomCount, default 4).
+FINGERPRINT_TORSION_ATOMS: int = 4
 # :param GRAPH_DESCRIPTORS:
 #       Whether the two global descriptors that HDF encodes, the graph size (number of heavy atoms) and the
 #       graph diameter (longest shortest path), are appended to the fingerprint as two additional features
@@ -112,11 +118,13 @@ def encode_fingerprints(e: Experiment, index_data_map: dict) -> None:
     elif e.FINGERPRINT_TYPE == 'atom':
         gen = rdFingerprintGenerator.GetAtomPairGenerator(
             fpSize=e.FINGERPRINT_SIZE,
+            maxDistance=e.FINGERPRINT_MAX_DISTANCE,
         )
-        
+
     elif e.FINGERPRINT_TYPE == 'torsion':
         gen = rdFingerprintGenerator.GetTopologicalTorsionGenerator(
             fpSize=e.FINGERPRINT_SIZE,
+            torsionAtomCount=e.FINGERPRINT_TORSION_ATOMS,
         )
 
     elif e.FINGERPRINT_TYPE == 'count_morgan':

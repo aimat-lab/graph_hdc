@@ -63,6 +63,14 @@ DATASET_NAME_ID: str = DATASET_NAME
 #       prediction task. If set to None, the full list of targets is used (for multi-target datasets).
 
 TARGET_INDEX: Union[int, None] = None
+# :param TARGET_INDICES:
+#       Optional list of target indices that are all evaluated in this run (regression only), one after the other on
+#       the same featurization and the same split, each with its own label scaler and models. The metrics of target t
+#       are stored under the keys "test_<model>__t<t>" / "val_<model>__t<t>". Every target trains exactly as in a
+#       single-target run with TARGET_INDEX=t (the models seed themselves before training), so this only saves the
+#       loading and featurization (ex_27). None (default): one target given by TARGET_INDEX. Cannot be combined with
+#       hooks that set the labels themselves, such as mixin_clogp.
+TARGET_INDICES: Optional[List[int]] = None
 # :param DATASET_TYPE:
 #       The type of the dataset, either 'classification', 'binary', or 'regression'. This parameter is used to determine the
 #       evaluation metrics and the type of the prediction target.
@@ -147,6 +155,12 @@ KN_WEIGHTS: str = 'uniform'
 # Common choices: 'minkowski' (sklearn default, p=2 = Euclidean), 'cosine',
 # 'jaccard' (binary inputs only, equivalent to Tanimoto for Morgan fingerprints).
 KN_METRIC: str = 'minkowski'
+# :param KN_BACKEND:
+#       'sklearn' (default): KNeighborsRegressor. 'torch': the same exact brute-force search with PyTorch, on the GPU if
+#       one is available (regression with uniform weights and the metrics 'minkowski' (Euclidean), 'cosine' or
+#       'jaccard'), which is much faster for the Jaccard (Tanimoto) distance on large datasets (ex_27). Neighbors at
+#       exactly equal distance may be chosen differently than by sklearn.
+KN_BACKEND: str = 'sklearn'
 
 NN_HIDDEN_LAYER_SIZES: Tuple[int] = (100, 100, 100)
 NN_ALPHA: float = 0.0001
@@ -157,6 +171,12 @@ NN_LEARNING_RATE_INIT: float = 0.001
 #       are packed onto a single node (e.g. a JUPITER Booster node), spawning 4 workers per task thrashes
 #       the machine. Increase only for a single-task GPU run on a very large dataset.
 NN_NUM_WORKERS: int = 0
+# :param NN_DEVICE_DATA:
+#       If True, neural_net2 keeps the training and validation data as tensors on the training device (the GPU if one
+#       is available) and indexes whole batches at once, instead of building one tensor per molecule in a DataLoader.
+#       The network, the batches (same shuffling, drawn from the same seeded generator), the epochs and the optimizer
+#       are those of the default path; only the data handling is faster (ex_27). Default False.
+NN_DEVICE_DATA: bool = False
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -371,6 +391,83 @@ class NeuralNet(pl.LightningModule):
             raise ValueError('Cannot use predict_proba with MSE loss function.')
     
         return y.cpu().numpy()
+
+class DeviceBatchDataset(torch.utils.data.Dataset):
+    """
+    The features and labels of the given indices as two tensors on a device; indexing with a list of positions
+    returns the whole batch at once (NN_DEVICE_DATA). Used with a BatchSampler as the DataLoader's sampler.
+    """
+
+    def __init__(self, index_data_map: dict, indices: list, device: torch.device):
+        self.features = torch.tensor(np.stack([index_data_map[i]['graph_features'] for i in indices]),
+                                     dtype=torch.float32, device=device)
+        self.labels = torch.tensor(np.stack([np.atleast_1d(index_data_map[i]['graph_labels']) for i in indices]),
+                                   dtype=torch.float32, device=device)
+
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, positions):
+        return self.features[positions], self.labels[positions]
+
+
+class TorchKNNRegressor:
+    """
+    Exact brute-force k-nearest-neighbor regression with uniform weights in PyTorch, on the GPU if one is available
+    (KN_BACKEND='torch'). The same search as sklearn's KNeighborsRegressor(algorithm='brute') for the metrics
+    'minkowski'/'euclidean' (Euclidean distance), 'cosine' and 'jaccard' (binary features: the Jaccard distance is one
+    minus the Tanimoto similarity). Unlike sklearn, ties are broken deterministically: among training samples at
+    exactly the same distance, the one that comes first in the training data is chosen. Binary fingerprints of small
+    molecules often have several neighbors at the same Tanimoto distance (26 of 63 FreeSolv test molecules have a tie
+    between their 5th and 6th neighbor), so the MAE can differ slightly from sklearn's, whose choice among ties is
+    arbitrary. Similarities are computed in float64; the tie-breaking offset (1e-13 per training position) is far
+    below the smallest difference between two Tanimoto similarities of fingerprints with up to 4096 bits (~6e-8).
+    """
+
+    def __init__(self, n_neighbors: int = 5, metric: str = 'minkowski', batch_size: int = 1024):
+        if metric not in ('minkowski', 'euclidean', 'cosine', 'jaccard'):
+            raise ValueError(f'TorchKNNRegressor does not support the metric "{metric}"')
+        self.n_neighbors = n_neighbors
+        self.metric = metric
+        self.batch_size = batch_size
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> 'TorchKNNRegressor':
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.X = torch.tensor(np.asarray(X), dtype=torch.float64, device=self.device)
+        if self.metric == 'jaccard':
+            self.X = (self.X != 0).double()
+            self.counts = self.X.sum(dim=1)
+        elif self.metric == 'cosine':
+            self.X = torch.nn.functional.normalize(self.X, dim=1)
+        self.y = torch.tensor(np.asarray(y), dtype=torch.float64, device=self.device)
+        if self.y.dim() == 1:
+            self.y = self.y[:, None]
+        self.tiebreak = torch.arange(len(self.X), dtype=torch.float64, device=self.device) * 1e-13
+        return self
+
+    def similarity(self, query: torch.Tensor) -> torch.Tensor:
+        """Larger = closer, for a batch of queries against all training samples."""
+        query = query.double()
+        if self.metric == 'jaccard':
+            query = (query != 0).double()
+            intersection = query @ self.X.T
+            union = query.sum(dim=1, keepdim=True) + self.counts[None, :] - intersection
+            # two empty fingerprints have Jaccard distance 0 (as in scipy)
+            return torch.where(union > 0, intersection / union.clamp(min=1), torch.ones_like(intersection))
+        if self.metric == 'cosine':
+            return torch.nn.functional.normalize(query, dim=1) @ self.X.T
+        return -torch.cdist(query, self.X)
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        X = np.asarray(X)
+        out = []
+        with torch.no_grad():
+            for start in range(0, len(X), self.batch_size):
+                query = torch.tensor(X[start:start + self.batch_size], dtype=torch.float64, device=self.device)
+                neighbors = (self.similarity(query) - self.tiebreak[None, :]).topk(self.n_neighbors, dim=1).indices
+                out.append(self.y[neighbors].mean(dim=1))
+        return torch.cat(out).cpu().numpy()
+
 
 # == EXPERIMENT IMPLEMENTATION ==
 
@@ -734,7 +831,12 @@ def train_model__k_neighbors(e: Experiment,
             return model
     
     elif e.DATASET_TYPE == 'regression':
-        
+
+        if e.KN_BACKEND == 'torch':
+            if e.KN_WEIGHTS != 'uniform':
+                raise ValueError('KN_BACKEND "torch" supports only uniform weights')
+            return TorchKNNRegressor(n_neighbors=e.KN_NUM_NEIGHBORS, metric=e.KN_METRIC).fit(X_train, y_train)
+
         model = KNeighborsRegressor(**kwargs)
         model.fit(X_train, y_train)
         return model
@@ -865,16 +967,16 @@ def train_model__neural_net2(e: Experiment,
         def __init__(self, indices, data_map):
             self.indices = indices
             self.data_map = data_map
-            
+
         def __len__(self):
             return len(self.indices)
-            
+
         def __getitem__(self, idx):
             data_idx = self.indices[idx]
             features = torch.tensor(self.data_map[data_idx]['graph_features'], dtype=torch.float32)
             labels = torch.tensor(self.data_map[data_idx]['graph_labels'], dtype=torch.float32)
             return features, labels
-    
+
     # DataLoader worker settings. With NN_NUM_WORKERS == 0 (the default, best for dense node packing)
     # loading happens in the main process; prefetch_factor/persistent_workers are only valid with workers.
     loader_kwargs = {'num_workers': e.NN_NUM_WORKERS, 'pin_memory': False}
@@ -882,29 +984,47 @@ def train_model__neural_net2(e: Experiment,
         loader_kwargs['prefetch_factor'] = 2
         loader_kwargs['persistent_workers'] = True
 
-    # Create memory-efficient datasets
-    train_dataset = LazyDataset(train_indices, index_data_map)
+    if e.NN_DEVICE_DATA:
+        # The data as tensors on the training device, indexed one whole batch at a time. The samplers are those that
+        # the DataLoaders below build internally (RandomSampler / SequentialSampler in a BatchSampler of 64), so the
+        # batches come in the same order, drawn from the same seeded global generator.
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        train_loader = torch.utils.data.DataLoader(
+            DeviceBatchDataset(index_data_map, train_indices, device),
+            batch_size=None,
+            sampler=torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(train_indices))),
+                                                  batch_size=64, drop_last=True),
+        )
+        val_loader = torch.utils.data.DataLoader(
+            DeviceBatchDataset(index_data_map, val_indices_, device),
+            batch_size=None,
+            sampler=torch.utils.data.BatchSampler(torch.utils.data.SequentialSampler(range(len(val_indices_))),
+                                                  batch_size=64, drop_last=False),
+        )
+    else:
+        # Create memory-efficient datasets
+        train_dataset = LazyDataset(train_indices, index_data_map)
 
-    # Create a DataLoader with optimized settings for performance
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=64,
-        shuffle=True,
-        drop_last=True,
-        **loader_kwargs,
-    )
+        # Create a DataLoader with optimized settings for performance
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=64,
+            shuffle=True,
+            drop_last=True,
+            **loader_kwargs,
+        )
 
-    # Create memory-efficient validation dataset
-    val_dataset = LazyDataset(val_indices_, index_data_map)
+        # Create memory-efficient validation dataset
+        val_dataset = LazyDataset(val_indices_, index_data_map)
 
-    # Create a DataLoader for the validation dataset with optimized settings
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset,
-        batch_size=64,
-        shuffle=False,
-        **loader_kwargs,
-    )
-    
+        # Create a DataLoader for the validation dataset with optimized settings
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset,
+            batch_size=64,
+            shuffle=False,
+            **loader_kwargs,
+        )
+
     ## --- creating the neural network model ---
     
     # input output dimensions from sample data
@@ -1245,21 +1365,27 @@ def experiment(e: Experiment):
         return index_data_map
         
     index_data_map: dict[int, GraphDict] = load_data()
-    
+
+    if e.TARGET_INDICES is not None and (e.TARGET_INDEX is not None or e.DATASET_TYPE != 'regression'):
+        raise ValueError('TARGET_INDICES requires TARGET_INDEX=None and a regression dataset')
+
     e.log('determine the graph labels...')
     for index in list(index_data_map.keys()):
-        
+
         graph = index_data_map[index]
         # :hook get_graph_labels:
-        #       This hook is called on each graph in the dataset and is supposed to return the numpy array 
+        #       This hook is called on each graph in the dataset and is supposed to return the numpy array
         #       representing the graph labels to serve as the prediction target.
         graph_labels = e.apply_hook(
             'get_graph_labels',
             index=index,
             graph=graph
         )
-                
+
         graph['graph_labels'] = graph_labels.astype(float)
+        # multi-target runs: all targets are kept, and the per-target loop selects them one after the other
+        if e.TARGET_INDICES is not None:
+            graph['graph_labels_all'] = graph['graph_labels'].copy()
             
         if e.DATASET_NOISE > 0.0:
             
@@ -1340,74 +1466,93 @@ def experiment(e: Experiment):
     # ClogP values, and the reported ClogP errors were the true ones times the standard deviation of logS in the
     # training split. "labels/scaled_after_hooks" marks the archives with the corrected order.
 
-    scaler = None
-    if e.DATASET_TYPE == 'regression':
-        e.log('scaling the regression labels...')
-        scaler = StandardScaler()
-        y_train = np.array([index_data_map[i]['graph_labels'] for i in train_indices])
-        e.log(f' * y_train shape: {y_train.shape}')
-        scaler.fit(y_train)
+    def scale_train_evaluate(suffix: str = '') -> None:
+        """
+        Standardize the current labels (regression), then train and evaluate every model of MODELS. In a run with
+        TARGET_INDICES this is called once per target, and the metric keys and the stored scaler carry the suffix
+        "__t<target>".
+        """
+        scaler = None
+        if e.DATASET_TYPE == 'regression':
+            e.log('scaling the regression labels...')
+            scaler = StandardScaler()
+            y_train = np.array([index_data_map[i]['graph_labels'] for i in train_indices])
+            e.log(f' * y_train shape: {y_train.shape}')
+            scaler.fit(y_train)
 
-        for index in index_data_map:
-            index_data_map[index]['graph_labels'] = scaler.transform(index_data_map[index]['graph_labels'].reshape(1, -1)).flatten()
+            for index in index_data_map:
+                index_data_map[index]['graph_labels'] = scaler.transform(index_data_map[index]['graph_labels'].reshape(1, -1)).flatten()
 
-        scaler_path = os.path.join(e.path, 'standard_scaler.joblib')
-        joblib.dump(scaler, scaler_path)
-        e.log(f'💾 saved standard scaler as joblib @ {scaler_path}')
-        e['labels/scaler_mean'] = scaler.mean_.tolist()
-        e['labels/scaler_scale'] = scaler.scale_.tolist()
+            scaler_path = os.path.join(e.path, f'standard_scaler{suffix}.joblib')
+            joblib.dump(scaler, scaler_path)
+            e.log(f'💾 saved standard scaler as joblib @ {scaler_path}')
+            e[f'labels/scaler_mean{suffix}'] = scaler.mean_.tolist()
+            e[f'labels/scaler_scale{suffix}'] = scaler.scale_.tolist()
+
+        # ~ model training
+        for model_name in e.MODELS:
+
+            e.log(f'\ntraining model "{model_name}"...')
+            time_start = time.time()
+            model = e.apply_hook(
+                f'train_model__{model_name}',
+                index_data_map=index_data_map,
+                train_indices=train_indices,
+                val_indices=val_indices,
+            )
+            time_end = time.time()
+            duration = time_end - time_start
+            # Total wall time of the training hook, recorded uniformly for every model (some hooks record
+            # their own "train_time/<model>", e.g. only up to the best epoch; that one is kept as is).
+            e[f'fit_time/{model_name}{suffix}'] = duration
+            e.log(f'training done after {duration:.2f} seconds')
+
+            # ~ model evaluation
+            e.log('evaluating model...')
+            e.apply_hook(
+                'evaluate_model',
+                model=model,
+                index_data_map=index_data_map,
+                indices=test_indices,
+                key=f'test_{model_name}{suffix}',
+                scaler=scaler,
+            )
+
+            # ~ model evaluation on the held-out validation split
+            # This validation metric is the selection signal for hyperparameter optimization (see
+            # _slurm_ex_13 / analyze_ex_13): the best config per (representation, dataset) is chosen by the
+            # validation metric, never the test metric, to avoid the optimistic bias of tuning on the test
+            # split. The top-level validation split is otherwise unused by the neural-net models (which carve
+            # their own internal validation set from the training indices), so it is a clean, held-out signal.
+            if val_indices:
+                e.apply_hook(
+                    'evaluate_model',
+                    model=model,
+                    index_data_map=index_data_map,
+                    indices=val_indices,
+                    key=f'val_{model_name}{suffix}',
+                    scaler=scaler,
+                )
+
     e['labels/scaled_after_hooks'] = True
-
     example_graph = index_data_map[train_indices[0]]
     e.log(f'example graph'
           f' - num_nodes: {len(example_graph["node_indices"])}'
           f' - num edges: {len(example_graph["edge_indices"])}'
           f' - embedding shape: {example_graph["graph_features"].shape}')
-    
-    # ~ model training
-    for model_name in e.MODELS:
-        
-        e.log(f'\ntraining model "{model_name}"...')
-        time_start = time.time()
-        model = e.apply_hook(
-            f'train_model__{model_name}',
-            index_data_map=index_data_map,
-            train_indices=train_indices,
-            val_indices=val_indices,
-        )
-        time_end = time.time()
-        duration = time_end - time_start
-        # Total wall time of the training hook, recorded uniformly for every model (some hooks record
-        # their own "train_time/<model>", e.g. only up to the best epoch; that one is kept as is).
-        e[f'fit_time/{model_name}'] = duration
-        e.log(f'training done after {duration:.2f} seconds')
-        
-        # ~ model evaluation
-        e.log('evaluating model...')
-        e.apply_hook(
-            'evaluate_model',
-            model=model,
-            index_data_map=index_data_map,
-            indices=test_indices,
-            key=f'test_{model_name}',
-            scaler=scaler,
-        )
 
-        # ~ model evaluation on the held-out validation split
-        # This validation metric is the selection signal for hyperparameter optimization (see
-        # _slurm_ex_13 / analyze_ex_13): the best config per (representation, dataset) is chosen by the
-        # validation metric, never the test metric, to avoid the optimistic bias of tuning on the test
-        # split. The top-level validation split is otherwise unused by the neural-net models (which carve
-        # their own internal validation set from the training indices), so it is a clean, held-out signal.
-        if val_indices:
-            e.apply_hook(
-                'evaluate_model',
-                model=model,
-                index_data_map=index_data_map,
-                indices=val_indices,
-                key=f'val_{model_name}',
-                scaler=scaler,
-            )
+    if e.TARGET_INDICES is None:
+        scale_train_evaluate()
+    else:
+        # a hook that set the labels itself (e.g. mixin_clogp) would be overwritten below
+        if any(index_data_map[i]['graph_labels'].shape != index_data_map[i]['graph_labels_all'].shape
+               for i in train_indices[:10]):
+            raise ValueError('a hook changed the labels; TARGET_INDICES cannot be combined with it')
+        for target in e.TARGET_INDICES:
+            e.log(f'\n=== target {target} ===')
+            for graph in index_data_map.values():
+                graph['graph_labels'] = graph['graph_labels_all'][target:target + 1].copy()
+            scale_train_evaluate(f'__t{target}')
 
     # ~ comparison of models
     
