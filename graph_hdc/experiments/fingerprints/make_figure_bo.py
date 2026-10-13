@@ -4,14 +4,18 @@ the paper (Fig. 4, made with analyze_ex_07.ipynb): Roboto Condensed, gray / ligh
 box plots with black medians, significance brackets, shaded progression bands, bold panel letters with
 left-aligned titles.
 
-- ``figure_bo``: main-text figure. Top row: normalized regret per BO round at 16 and 1024 dimensions for ClogP
-  (AqSolDB) and QED (ZINC250k), mean over the 25 campaigns with the standard error as band. Bottom row: regret AUC
-  against the embedding size for both objectives, box plots over the 25 campaigns, random search as a dashed line,
-  brackets for HDF against Morgan + Tanimoto (paired two-sided Wilcoxon signed-rank test, Holm-corrected within
-  each objective as in analyze_ex_24.py).
-- ``figure_bo_si``: the box-plot panels of all nine objectives in a 3 x 3 grid (SI).
+- ``figure_bo``: main-text figure with Morgan fingerprints + Tanimoto kernel and HDF + Matern kernel only (user,
+  2026-10-13). Top row: normalized regret per BO round at 16 and 1024 dimensions for ClogP (AqSolDB) and QED
+  (ZINC250k), mean over the campaigns with the standard error as band. Bottom row: regret AUC against the embedding
+  size for both objectives, box plots over the campaigns, random search as a dashed line, brackets for HDF against
+  Morgan + Tanimoto (paired two-sided Wilcoxon signed-rank test, Holm-corrected within each objective as in
+  analyze_ex_24.py).
+- ``figure_bo_si``: box-plot panels of all nine objectives in a 3 x 3 grid (SI) with all four surrogates (Morgan +
+  Tanimoto, Morgan PCA + Matern, HDF + Matern, HDF + linear kernel), at every second embedding size so that the
+  panels stay readable (user, 2026-10-13).
 
-HDF appears with its standard kernel (Matern-5/2) only. Reads ``_ex24/campaigns.tsv``, ``_ex24/runs/`` and
+Random search is explained by the legend only, without a label in every panel (user, 2026-10-13). Sizes without
+data (e.g. 256 before its campaigns ran) are left out. Reads ``_ex24/campaigns.tsv``, ``_ex24/runs/`` and
 ``_ex24/analysis/tests.tsv`` (``bo_benchmark.py collect`` and ``analyze_ex_24.py``; EX24_ROOT points elsewhere).
 
     python make_figure_bo.py [output folder]
@@ -27,25 +31,30 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from matplotlib import font_manager  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
+from matplotlib.ticker import MaxNLocator  # noqa: E402
 
 PATH = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.environ.get('EX24_ROOT', os.path.join(PATH, '_ex24'))
 
-SIZES = [8, 16, 32, 64, 128, 512, 1024]
+SIZES = [8, 16, 32, 64, 128, 256, 512, 1024]
+SI_SIZES = [8, 32, 128, 512]
 PROGRESSION_SIZES = [16, 1024]
 # box order within a size: Morgan variants left, HDF right (as in the original figure)
-METHODS = ['morgan_tanimoto', 'morgan_pca', 'hdf_matern']
+MAIN_METHODS = ['morgan_tanimoto', 'hdf_matern']
+SI_METHODS = ['morgan_tanimoto', 'morgan_pca', 'hdf_matern', 'hdf_linear']
 COLORS = {
     'random': '#808080',
     'morgan_tanimoto': '#7C92FF',
     'morgan_pca': '#4C64EB',
     'hdf_matern': '#69F7AE',
+    'hdf_linear': '#2DBE76',
 }
 LABELS = {
     'random': 'Random search',
     'morgan_tanimoto': 'Morgan FP (Tanimoto)',
     'morgan_pca': 'Morgan FP, PCA (Matérn)',
     'hdf_matern': 'HDF (Matérn)',
+    'hdf_linear': 'HDF (linear)',
 }
 OBJECTIVES = ['clogp', 'qed', 'solubility', 'lipophilicity', 'freesolv', 'beet', 'qm9_gap', 'qm9_dipole',
               'melting_point']
@@ -95,6 +104,12 @@ def load_tests() -> pd.DataFrame:
     return tests[(tests.family == 'hdf_vs_morgan') & (tests.method_b == 'morgan_tanimoto')]
 
 
+def available(df: pd.DataFrame, sizes: list) -> list:
+    """The sizes of ``sizes`` for which the benchmark has campaigns."""
+    present = set(df['size'].dropna().astype(int))
+    return [s for s in sizes if s in present]
+
+
 def regret_curves(objective: str, method: str, size) -> np.ndarray:
     """Normalized regret per BO round of all campaigns of one cell, shape (campaigns, rounds + 1)."""
     folder = os.path.join(ROOT, 'runs', objective, method, 'Dna' if size is None else f'D{int(size)}')
@@ -107,8 +122,8 @@ def regret_curves(objective: str, method: str, size) -> np.ndarray:
     return np.array(curves)
 
 
-def progression_panel(ax, objective: str, size: int) -> None:
-    for method in ['random'] + METHODS:
+def progression_panel(ax, objective: str, size: int, methods: list) -> None:
+    for method in ['random'] + methods:
         curves = regret_curves(objective, method, None if method == 'random' else size)
         rounds = np.arange(curves.shape[1])
         mean = curves.mean(axis=0)
@@ -127,17 +142,20 @@ def bracket(ax, x0: float, x1: float, y: float, height: float, label: str) -> No
     ax.text((x0 + x1) / 2, y - 0.4 * height, label, ha='center', va='top', fontsize=FONT_SIZE, clip_on=False)
 
 
-def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, legend: bool = False) -> None:
-    box_width = 0.26
-    offsets = {'morgan_tanimoto': -box_width, 'morgan_pca': 0.0, 'hdf_matern': box_width}
+def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods: list, sizes: list) -> None:
+    group_width = 0.8
+    box_width = group_width / len(methods)
+    offsets = {m: (j - (len(methods) - 1) / 2) * box_width for j, m in enumerate(methods)}
     data = df[df.objective == objective]
-    top = 0.0
-    for i, size in enumerate(SIZES):
-        for method in METHODS:
+    random = data[data.method == 'random']['auc'].to_numpy()
+    random_median = float(np.median(random))
+    low, high = np.inf, random_median
+    for i, size in enumerate(sizes):
+        for method in methods:
             values = data[(data.method == method) & (data['size'] == size)]['auc'].to_numpy()
             if len(values) == 0:
                 continue  # Morgan-PCA cannot have more components than the library has molecules
-            top = max(top, values.max())
+            low, high = min(low, values.min()), max(high, values.max())
             ax.boxplot(
                 [values], positions=[i + offsets[method]], widths=box_width * 0.85, patch_artist=True,
                 showfliers=True,
@@ -148,75 +166,85 @@ def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, legend:
                 flierprops=dict(marker='o', markerfacecolor=COLORS[method], markeredgecolor='none', markersize=2.5,
                                 alpha=0.5),
             )
-    random = data[data.method == 'random']['auc'].to_numpy()
-    random_median = float(np.median(random))
-    top = max(top, random_median)
     ax.axhline(random_median, color=COLORS['random'], ls='--', lw=0.9, zorder=1)
-    ax.text(len(SIZES) - 0.5, random_median, 'random search', color=COLORS['random'], style='italic',
-            fontsize=FONT_SIZE - 0.5, ha='right', va='bottom', zorder=5,
-            bbox=dict(facecolor='white', alpha=0.75, edgecolor='none', pad=0.6))
-    # room for the brackets below the boxes
-    span = top * 1.08
-    ax.set_ylim(-0.17 * span, span)
-    for i, size in enumerate(SIZES):
+    # the axis starts at zero unless all values lie far above it; then it starts just below the data, so that
+    # the boxes fill the panel. Below the data, a strip holds the significance brackets.
+    base = 0.0 if low < 0.3 * high else low - 0.06 * (high - low)
+    top = high + 0.05 * (high - base)
+    span = top - base
+    for i, size in enumerate(sizes):
         row = tests[(tests.objective == objective) & (tests['size'] == size)]
-        if row.empty or pd.isna(row.p_holm.iloc[0]):
+        if row.empty or pd.isna(row.p_holm.iloc[0]) or 'morgan_tanimoto' not in offsets:
             continue
         p = float(row.p_holm.iloc[0])
         label = next((mark for threshold, mark in SIGNIFICANCE if p < threshold), None)
         if label:
-            bracket(ax, i + offsets['morgan_tanimoto'], i + offsets['hdf_matern'], -0.05 * span, 0.025 * span, label)
-    ax.set_xticks(range(len(SIZES)))
-    ax.set_xticklabels([str(s) for s in SIZES])
-    ax.set_xlim(-0.6, len(SIZES) - 0.4)
-    # only non-negative ticks inside the data range (set_yticks would otherwise widen the axis)
-    ax.set_yticks([t for t in ax.get_yticks() if 0 <= t <= span])
-    ax.set_ylim(-0.17 * span, span)
-    ax.set_xlabel('Embedding size')
+            bracket(ax, i + offsets['morgan_tanimoto'], i + offsets['hdf_matern'], base - 0.05 * span,
+                    0.025 * span, label)
+    ax.set_xticks(range(len(sizes)))
+    ax.set_xticklabels([str(s) for s in sizes])
+    ax.set_xlim(-0.55, len(sizes) - 0.45)
+    # ticks only inside the data range (the strip below holds the brackets)
+    ticks = MaxNLocator(nbins=5).tick_values(base, top)
+    ax.set_yticks([t for t in ticks if base - 1e-12 <= t <= top])
+    ax.set_ylim(base - 0.16 * span, top)
     ax.set_ylabel('Regret AUC $\\downarrow$')
     ax.grid(True, alpha=0.3, axis='y', lw=0.5)
-    if legend:
-        handles = [Patch(facecolor=COLORS[m], alpha=0.7, label=LABELS[m]) for m in METHODS]
-        ax.legend(handles=handles, loc='upper right', frameon=True, framealpha=0.9)
 
 
 def main_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
-    fig = plt.figure(figsize=(7.8, 5.0))
-    grid = fig.add_gridspec(2, 4, height_ratios=[1.0, 1.15], hspace=0.62, wspace=0.42,
-                            left=0.065, right=0.99, top=0.86, bottom=0.08)
+    methods = MAIN_METHODS
+    sizes = available(df, SIZES)
+    fig = plt.figure(figsize=(7.8, 4.6))
+    outer = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.15], hspace=0.4, wspace=0.17,
+                             left=0.065, right=0.985, top=0.875, bottom=0.085)
     letters = iter('abcdef')
-    first = None
-    for column, (objective, size) in enumerate([(o, s) for o in ('clogp', 'qed') for s in PROGRESSION_SIZES]):
-        ax = fig.add_subplot(grid[0, column])
-        progression_panel(ax, objective, size)
-        panel_title(ax, next(letters), f'{TITLES[objective].split(" (")[0]}, {size} dimensions')
-        if column == 0:
-            ax.set_ylabel('Normalized regret $\\downarrow$')
-            first = ax
     for column, objective in enumerate(('clogp', 'qed')):
-        ax = fig.add_subplot(grid[1, 2 * column:2 * column + 2])
-        box_panel(ax, df, tests, objective)
+        # the two progression panels of one objective share their y-axis and sit close together
+        inner = outer[0, column].subgridspec(1, 2, wspace=0.13)
+        left = None
+        for k, size in enumerate(PROGRESSION_SIZES):
+            ax = fig.add_subplot(inner[0, k], sharey=left)
+            progression_panel(ax, objective, size, methods)
+            panel_title(ax, next(letters), f'{TITLES[objective].split(" (")[0]}, {size} dimensions')
+            if k == 0:
+                left = ax
+                if column == 0:
+                    ax.set_ylabel('Normalized regret $\\downarrow$')
+            else:
+                ax.tick_params(labelleft=False)
+    for column, objective in enumerate(('clogp', 'qed')):
+        ax = fig.add_subplot(outer[1, column])
+        box_panel(ax, df, tests, objective, methods, sizes)
+        ax.set_xlabel('Embedding size')
+        if column == 1:
+            ax.set_ylabel('')
         panel_title(ax, next(letters), f'{TITLES[objective]}: regret AUC across embedding sizes')
-    handles = [plt.Line2D([], [], color=COLORS[m], lw=1.6, label=LABELS[m]) for m in METHODS + ['random']]
-    fig.legend(handles=handles, loc='upper center', ncol=4, frameon=True, framealpha=0.9,
-               bbox_to_anchor=(0.5, 0.995), handlelength=1.8, columnspacing=1.6)
+    handles = [plt.Line2D([], [], color=COLORS[m], lw=1.6, label=LABELS[m]) for m in methods]
+    handles.append(plt.Line2D([], [], color=COLORS['random'], lw=1.6, label=LABELS['random']))
+    fig.legend(handles=handles, loc='upper center', ncol=3, frameon=True, framealpha=0.9,
+               bbox_to_anchor=(0.5, 0.998), handlelength=1.8, columnspacing=1.6)
     fig.savefig(path + '.pdf')
     fig.savefig(path + '.png', dpi=300)
     plt.close(fig)
 
 
 def si_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
-    fig, axes = plt.subplots(3, 3, figsize=(7.8, 7.4))
-    fig.subplots_adjust(left=0.07, right=0.99, top=0.91, bottom=0.06, hspace=0.62, wspace=0.28)
+    methods = SI_METHODS
+    sizes = available(df, SI_SIZES)
+    fig, axes = plt.subplots(3, 3, figsize=(7.8, 7.0))
+    fig.subplots_adjust(left=0.07, right=0.995, top=0.925, bottom=0.065, hspace=0.36, wspace=0.2)
     for ax, letter, objective in zip(axes.flat, 'abcdefghi', OBJECTIVES):
-        box_panel(ax, df, tests, objective)
+        box_panel(ax, df, tests, objective, methods, sizes)
         panel_title(ax, letter, TITLES[objective])
         if objective not in ('clogp', 'lipophilicity', 'qm9_gap'):
             ax.set_ylabel('')
-    handles = [Patch(facecolor=COLORS[m], alpha=0.7, label=LABELS[m]) for m in METHODS]
+        if objective in ('qm9_gap', 'qm9_dipole', 'melting_point'):
+            ax.set_xlabel('Embedding size')
+    handles = [Patch(facecolor=COLORS[m], alpha=0.7, label=LABELS[m]) for m in methods]
     handles.append(plt.Line2D([], [], color=COLORS['random'], ls='--', lw=0.9, label=LABELS['random']))
-    fig.legend(handles=handles, loc='upper center', ncol=4, frameon=True, framealpha=0.9,
-               bbox_to_anchor=(0.5, 0.995), handlelength=1.8, columnspacing=1.6)
+    fig.legend(handles=handles, loc='upper center', ncol=5, frameon=True, framealpha=0.9,
+               bbox_to_anchor=(0.5, 0.998), handlelength=1.8, columnspacing=1.4)
     fig.savefig(path + '.pdf')
     fig.savefig(path + '.png', dpi=300)
     plt.close(fig)
