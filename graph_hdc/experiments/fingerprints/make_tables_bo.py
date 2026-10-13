@@ -55,7 +55,9 @@ def hdf_linear_table(df: pd.DataFrame) -> str:
 
 
 def runtime_table(df: pd.DataFrame) -> str:
-    seconds = df[df.objective == 'qed'].groupby(['method', 'size']).seconds_total.median()
+    # campaigns 25-99 all come from the rerun of 2026-10-13 (one code version and cluster setup); the first 25 ran
+    # in two earlier sessions with different GPU loads
+    seconds = df[(df.objective == 'qed') & (df.campaign >= 25)].groupby(['method', 'size']).seconds_total.median()
     lines = [
         '\\begin{tabular}{rrrr}',
         '\\toprule',
@@ -63,7 +65,8 @@ def runtime_table(df: pd.DataFrame) -> str:
         '\\midrule',
     ]
     for size in SIZES:
-        cells = [f'{seconds[(method, float(size))]:.0f}' for method, _ in RUNTIME_METHODS]
+        cells = [f'{seconds[(method, float(size))]:.0f}' if (method, float(size)) in seconds.index else '--'
+                 for method, _ in RUNTIME_METHODS]
         lines.append(f'{size} & ' + ' & '.join(cells) + ' \\\\')
     lines += ['\\bottomrule', '\\end{tabular}']
     return '\n'.join(lines) + '\n'

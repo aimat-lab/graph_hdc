@@ -22,6 +22,7 @@ data (e.g. 256 before its campaigns ran) are left out. Reads ``_ex24/campaigns.t
 """
 import json
 import os
+import re
 import sys
 
 import matplotlib
@@ -114,7 +115,8 @@ def regret_curves(objective: str, method: str, size) -> np.ndarray:
     """Normalized regret per BO round of all campaigns of one cell, shape (campaigns, rounds + 1)."""
     folder = os.path.join(ROOT, 'runs', objective, method, 'Dna' if size is None else f'D{int(size)}')
     curves = []
-    for name in sorted(os.listdir(folder)):
+    # finished result files only (c<k>.npz), not the temporary files of an interrupted save
+    for name in sorted(n for n in os.listdir(folder) if re.fullmatch(r'c\d+\.npz', n)):
         result = np.load(os.path.join(folder, name))
         meta = json.loads(str(result['meta']))
         best = result['best']

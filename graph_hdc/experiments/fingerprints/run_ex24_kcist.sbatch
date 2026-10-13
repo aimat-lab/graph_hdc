@@ -7,6 +7,7 @@
 #   objectives rewrite objective files, e.g. initial designs for more campaigns or a new mask (CPU only)
 #   encode     HDF embeddings of every library, size and campaign codebook (CPU only)
 #   calibrate  per-round timings and node throughput for several worker counts (CPU + GPU)
+#   cleanup    delete the HDF encodings of finished campaigns (CLEANUP_ARGS="--campaigns 25-39"; CPU only)
 #   run        BO campaigns of one shard of _ex24/tasks.jsonl (CPU + GPU acquisition for ZINC250k). Submit as
 #              a job array, one shard per node; the array MUST be 0-based and contiguous (--array=0-3).
 #
@@ -37,7 +38,7 @@
 #SBATCH --output=_ex24/slurm_%x_%A_%a.out
 
 set -uo pipefail
-EX24_STAGE="${EX24_STAGE:?set EX24_STAGE=featurize|morgan|encode|objectives|calibrate|run}"
+EX24_STAGE="${EX24_STAGE:?set EX24_STAGE=featurize|morgan|encode|objectives|cleanup|calibrate|run}"
 REPO="${REPO:-$HOME/Programming/graph_hdc}"
 CODE="${CODE:-$HOME/Programming/graph_hdc_ex24}"
 VENV="${VENV:-$REPO/.venv}"
@@ -53,6 +54,7 @@ RUN_ARGS="${RUN_ARGS:-}"               # e.g. "--gpu-min-molecules 20000"
 ENCODE_ARGS="${ENCODE_ARGS:-}"         # e.g. "--campaigns 0-12" (one part of the codebooks per node)
 OBJECTIVES_ARGS="${OBJECTIVES_ARGS:-}" # e.g. "--objectives qm9_gap qm9_dipole"
 MORGAN_ARGS="${MORGAN_ARGS:-}"         # e.g. "--sizes 256"
+CLEANUP_ARGS="${CLEANUP_ARGS:-}"       # e.g. "--campaigns 25-39"
 
 source "$VENV/bin/activate"
 export PYTHONPATH="$CODE"
@@ -78,6 +80,7 @@ case "$EX24_STAGE" in
     morgan)    python bo_benchmark.py morgan --workers "$WORKERS" $MORGAN_ARGS ;;
     encode)    python bo_benchmark.py encode --workers "$WORKERS" --threads "$THREADS" $ENCODE_ARGS ;;
     objectives) python bo_benchmark.py objectives $OBJECTIVES_ARGS ;;
+    cleanup)   python bo_benchmark.py cleanup $CLEANUP_ARGS ;;
     calibrate) python bo_benchmark.py calibrate --gpus "$GPUS" $CALIBRATE_ARGS ;;
     run)       python bo_benchmark.py run --workers "$WORKERS" --threads "$THREADS" --gpus "$GPUS" \
                    --shard "$SHARD" --num-shards "$NUM_SHARDS" $RUN_ARGS ;;

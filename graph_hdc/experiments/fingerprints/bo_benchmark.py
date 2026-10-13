@@ -43,8 +43,9 @@ the objective values and initial designs, ``runs/`` one result file per campaign
     python bo_benchmark.py morgan [--libraries ...] [--sizes ...] [--workers N]
     python bo_benchmark.py objectives --objectives ...
     python bo_benchmark.py encode [--libraries ...] [--sizes ...] [--campaigns ...] [--workers N]
-    python bo_benchmark.py tasks
-    python bo_benchmark.py run --workers W --threads T [--gpus G] [--shard i --num-shards n]
+    python bo_benchmark.py tasks [--campaigns ...] [--output FILE] [--open-only]
+    python bo_benchmark.py run --workers W --threads T [--gpus G] [--shard i --num-shards n] [--tasks-file FILE]
+    python bo_benchmark.py cleanup --campaigns ... [--dry-run]
     python bo_benchmark.py calibrate --workers-list 16 32 64 [--gpus G]
     python bo_benchmark.py status
     python bo_benchmark.py collect
@@ -245,8 +246,11 @@ def add_morgan(library: str, sizes: List[int], workers: int) -> None:
         if size <= meta['pca_components']:
             meta['pca_explained_by_size'][str(size)] = float(explained[:size].sum())
     meta['pca_explained_by_size'] = dict(sorted(meta['pca_explained_by_size'].items(), key=lambda kv: int(kv[0])))
-    with open(os.path.join(folder, 'meta.json'), 'w') as file:
+    # atomic, as other stages read meta.json
+    tmp = os.path.join(folder, f'meta.json.tmp{os.getpid()}')
+    with open(tmp, 'w') as file:
         json.dump(meta, file, indent=2)
+    os.replace(tmp, os.path.join(folder, 'meta.json'))
     log(f'{library}: Morgan bits of sizes {missing} for {len(smiles_list)} molecules')
 
 
@@ -435,6 +439,40 @@ def write_objectives(library: str, smiles_list: List[str], properties: Dict[str,
             f'[{allowed_objective.min():.4g}, {allowed_objective.max():.4g}], best molecule {smiles_list[best]}')
 
 
+def verify_objectives(objectives: List[str], backup: str) -> None:
+    """
+    Compares the rewritten objective files with the copies in ``backup`` (taken before the rewrite): values,
+    objective values, mask, objective range and the initial designs of the campaigns that the backup holds must
+    be identical, so that finished campaigns stay valid. Objectives whose candidate mask changed on purpose (the
+    QM9 objectives, 2026-10-13) are only reported. Raises on any other difference.
+    """
+    problems = []
+    for objective in objectives:
+        old_path = os.path.join(backup, f'{objective}.npz')
+        if not os.path.exists(old_path):
+            continue
+        old = np.load(old_path)
+        new = np.load(os.path.join(DATA, 'objectives', f'{objective}.npz'))
+        n = len(old['initial'])
+        same = {
+            'values': np.array_equal(old['values'], new['values'], equal_nan=True),
+            'objective': np.array_equal(old['objective'], new['objective']),
+            'allowed': np.array_equal(old['allowed'], new['allowed']),
+            'range': float(old['objective_max']) == float(new['objective_max'])
+            and float(old['objective_min']) == float(new['objective_min']),
+            f'initial[:{n}]': np.array_equal(old['initial'], new['initial'][:n]),
+        }
+        differ = [name for name, ok in same.items() if not ok]
+        if OBJECTIVES[objective].get('exclude_zwitterions'):
+            log(f'{objective}: new candidate mask, differs from the backup in {differ or "nothing"}')
+        elif differ:
+            problems.append(f'{objective}: {differ}')
+        else:
+            log(f'{objective}: identical to the backup for the first {n} campaigns')
+    if problems:
+        raise RuntimeError('rewritten objective files differ from the backup: ' + '; '.join(problems))
+
+
 def rewrite_objectives(objectives: List[str]) -> None:
     """
     Rewrites the objective files of ``objectives`` from the stored library (SMILES in library.tsv) and the raw
@@ -544,9 +582,14 @@ def encode(libraries: List[str], sizes: List[int], campaigns: List[int], workers
     with ProcessPoolExecutor(min(workers, len(jobs)), mp_context=mp.get_context('spawn'),
                              initializer=_encode_init, initargs=(threads, )) as executor:
         futures = {executor.submit(_encode_one, job): job for job in jobs}
-        for i, future in enumerate(as_completed(futures), start=1):
-            path, seconds = future.result()
-            log(f'  [{i}/{len(jobs)}] {futures[future][0]} {os.path.basename(path)} in {seconds:.1f} s')
+        try:
+            for i, future in enumerate(as_completed(futures), start=1):
+                path, seconds = future.result()
+                log(f'  [{i}/{len(jobs)}] {futures[future][0]} {os.path.basename(path)} in {seconds:.1f} s')
+        except BaseException:
+            # do not compute the remaining encodings when one failed (e.g. a full disk)
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
 
 
 # == TASKS ==
@@ -724,10 +767,13 @@ def run_task(task: dict) -> dict:
 
 
 def run(workers: int, threads: int, gpus: int, shard: int, num_shards: int, limit: Optional[int] = None,
-        gpu_min_molecules: int = GPU_MIN_MOLECULES) -> int:
-    """Runs the open campaigns of one shard of the task list; returns the number of failed campaigns."""
+        gpu_min_molecules: int = GPU_MIN_MOLECULES, tasks_file: Optional[str] = None) -> int:
+    """
+    Runs the open campaigns of one shard of the task list (``tasks_file``, default ``tasks.jsonl``); returns the
+    number of failed campaigns.
+    """
     gpus = resolve_gpus(gpus)
-    with open(os.path.join(ROOT, 'tasks.jsonl')) as file:
+    with open(tasks_file or os.path.join(ROOT, 'tasks.jsonl')) as file:
         tasks = [json.loads(line) for line in file]
     # round-robin over the cost-sorted list gives every shard the same mix of long and short campaigns
     tasks = [t for i, t in enumerate(tasks) if i % num_shards == shard]
@@ -896,6 +942,7 @@ def collect() -> None:
     from graph_hdc.bo import normalized_regret, regret_auc
     with open(os.path.join(ROOT, 'tasks.jsonl')) as file:
         tasks = [json.loads(line) for line in file]
+    objective_files = {}
     rows = []
     for task in tasks:
         path = result_path(task)
@@ -903,6 +950,17 @@ def collect() -> None:
             continue
         result = np.load(path)
         meta = json.loads(str(result['meta']))
+        # a result must belong to the current objective file: same initial design and candidate count (catches
+        # results that survived a change of the candidate mask, e.g. the QM9 mask of 2026-10-13)
+        if task['objective'] not in objective_files:
+            objective_files[task['objective']] = np.load(
+                os.path.join(DATA, 'objectives', f'{task["objective"]}.npz'))
+        current = objective_files[task['objective']]
+        num_candidates = int(current['allowed'].sum()) if 'allowed' in current.files else len(current['objective'])
+        initial = current['initial'][task['campaign']]
+        if (not np.array_equal(result['observed'][:len(initial)], initial)
+                or meta.get('num_candidates', meta['num_molecules']) != num_candidates):
+            raise RuntimeError(f'{path} does not match the current objective file (stale result?)')
         regret = normalized_regret(result['best'], meta['objective_max'], meta['objective_min'])
         rows.append({
             **{k: meta[k] for k in ('objective', 'method', 'size', 'campaign')},
@@ -921,6 +979,43 @@ def collect() -> None:
         for row in rows:
             file.write('\t'.join(str(v) for v in row.values()) + '\n')
     log(f'{len(rows)}/{len(tasks)} campaigns -> {path}')
+
+
+# == CLEANUP ==
+
+def cleanup(campaigns: List[int], dry_run: bool = False) -> int:
+    """
+    Deletes the HDF encodings of ``campaigns`` (every library and size) whose campaigns all have their result
+    files. The encodings take most of the disk space of the benchmark (about 3.4 GB per campaign over all
+    libraries and sizes, mostly ZINC250k and QM9) and are reproducible from their seeds, so the rerun of
+    2026-10-13 encodes and runs the campaigns in waves and removes the encodings of each wave afterwards (user).
+    An encoding that an unfinished campaign still needs is kept. Returns the number of kept encodings.
+    """
+    import glob
+    libraries = [library for library in LIBRARIES if os.path.exists(os.path.join(DATA, library, 'meta.json'))]
+    objectives = [objective for objective, spec in OBJECTIVES.items() if spec['library'] in libraries]
+    needed: Dict[tuple, List[str]] = {}
+    for task in make_tasks(objectives=objectives, campaigns=campaigns):
+        if task['method'] in ('hdf_matern', 'hdf_linear'):
+            key = (OBJECTIVES[task['objective']]['library'], task['size'], task['campaign'])
+            needed.setdefault(key, []).append(result_path(task))
+    kept, removed, freed = 0, 0, 0
+    for library in libraries:
+        for campaign in campaigns:
+            for path in sorted(glob.glob(os.path.join(DATA, library, f'hdf_*_c{campaign}.npy'))):
+                size = int(os.path.basename(path).split('_')[1])
+                missing = [p for p in needed.get((library, size, campaign), []) if not os.path.exists(p)]
+                if missing:
+                    kept += 1
+                    log(f'  keep {library}/{os.path.basename(path)}: {len(missing)} campaigns without result, '
+                        f'e.g. {missing[0]}')
+                    continue
+                removed += 1
+                freed += os.path.getsize(path)
+                if not dry_run:
+                    os.remove(path)
+    log(f'{"would remove" if dry_run else "removed"} {removed} encodings ({freed / 1e9:.1f} GB), kept {kept}')
+    return kept
 
 
 # == COMMAND LINE ==
@@ -950,10 +1045,14 @@ def main(argv=None):
     p.add_argument('--threads', type=int, default=1)
     p = sub.add_parser('objectives')
     p.add_argument('--objectives', nargs='+', required=True)
+    p.add_argument('--verify-against', default=None,
+                   help='folder with copies of the objective files from before the rewrite (see verify_objectives)')
     p = sub.add_parser('tasks')
     p.add_argument('--objectives', nargs='+', default=None)
     p.add_argument('--sizes', nargs='+', type=int, default=None)
     p.add_argument('--campaigns', default=None)
+    p.add_argument('--output', default=None, help='task file, default _ex24/tasks.jsonl (status and collect read it)')
+    p.add_argument('--open-only', action='store_true', help='only campaigns without a result file')
     p = sub.add_parser('run')
     p.add_argument('--workers', type=int, required=True)
     p.add_argument('--threads', type=int, default=1)
@@ -963,6 +1062,7 @@ def main(argv=None):
     p.add_argument('--shard', type=int, default=0)
     p.add_argument('--num-shards', type=int, default=1)
     p.add_argument('--limit', type=int, default=None)
+    p.add_argument('--tasks-file', default=None, help='task file, default _ex24/tasks.jsonl')
     p = sub.add_parser('calibrate')
     p.add_argument('--workers-list', nargs='+', type=int, default=[16, 32, 64])
     p.add_argument('--threads-list', nargs='+', type=int, default=[1, 2])
@@ -971,6 +1071,9 @@ def main(argv=None):
     p.add_argument('--throughput-rounds', type=int, default=20)
     sub.add_parser('status')
     sub.add_parser('collect')
+    p = sub.add_parser('cleanup')
+    p.add_argument('--campaigns', required=True)
+    p.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
 
     if args.stage == 'featurize':
@@ -983,17 +1086,22 @@ def main(argv=None):
         encode(args.libraries, args.sizes, parse_campaigns(args.campaigns), args.workers, args.threads)
     elif args.stage == 'objectives':
         rewrite_objectives(args.objectives)
+        if args.verify_against:
+            verify_objectives(args.objectives, args.verify_against)
     elif args.stage == 'tasks':
         tasks = make_tasks(args.objectives, args.sizes,
                            parse_campaigns(args.campaigns) if args.campaigns else None)
+        if args.open_only:
+            tasks = [task for task in tasks if not os.path.exists(result_path(task))]
         os.makedirs(ROOT, exist_ok=True)
-        with open(os.path.join(ROOT, 'tasks.jsonl'), 'w') as file:
+        output = args.output or os.path.join(ROOT, 'tasks.jsonl')
+        with open(output, 'w') as file:
             for task in tasks:
                 file.write(json.dumps(task) + '\n')
-        log(f'{len(tasks)} campaigns -> {os.path.join(ROOT, "tasks.jsonl")}')
+        log(f'{len(tasks)} campaigns -> {output}')
     elif args.stage == 'run':
         failed = run(args.workers, args.threads, args.gpus, args.shard, args.num_shards, args.limit,
-                     args.gpu_min_molecules)
+                     args.gpu_min_molecules, args.tasks_file)
         return 1 if failed else 0
     elif args.stage == 'calibrate':
         calibrate(args.workers_list, args.threads_list, args.gpus, args.rounds, args.throughput_rounds)
@@ -1001,6 +1109,8 @@ def main(argv=None):
         status()
     elif args.stage == 'collect':
         collect()
+    elif args.stage == 'cleanup':
+        return 1 if cleanup(parse_campaigns(args.campaigns), args.dry_run) else 0
     return 0
 
 
