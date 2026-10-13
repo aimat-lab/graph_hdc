@@ -2,13 +2,13 @@ Test MAE of the MLP (mean +- std over the seeds, number of seeds), in the units 
 
 | Target | HDF | HDF w/o size, diameter | Morgan | Morgan + size, diameter |
 |---|---|---|---|---|
-| HOPV15 PCE [\%] | 0.2098 +- 0.038 (10) | 0.221 +- 0.044 (10) | 0.1956 +- 0.039 (10) | 0.1905 +- 0.031 (10) |
-| HOPV15 $V_{oc}$ [V] | 0.1545 +- 0.044 (10) | 0.1398 +- 0.031 (10) | 0.1014 +- 0.036 (10) | 0.1085 +- 0.036 (10) |
+| HOPV15 PCE [\%] | 1.741 +- 0.33 (10) | 1.589 +- 0.33 (10) | 1.463 +- 0.33 (10) | 1.446 +- 0.27 (10) |
+| HOPV15 $V_{oc}$ [V] | 0.1098 +- 0.023 (10) | 0.1147 +- 0.018 (10) | 0.1003 +- 0.023 (10) | 0.1046 +- 0.02 (10) |
 | FreeSolv $\Delta G$ [kcal/mol] | 0.7996 +- 0.12 (10) | 0.6862 +- 0.14 (10) | 1.134 +- 0.21 (10) | 1.157 +- 0.19 (10) |
 | BACE IC50 [pIC50] | 0.5486 +- 0.051 (10) | 0.5791 +- 0.034 (10) | 0.5123 +- 0.031 (10) | 0.5127 +- 0.037 (10) |
 | Lipophilicity logD | 0.4928 +- 0.015 (10) | 0.496 +- 0.017 (10) | 0.5646 +- 0.024 (10) | 0.5599 +- 0.025 (10) |
 | AqSolDB logS [log\,M] | 0.5997 +- 0.017 (10) | 0.6861 +- 0.017 (10) | 0.7492 +- 0.027 (10) | 0.6884 +- 0.021 (10) |
-| ClogP | 0.3939 +- 0.022 (10) | 0.9638 +- 0.053 (10) | 1.281 +- 0.048 (10) | 0.9706 +- 0.031 (10) |
+| AqSolDB ClogP | 0.1804 +- 0.013 (10) | 0.4256 +- 0.018 (10) | 0.5434 +- 0.02 (10) | 0.4058 +- 0.017 (10) |
 | COMPAS-3X $U_0$ [eV] | 0.8484 +- 0.12 (10) | 10.64 +- 0.93 (10) | 97.69 +- 1.5 (10) | 2.662 +- 0.21 (10) |
 | COMPAS-3X Gap [mHa] | 5.82 +- 0.094 (10) | 4.448 +- 0.14 (10) | 3.262 +- 0.039 (10) | 3.167 +- 0.038 (10) |
 | COMPAS-3X $\mu$ [D] | 0.04794 +- 0.0023 (10) | 0.04575 +- 0.0031 (10) | 0.03497 +- 0.00035 (10) | 0.03413 +- 0.00043 (10) |
@@ -24,14 +24,14 @@ Paired change of the test MAE of the first arm relative to the second (negative 
 
 | Target | Contrast | n | Change (mean, 95% CI) | first arm better in | Wilcoxon p | Holm p |
 |---|---|---|---|---|---|---|
-| HOPV15 PCE [\%] | hdf_noglobal vs. hdf | 10 | +6.3% [-6.0, +18.6] | 5/10 | 0.275 | 0.826 |
-| HOPV15 PCE [\%] | morgan_desc vs. morgan | 10 | -1.4% [-9.1, +6.3] | 5/10 | 1.000 | 1.000 |
-| HOPV15 PCE [\%] | morgan_desc vs. hdf | 10 | -7.3% [-20.0, +5.4] | 5/10 | 0.492 | 0.984 |
-| HOPV15 PCE [\%] | hdf_noglobal vs. morgan | 10 | +16.3% [-2.6, +35.1] | 2/10 | 0.131 | 0.523 |
-| HOPV15 $V_{oc}$ [V] | hdf_noglobal vs. hdf | 10 | -3.4% [-27.4, +20.7] | 7/10 | 0.322 | 0.322 |
-| HOPV15 $V_{oc}$ [V] | morgan_desc vs. morgan | 10 | +8.0% [+0.0, +16.0] | 3/10 | 0.049 | 0.098 |
-| HOPV15 $V_{oc}$ [V] | morgan_desc vs. hdf | 10 | -27.2% [-42.3, -12.2] | 9/10 | 0.004 | 0.016 |
-| HOPV15 $V_{oc}$ [V] | hdf_noglobal vs. morgan | 10 | +48.4% [+16.6, +80.2] | 1/10 | 0.010 | 0.029 |
+| HOPV15 PCE [\%] | hdf_noglobal vs. hdf | 10 | -7.7% [-19.3, +3.9] | 6/10 | 0.232 | 0.465 |
+| HOPV15 PCE [\%] | morgan_desc vs. morgan | 10 | -0.1% [-4.9, +4.7] | 5/10 | 0.846 | 0.846 |
+| HOPV15 PCE [\%] | morgan_desc vs. hdf | 10 | -15.9% [-24.9, -7.0] | 9/10 | 0.004 | 0.016 |
+| HOPV15 PCE [\%] | hdf_noglobal vs. morgan | 10 | +10.8% [-4.8, +26.3] | 2/10 | 0.131 | 0.393 |
+| HOPV15 $V_{oc}$ [V] | hdf_noglobal vs. hdf | 10 | +8.0% [-8.9, +25.0] | 4/10 | 0.492 | 0.984 |
+| HOPV15 $V_{oc}$ [V] | morgan_desc vs. morgan | 10 | +6.9% [-9.4, +23.1] | 6/10 | 0.846 | 0.984 |
+| HOPV15 $V_{oc}$ [V] | morgan_desc vs. hdf | 10 | +0.9% [-28.4, +30.2] | 8/10 | 0.232 | 0.697 |
+| HOPV15 $V_{oc}$ [V] | hdf_noglobal vs. morgan | 10 | +17.6% [+2.4, +32.9] | 1/10 | 0.027 | 0.109 |
 | FreeSolv $\Delta G$ [kcal/mol] | hdf_noglobal vs. hdf | 10 | -13.9% [-24.7, -3.1] | 9/10 | 0.006 | 0.012 |
 | FreeSolv $\Delta G$ [kcal/mol] | morgan_desc vs. morgan | 10 | +2.7% [-2.7, +8.0] | 3/10 | 0.432 | 0.432 |
 | FreeSolv $\Delta G$ [kcal/mol] | morgan_desc vs. hdf | 10 | +46.5% [+27.6, +65.3] | 0/10 | 0.002 | 0.008 |
@@ -48,10 +48,10 @@ Paired change of the test MAE of the first arm relative to the second (negative 
 | AqSolDB logS [log\,M] | morgan_desc vs. morgan | 10 | -8.1% [-9.8, -6.3] | 10/10 | 0.002 | 0.008 |
 | AqSolDB logS [log\,M] | morgan_desc vs. hdf | 10 | +14.8% [+12.3, +17.3] | 0/10 | 0.002 | 0.008 |
 | AqSolDB logS [log\,M] | hdf_noglobal vs. morgan | 10 | -8.3% [-11.2, -5.4] | 10/10 | 0.002 | 0.008 |
-| ClogP | hdf_noglobal vs. hdf | 10 | +144.9% [+137.1, +152.7] | 0/10 | 0.002 | 0.008 |
-| ClogP | morgan_desc vs. morgan | 10 | -24.2% [-25.8, -22.5] | 10/10 | 0.002 | 0.008 |
-| ClogP | morgan_desc vs. hdf | 10 | +147.0% [+138.1, +155.8] | 0/10 | 0.002 | 0.008 |
-| ClogP | hdf_noglobal vs. morgan | 10 | -24.7% [-27.3, -22.1] | 10/10 | 0.002 | 0.008 |
+| AqSolDB ClogP | hdf_noglobal vs. hdf | 10 | +136.6% [+127.1, +146.0] | 0/10 | 0.002 | 0.008 |
+| AqSolDB ClogP | morgan_desc vs. morgan | 10 | -25.3% [-27.2, -23.4] | 10/10 | 0.002 | 0.008 |
+| AqSolDB ClogP | morgan_desc vs. hdf | 10 | +125.6% [+116.9, +134.2] | 0/10 | 0.002 | 0.008 |
+| AqSolDB ClogP | hdf_noglobal vs. morgan | 10 | -21.6% [-24.3, -18.9] | 10/10 | 0.002 | 0.008 |
 | COMPAS-3X $U_0$ [eV] | hdf_noglobal vs. hdf | 10 | +1190.0% [+978.8, +1401.2] | 0/10 | 0.002 | 0.008 |
 | COMPAS-3X $U_0$ [eV] | morgan_desc vs. morgan | 10 | -97.3% [-97.4, -97.1] | 10/10 | 0.002 | 0.008 |
 | COMPAS-3X $U_0$ [eV] | morgan_desc vs. hdf | 10 | +219.2% [+187.0, +251.4] | 0/10 | 0.002 | 0.008 |

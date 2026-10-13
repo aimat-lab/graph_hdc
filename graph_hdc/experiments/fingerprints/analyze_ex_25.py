@@ -75,7 +75,7 @@ DATASET_OF = {ds[0]: ds[1] for ds in DATASETS}
 ROW_META = {
     **EX14_ROW_META,
     'hopv15_voc': ('HOPV15', '$V_{oc}$', 'V', 1.0),
-    'clogp': ('ClogP', 'ClogP', '', 1.0),
+    'clogp': ('AqSolDB', 'ClogP', '', 1.0),   # computed for the molecules of AqSolDB (mixin_clogp)
     'compas_energy': ('COMPAS-3X', '$U_0$', 'eV', 1.0),
     'compas_dipole': ('COMPAS-3X', r'$\mu$', 'D', 1.0),
     'qm9_dipole': ('QM9', r'$\mu$', 'D', 1.0),
