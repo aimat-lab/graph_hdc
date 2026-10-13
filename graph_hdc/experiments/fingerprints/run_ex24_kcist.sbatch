@@ -35,7 +35,7 @@
 #SBATCH --output=_ex24/slurm_%x_%A_%a.out
 
 set -uo pipefail
-EX24_STAGE="${EX24_STAGE:?set EX24_STAGE=featurize|encode|calibrate|run}"
+EX24_STAGE="${EX24_STAGE:?set EX24_STAGE=featurize|encode|objectives|calibrate|run}"
 REPO="${REPO:-$HOME/Programming/graph_hdc}"
 CODE="${CODE:-$HOME/Programming/graph_hdc_ex24}"
 VENV="${VENV:-$REPO/.venv}"
@@ -49,6 +49,7 @@ CALIBRATE_ARGS="${CALIBRATE_ARGS:-}"
 FEATURIZE_ARGS="${FEATURIZE_ARGS:-}"   # e.g. "--libraries beet"
 RUN_ARGS="${RUN_ARGS:-}"               # e.g. "--gpu-min-molecules 20000"
 ENCODE_ARGS="${ENCODE_ARGS:-}"         # e.g. "--campaigns 0-12" (one part of the codebooks per node)
+OBJECTIVES_ARGS="${OBJECTIVES_ARGS:-}" # e.g. "--objectives qm9_gap qm9_dipole"
 
 source "$VENV/bin/activate"
 export PYTHONPATH="$CODE"
@@ -72,6 +73,7 @@ python -c "import os, sys, graph_hdc; sys.exit(not os.path.realpath(graph_hdc.__
 case "$EX24_STAGE" in
     featurize) python bo_benchmark.py featurize --workers "$WORKERS" $FEATURIZE_ARGS ;;
     encode)    python bo_benchmark.py encode --workers "$WORKERS" --threads "$THREADS" $ENCODE_ARGS ;;
+    objectives) python bo_benchmark.py objectives $OBJECTIVES_ARGS ;;
     calibrate) python bo_benchmark.py calibrate --gpus "$GPUS" $CALIBRATE_ARGS ;;
     run)       python bo_benchmark.py run --workers "$WORKERS" --threads "$THREADS" --gpus "$GPUS" \
                    --shard "$SHARD" --num-shards "$NUM_SHARDS" $RUN_ARGS ;;

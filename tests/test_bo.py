@@ -156,6 +156,19 @@ def test_run_campaign_bookkeeping(method):
     assert np.array_equal(again['observed'], observed)
 
 
+@pytest.mark.parametrize('method', ['hdf_matern', 'random'])
+def test_run_campaign_respects_allowed_candidates(method):
+    _, continuous, objective = synthetic_library(num=80, seed=7)
+    allowed = np.zeros(80, dtype=bool)
+    allowed[::2] = True  # only the even molecules may be proposed (the optimum, molecule 0, is among them)
+    features = center_scale(continuous) if method != 'random' else None
+    result = run_campaign(method, objective, [2, 4, 6], num_rounds=50, seed=1, features=features, allowed=allowed)
+    assert allowed[result['observed']].all()
+    assert len(result['observed']) == 40  # 37 rounds until the 40 allowed molecules are used up
+    with pytest.raises(ValueError):
+        run_campaign(method, objective, [1, 2], num_rounds=5, seed=1, features=features, allowed=allowed)
+
+
 def test_run_campaign_stops_when_library_is_exhausted():
     bits, _, objective = synthetic_library(num=12)
     result = run_campaign('morgan_tanimoto', objective, [0, 1, 2], num_rounds=50, seed=0, features=bits)

@@ -229,6 +229,7 @@ def run_campaign(method: str,
                  features: Optional[np.ndarray] = None,
                  device: str = 'cpu',
                  chunk_size: int = 8192,
+                 allowed: Optional[np.ndarray] = None,
                  ) -> Dict[str, np.ndarray]:
     """
     Runs one BO campaign of ``method`` on a fixed library.
@@ -244,6 +245,8 @@ def run_campaign(method: str,
     :param device: Device of the acquisition step ("cpu" or "cuda:<i>"). The GP is always fitted on the CPU,
         because the fit of a few hundred points is latency-bound.
     :param chunk_size: Candidates per chunk of the acquisition step.
+    :param allowed: Optional boolean mask over the library: only these molecules can be observed (the initial
+        design must lie inside it). The others still define the input space but are never proposed.
 
     :returns: Dict with the observed library indices in order ("observed", initial ones first), the best
         objective value after the initial design and after every round ("best", length num_rounds + 1), the
@@ -261,7 +264,10 @@ def run_campaign(method: str,
     observed: List[int] = [int(i) for i in initial]
     if len(set(observed)) != len(observed):
         raise ValueError('the initial design contains duplicates')
-    num_rounds = min(num_rounds, num_molecules - len(observed))
+    allowed = np.ones(num_molecules, dtype=bool) if allowed is None else np.asarray(allowed, dtype=bool)
+    if not allowed[observed].all():
+        raise ValueError('the initial design contains molecules outside the allowed candidates')
+    num_rounds = min(num_rounds, int(allowed.sum()) - len(observed))
 
     best = [float(objective[observed].max())]
     fit_seconds, acq_seconds = [], []
@@ -269,7 +275,7 @@ def run_campaign(method: str,
     fit_failures = 0
 
     if method == 'random':
-        remaining = np.setdiff1d(np.arange(num_molecules), observed)
+        remaining = np.setdiff1d(np.flatnonzero(allowed), observed)
         for index in rng.permutation(remaining)[:num_rounds]:
             observed.append(int(index))
             best.append(max(best[-1], float(objective[index])))
@@ -280,8 +286,9 @@ def run_campaign(method: str,
         # The candidate matrix stays float32 on the acquisition device; the training data are float64 on the
         # CPU (BoTorch's recommendation for a stable GP fit).
         candidates = torch.as_tensor(np.asarray(features), dtype=torch.float32, device=device)
-        is_observed = torch.zeros(num_molecules, dtype=torch.bool, device=device)
-        is_observed[observed] = True
+        # molecules that cannot be proposed: the observed ones and those outside the allowed candidates
+        is_blocked = torch.as_tensor(~allowed, device=device)
+        is_blocked[observed] = True
         train_x = torch.as_tensor(np.asarray(features)[observed], dtype=torch.float64)
         train_y = torch.as_tensor(objective[observed], dtype=torch.float64).unsqueeze(-1)
 
@@ -299,14 +306,14 @@ def run_campaign(method: str,
 
             gp = gp.to(device)
             scores = log_ei_scores(gp, candidates, best_f=float(train_y.max()), chunk_size=chunk_size)
-            scores[is_observed] = -float('inf')
+            scores[is_blocked] = -float('inf')
             index = pick_best(scores, rng)
             if device.type == 'cuda':
                 torch.cuda.synchronize(device)
             time_acq = time.perf_counter()
 
             observed.append(index)
-            is_observed[index] = True
+            is_blocked[index] = True
             train_x = torch.cat([train_x, torch.as_tensor(np.asarray(features[index:index + 1]),
                                                           dtype=torch.float64)])
             train_y = torch.cat([train_y, torch.tensor([[objective[index]]], dtype=torch.float64)])

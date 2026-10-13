@@ -14,8 +14,11 @@ repeats the size sweep of ex_07 with a kernel that suits each representation and
                                  span 0.0015-3980 ug/bee, and on that scale 124 of 128 molecules lie at
                                  normalized regret >= 0.91 behind four outliers)
                   qm9_gap        minimal HOMO-LUMO gap on QM9 (DFT)
-                  qm9_dipole     maximal dipole moment on QM9 (DFT; one molecule at 29.6 D stretches the scale,
-                                 so hits at regret <= 0.05 mean finding that one molecule)
+                  qm9_dipole     maximal dipole moment on QM9 (DFT)
+                                 Both QM9 objectives search only the neutral molecules (user decision): the 1,705
+                                 zwitterions of QM9 (gas-phase DFT) hold all 100 largest dipoles (up to 29.6 D,
+                                 neutral molecules at most 9.4 D) and 69 of the 100 smallest gaps. They stay in
+                                 the library (input space, HDF statistics) but are never proposed.
                   melting_point  maximal melting point (open melting point dataset)
     methods       hdf_matern       HDF (standard configuration) + Matern-5/2
                   morgan_tanimoto  Morgan radius 2, binary, folded to D bits + Tanimoto
@@ -97,9 +100,9 @@ OBJECTIVES = {
     'beet': dict(library='beet', property='beet', mode='maximize', target=None, num_initial=10, num_rounds=40,
                  transform='log10'),
     'qm9_gap': dict(library='qm9_smiles', property='qm9_gap', mode='minimize', target=None,
-                    num_initial=20, num_rounds=150),
+                    num_initial=20, num_rounds=150, exclude_charged=True),
     'qm9_dipole': dict(library='qm9_smiles', property='qm9_dipole', mode='maximize', target=None,
-                       num_initial=20, num_rounds=150),
+                       num_initial=20, num_rounds=150, exclude_charged=True),
     'melting_point': dict(library='open_melting_point', property='melting_point', mode='maximize', target=None,
                           num_initial=20, num_rounds=150),
 }
@@ -288,11 +291,31 @@ def featurize(library: str, workers: int) -> None:
     with open(os.path.join(folder, 'meta.json'), 'w') as file:
         json.dump(meta, file, indent=2)
 
-    from graph_hdc.bo import objective_values
     properties = dict(zip(names, values.T))
     properties['clogp'] = clogp
+    write_objectives(library, smiles_list, properties)
+    log(f'{library}: done, {json.dumps({k: meta[k] for k in ("max_graph_size", "max_graph_diameter")})}')
+
+
+def charged_mask(smiles_list: List[str]) -> np.ndarray:
+    """True for every molecule with a formally charged atom (e.g. the zwitterions of QM9)."""
+    from rdkit import Chem
+    return np.array([any(atom.GetFormalCharge() != 0 for atom in Chem.MolFromSmiles(smiles).GetAtoms())
+                     for smiles in smiles_list])
+
+
+def write_objectives(library: str, smiles_list: List[str], properties: Dict[str, np.ndarray],
+                     only: Optional[List[str]] = None) -> None:
+    """
+    Writes ``data/objectives/<objective>.npz`` for the objectives of ``library`` (or the subset ``only``): the raw
+    property values, the objective values (to be maximized), the mask of molecules that may be proposed, the
+    initial designs of all campaigns (inside the mask) and the objective range over the mask (for the
+    normalized regret).
+    """
+    from graph_hdc.bo import objective_values
+    charged = None
     for objective, ospec in OBJECTIVES.items():
-        if ospec['library'] != library:
+        if ospec['library'] != library or (only is not None and objective not in only):
             continue
         prop = properties[ospec['property']]
         if ospec.get('transform') == 'log10':
@@ -300,18 +323,45 @@ def featurize(library: str, workers: int) -> None:
                 raise ValueError(f'{objective}: log10 transform of non-positive values')
             prop = np.log10(prop)
         objective_array = objective_values(prop, ospec['mode'], ospec['target'])
+        if ospec.get('exclude_charged'):
+            if charged is None:
+                charged = charged_mask(smiles_list)
+            allowed = ~charged
+            population = np.flatnonzero(allowed)
+        else:
+            allowed = np.ones(len(smiles_list), dtype=bool)
+            # an integer population (not the index array): keeps the initial designs of the first round exactly
+            population = len(smiles_list)
         initial = np.stack([
             np.random.default_rng([24, zlib.crc32(objective.encode()), k]).choice(
-                len(smiles_list), size=ospec['num_initial'], replace=False)
+                population, size=ospec['num_initial'], replace=False)
             for k in range(NUM_CAMPAIGNS)
         ])
+        allowed_objective = objective_array[allowed]
         np.savez(os.path.join(DATA, 'objectives', f'{objective}.npz'),
                  values=properties[ospec['property']], transform=ospec.get('transform') or 'none',
-                 objective=objective_array, initial=initial,
-                 objective_max=objective_array.max(), objective_min=objective_array.min())
-        log(f'{objective}: {len(smiles_list)} candidates, objective range [{objective_array.min():.4g}, '
-            f'{objective_array.max():.4g}], best molecule {smiles_list[int(objective_array.argmax())]}')
-    log(f'{library}: done, {json.dumps({k: meta[k] for k in ("max_graph_size", "max_graph_diameter")})}')
+                 objective=objective_array, initial=initial, allowed=allowed,
+                 objective_max=allowed_objective.max(), objective_min=allowed_objective.min())
+        best = int(np.flatnonzero(allowed)[allowed_objective.argmax()])
+        log(f'{objective}: {int(allowed.sum())} of {len(smiles_list)} molecules are candidates, objective range '
+            f'[{allowed_objective.min():.4g}, {allowed_objective.max():.4g}], best molecule {smiles_list[best]}')
+
+
+def rewrite_objectives(objectives: List[str]) -> None:
+    """
+    Rewrites the objective files of ``objectives`` from the stored library (SMILES in library.tsv) and the raw
+    property values in the existing objective files, without touching graphs or features, e.g. after a change
+    of the candidate mask while features are in use.
+    """
+    for library in sorted({OBJECTIVES[o]['library'] for o in objectives}):
+        with open(os.path.join(DATA, library, 'library.tsv')) as file:
+            smiles_list = [line.split('\t')[1] for line in file.read().splitlines()[1:]]
+        properties = {}
+        for objective, ospec in OBJECTIVES.items():
+            path = os.path.join(DATA, 'objectives', f'{objective}.npz')
+            if ospec['library'] == library and os.path.exists(path):
+                properties[ospec['property']] = np.load(path)['values']
+        write_objectives(library, smiles_list, properties, only=objectives)
 
 
 # == HDF ENCODING ==
@@ -536,6 +586,7 @@ def run_task(task: dict) -> dict:
     start = time.time()
     features = load_features(task['objective'], task['method'], task['size'], task['campaign'])
     time_features = time.time() - start
+    allowed = data['allowed'] if 'allowed' in data.files else None
     result = run_campaign(
         method=task['method'],
         objective=data['objective'],
@@ -544,6 +595,7 @@ def run_task(task: dict) -> dict:
         seed=campaign_seed(task['campaign']),
         features=features,
         device=device,
+        allowed=allowed,
     )
     meta = {
         **{k: task[k] for k in ('objective', 'method', 'size', 'campaign')},
@@ -551,6 +603,7 @@ def run_task(task: dict) -> dict:
         'campaign_seed': campaign_seed(task['campaign']),
         'num_initial': spec['num_initial'], 'num_rounds': spec['num_rounds'],
         'num_molecules': num_molecules,
+        'num_candidates': int(num_molecules if allowed is None else allowed.sum()),
         'objective_max': float(data['objective_max']), 'objective_min': float(data['objective_min']),
         'device': device, 'threads': _WORKER.get('threads'), 'host': socket.gethostname(),
         'git': _WORKER.setdefault('git', git_commit()), 'torch': torch.__version__,
@@ -773,6 +826,8 @@ def main(argv=None):
     p.add_argument('--campaigns', default=f'0-{NUM_CAMPAIGNS - 1}')
     p.add_argument('--workers', type=int, default=8)
     p.add_argument('--threads', type=int, default=1)
+    p = sub.add_parser('objectives')
+    p.add_argument('--objectives', nargs='+', required=True)
     p = sub.add_parser('tasks')
     p.add_argument('--objectives', nargs='+', default=None)
     p.add_argument('--sizes', nargs='+', type=int, default=None)
@@ -801,6 +856,8 @@ def main(argv=None):
             featurize(library, args.workers)
     elif args.stage == 'encode':
         encode(args.libraries, args.sizes, parse_campaigns(args.campaigns), args.workers, args.threads)
+    elif args.stage == 'objectives':
+        rewrite_objectives(args.objectives)
     elif args.stage == 'tasks':
         tasks = make_tasks(args.objectives, args.sizes,
                            parse_campaigns(args.campaigns) if args.campaigns else None)
