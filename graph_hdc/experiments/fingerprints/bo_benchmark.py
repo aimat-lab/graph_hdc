@@ -15,19 +15,22 @@ repeats the size sweep of ex_07 with a kernel that suits each representation and
                                  normalized regret >= 0.91 behind four outliers)
                   qm9_gap        minimal HOMO-LUMO gap on QM9 (DFT)
                   qm9_dipole     maximal dipole moment on QM9 (DFT)
-                                 Both QM9 objectives search only the neutral molecules (user decision): the 1,705
-                                 zwitterions of QM9 (gas-phase DFT) hold all 100 largest dipoles (up to 29.6 D,
-                                 neutral molecules at most 9.4 D) and 69 of the 100 smallest gaps. They stay in
-                                 the library (input space, HDF statistics) but are never proposed.
+                                 Both QM9 objectives never propose zwitterions (user decisions 2026-10-12/13, see
+                                 zwitterion_mask): molecules with a formal charge that no opposite charge on a
+                                 bonded atom compensates, and ylides with a charged carbon. In the gas-phase DFT of
+                                 QM9 they hold all 100 largest dipoles (up to 29.6 D) and most of the smallest
+                                 gaps. They stay in the library (input space, HDF statistics). Nitro compounds are
+                                 candidates (the first version excluded every molecule with a formal charge).
                   melting_point  maximal melting point (open melting point dataset)
     methods       hdf_matern       HDF (standard configuration) + Matern-5/2
                   morgan_tanimoto  Morgan radius 2, binary, folded to D bits + Tanimoto
                   morgan_pca       Morgan-2048 -> first D PCA components + Matern-5/2
                   random           random search
-                  hdf_linear       HDF + linear (cosine) kernel, every objective except qed (SI)
-    sizes         D = 8, 16, 32, 64, 128, 512, 1024 (the PCA needs more molecules than components: no
+                  hdf_linear       HDF + linear (cosine) kernel (SI; on qed since 2026-10-13)
+    sizes         D = 8, 16, 32, 64, 128, 256, 512, 1024 (the PCA needs more molecules than components: no
                   morgan_pca cell above num_molecules - 1 components)
-    campaigns     25 per (objective, method, size); campaign k shares its initial molecules across methods
+    campaigns     100 per (objective, method, size) (25 until 2026-10-13); campaign k shares its initial
+                  molecules across methods
                   and uses its own HDF codebook (seed 1000 + 100 k)
     budget        20 initial molecules + 150 rounds of one molecule; freesolv 20 + 80; beet 10 + 40. The
                   acquisition scores the whole library in every round, also on ZINC250k.
@@ -37,6 +40,8 @@ file (or to $EX24_ROOT): ``data/<library>/`` holds the cleaned library and its f
 the objective values and initial designs, ``runs/`` one result file per campaign. Stages:
 
     python bo_benchmark.py featurize [--libraries ...] [--workers N]
+    python bo_benchmark.py morgan [--libraries ...] [--sizes ...] [--workers N]
+    python bo_benchmark.py objectives --objectives ...
     python bo_benchmark.py encode [--libraries ...] [--sizes ...] [--campaigns ...] [--workers N]
     python bo_benchmark.py tasks
     python bo_benchmark.py run --workers W --threads T [--gpus G] [--shard i --num-shards n]
@@ -66,8 +71,10 @@ ROOT = os.environ.get('EX24_ROOT', os.path.join(PATH, '_ex24'))
 DATA = os.path.join(ROOT, 'data')
 RUNS = os.path.join(ROOT, 'runs')
 
-SIZES = [8, 16, 32, 64, 128, 512, 1024]
-NUM_CAMPAIGNS = 25
+SIZES = [8, 16, 32, 64, 128, 256, 512, 1024]
+# 25 campaigns until 2026-10-13, then 100 (user). Campaign k keeps its initial design and codebook seed, so the
+# first 25 campaigns stay valid.
+NUM_CAMPAIGNS = 100
 HDF_DEPTH = 2
 MORGAN_RADIUS = 2
 PCA_SOURCE_BITS = 2048
@@ -100,9 +107,9 @@ OBJECTIVES = {
     'beet': dict(library='beet', property='beet', mode='maximize', target=None, num_initial=10, num_rounds=40,
                  transform='log10'),
     'qm9_gap': dict(library='qm9_smiles', property='qm9_gap', mode='minimize', target=None,
-                    num_initial=20, num_rounds=150, exclude_charged=True),
+                    num_initial=20, num_rounds=150, exclude_zwitterions=True),
     'qm9_dipole': dict(library='qm9_smiles', property='qm9_dipole', mode='maximize', target=None,
-                       num_initial=20, num_rounds=150, exclude_charged=True),
+                       num_initial=20, num_rounds=150, exclude_zwitterions=True),
     'melting_point': dict(library='open_melting_point', property='melting_point', mode='maximize', target=None,
                           num_initial=20, num_rounds=150),
 }
@@ -111,11 +118,8 @@ GP_METHODS = ['hdf_matern', 'morgan_tanimoto', 'morgan_pca', 'hdf_linear']
 
 
 def methods_for(objective: str) -> List[str]:
-    """The methods of an objective: the linear-kernel HDF runs on every objective except ZINC250k (user)."""
-    methods = ['hdf_matern', 'morgan_tanimoto', 'morgan_pca', 'random']
-    if OBJECTIVES[objective]['library'] != 'zinc250k':
-        methods.append('hdf_linear')
-    return methods
+    """The methods of an objective: all of them (the linear-kernel HDF skipped ZINC250k until 2026-10-13)."""
+    return ['hdf_matern', 'morgan_tanimoto', 'morgan_pca', 'random', 'hdf_linear']
 
 
 def hdf_seed(campaign: int) -> int:
@@ -199,6 +203,51 @@ def _featurize_molecule(smiles: str):
     graph.pop('graph_labels', None)
     bits = {size: generator.GetFingerprintAsNumPy(mol).astype(np.uint8) for size, generator in _GENERATORS.items()}
     return graph, bits, Crippen.MolLogP(mol)
+
+
+_MORGAN_GENERATORS = {}
+
+
+def _morgan_bits(smiles: str, sizes: List[int]) -> Dict[int, np.ndarray]:
+    """Worker of ``add_morgan``: the Morgan bits of ``sizes`` with the generator settings of ``featurize``."""
+    from rdkit import Chem, RDLogger
+    from rdkit.Chem import rdFingerprintGenerator
+    RDLogger.DisableLog('rdApp.*')
+    for size in sizes:
+        if size not in _MORGAN_GENERATORS:
+            _MORGAN_GENERATORS[size] = rdFingerprintGenerator.GetMorganGenerator(radius=MORGAN_RADIUS, fpSize=size)
+    mol = Chem.MolFromSmiles(smiles)
+    return {size: _MORGAN_GENERATORS[size].GetFingerprintAsNumPy(mol).astype(np.uint8) for size in sizes}
+
+
+def add_morgan(library: str, sizes: List[int], workers: int) -> None:
+    """
+    Adds the Morgan fingerprints of the ``sizes`` that a featurized library does not have yet (D=256 since
+    2026-10-13), from the stereo-free canonical SMILES in library.tsv, the strings that ``featurize`` computed its
+    bits from. Graphs, PCA and objectives stay untouched, so finished campaigns stay valid. The explained variance
+    of the PCA at the new sizes goes into meta.json.
+    """
+    folder = os.path.join(DATA, library)
+    missing = [s for s in sizes if not os.path.exists(os.path.join(folder, f'morgan_{s}.npy'))]
+    if not missing:
+        log(f'{library}: Morgan bits of sizes {sizes} exist')
+        return
+    with open(os.path.join(folder, 'library.tsv')) as file:
+        smiles_list = [line.split('\t')[1] for line in file.read().splitlines()[1:]]
+    set_thread_env(1)
+    with mp.get_context('spawn').Pool(workers) as pool:
+        bits = pool.starmap(_morgan_bits, [(smiles, missing) for smiles in smiles_list], chunksize=500)
+    for size in missing:
+        save_npy(os.path.join(folder, f'morgan_{size}.npy'), np.stack([b[size] for b in bits]))
+    meta = library_meta(library)
+    explained = np.load(os.path.join(folder, 'pca_explained.npy'))
+    for size in missing:
+        if size <= meta['pca_components']:
+            meta['pca_explained_by_size'][str(size)] = float(explained[:size].sum())
+    meta['pca_explained_by_size'] = dict(sorted(meta['pca_explained_by_size'].items(), key=lambda kv: int(kv[0])))
+    with open(os.path.join(folder, 'meta.json'), 'w') as file:
+        json.dump(meta, file, indent=2)
+    log(f'{library}: Morgan bits of sizes {missing} for {len(smiles_list)} molecules')
 
 
 def _parse_value(value) -> float:
@@ -303,11 +352,44 @@ def featurize(library: str, workers: int) -> None:
     log(f'{library}: done, {json.dumps({k: meta[k] for k in ("max_graph_size", "max_graph_diameter")})}')
 
 
-def charged_mask(smiles_list: List[str]) -> np.ndarray:
-    """True for every molecule with a formally charged atom (e.g. the zwitterions of QM9)."""
+def zwitterion_mask(smiles_list: List[str]) -> np.ndarray:
+    """
+    True for every zwitterion or ion: a molecule with a formal charge that no opposite charge on a bonded atom
+    compensates (e.g. an ammonium and a carboxylate group), or with a charged carbon atom. The latter are ylides
+    such as [NH3+][c-] or [C-]-[NH+]=, 28 molecules of QM9, of which 16 have larger gas-phase dipoles than any
+    neutral molecule (up to 12.2 D against 9.4 D). Charges that cancel within a bond between nitrogen and oxygen
+    or nitrogen, as in nitro groups, are not masked: 139 nitro compounds and 7 aromatic N+-N- rings of QM9, none of
+    them beyond the extremes of the neutral molecules (QM9: 1,698 masked of 133,795). The bonded pairs come from a
+    maximum matching between the positively and the negatively charged atoms (Kuhn's augmenting paths), so the order of
+    the bonds does not matter. Atoms with a charge other than +1 or -1 count as uncompensated.
+    """
     from rdkit import Chem
-    return np.array([any(atom.GetFormalCharge() != 0 for atom in Chem.MolFromSmiles(smiles).GetAtoms())
-                     for smiles in smiles_list])
+    mask = np.zeros(len(smiles_list), dtype=bool)
+    for i, smiles in enumerate(smiles_list):
+        mol = Chem.MolFromSmiles(smiles)
+        charges = {atom.GetIdx(): atom.GetFormalCharge() for atom in mol.GetAtoms() if atom.GetFormalCharge() != 0}
+        if not charges:
+            continue
+        if any(abs(charge) != 1 or mol.GetAtomWithIdx(idx).GetSymbol() == 'C' for idx, charge in charges.items()):
+            mask[i] = True
+            continue
+        negatives = {idx for idx, charge in charges.items() if charge < 0}
+        neighbours = {idx: [n.GetIdx() for n in mol.GetAtomWithIdx(idx).GetNeighbors() if n.GetIdx() in negatives]
+                      for idx, charge in charges.items() if charge > 0}
+        partner = {}
+
+        def augment(positive: int, seen: set) -> bool:
+            for negative in neighbours[positive]:
+                if negative not in seen:
+                    seen.add(negative)
+                    if negative not in partner or augment(partner[negative], seen):
+                        partner[negative] = positive
+                        return True
+            return False
+
+        matched = sum(augment(positive, set()) for positive in neighbours)
+        mask[i] = 2 * matched < len(charges)
+    return mask
 
 
 def write_objectives(library: str, smiles_list: List[str], properties: Dict[str, np.ndarray],
@@ -319,7 +401,7 @@ def write_objectives(library: str, smiles_list: List[str], properties: Dict[str,
     normalized regret).
     """
     from graph_hdc.bo import objective_values
-    charged = None
+    zwitterions = None
     for objective, ospec in OBJECTIVES.items():
         if ospec['library'] != library or (only is not None and objective not in only):
             continue
@@ -329,10 +411,10 @@ def write_objectives(library: str, smiles_list: List[str], properties: Dict[str,
                 raise ValueError(f'{objective}: log10 transform of non-positive values')
             prop = np.log10(prop)
         objective_array = objective_values(prop, ospec['mode'], ospec['target'])
-        if ospec.get('exclude_charged'):
-            if charged is None:
-                charged = charged_mask(smiles_list)
-            allowed = ~charged
+        if ospec.get('exclude_zwitterions'):
+            if zwitterions is None:
+                zwitterions = zwitterion_mask(smiles_list)
+            allowed = ~zwitterions
             population = np.flatnonzero(allowed)
         else:
             allowed = np.ones(len(smiles_list), dtype=bool)
@@ -856,6 +938,10 @@ def main(argv=None):
     p = sub.add_parser('featurize')
     p.add_argument('--libraries', nargs='+', default=list(LIBRARIES))
     p.add_argument('--workers', type=int, default=8)
+    p = sub.add_parser('morgan')
+    p.add_argument('--libraries', nargs='+', default=list(LIBRARIES))
+    p.add_argument('--sizes', nargs='+', type=int, default=SIZES)
+    p.add_argument('--workers', type=int, default=8)
     p = sub.add_parser('encode')
     p.add_argument('--libraries', nargs='+', default=list(LIBRARIES))
     p.add_argument('--sizes', nargs='+', type=int, default=SIZES)
@@ -890,6 +976,9 @@ def main(argv=None):
     if args.stage == 'featurize':
         for library in args.libraries:
             featurize(library, args.workers)
+    elif args.stage == 'morgan':
+        for library in args.libraries:
+            add_morgan(library, args.sizes, args.workers)
     elif args.stage == 'encode':
         encode(args.libraries, args.sizes, parse_campaigns(args.campaigns), args.workers, args.threads)
     elif args.stage == 'objectives':

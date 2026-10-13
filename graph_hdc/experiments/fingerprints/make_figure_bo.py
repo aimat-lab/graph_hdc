@@ -37,7 +37,7 @@ PATH = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.environ.get('EX24_ROOT', os.path.join(PATH, '_ex24'))
 
 SIZES = [8, 16, 32, 64, 128, 256, 512, 1024]
-SI_SIZES = [8, 32, 128, 512]
+SI_SIZES = [8, 32, 128, 512, 1024]   # every second size plus the largest (user, 2026-10-13)
 PROGRESSION_SIZES = [16, 1024]
 # box order within a size: Morgan variants left, HDF right (as in the original figure)
 MAIN_METHODS = ['morgan_tanimoto', 'hdf_matern']

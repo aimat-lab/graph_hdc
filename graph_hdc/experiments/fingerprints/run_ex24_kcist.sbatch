@@ -3,6 +3,8 @@
 # nodes: 64 CPU, 4x RTX 4090, 478 GB). One stage per job (EX24_STAGE):
 #
 #   featurize  clean the libraries, Morgan bits, PCA, objectives, initial designs (CPU only)
+#   morgan     add Morgan bits of new sizes to featurized libraries, nothing else changes (CPU only)
+#   objectives rewrite objective files, e.g. initial designs for more campaigns or a new mask (CPU only)
 #   encode     HDF embeddings of every library, size and campaign codebook (CPU only)
 #   calibrate  per-round timings and node throughput for several worker counts (CPU + GPU)
 #   run        BO campaigns of one shard of _ex24/tasks.jsonl (CPU + GPU acquisition for ZINC250k). Submit as
@@ -35,7 +37,7 @@
 #SBATCH --output=_ex24/slurm_%x_%A_%a.out
 
 set -uo pipefail
-EX24_STAGE="${EX24_STAGE:?set EX24_STAGE=featurize|encode|objectives|calibrate|run}"
+EX24_STAGE="${EX24_STAGE:?set EX24_STAGE=featurize|morgan|encode|objectives|calibrate|run}"
 REPO="${REPO:-$HOME/Programming/graph_hdc}"
 CODE="${CODE:-$HOME/Programming/graph_hdc_ex24}"
 VENV="${VENV:-$REPO/.venv}"
@@ -50,6 +52,7 @@ FEATURIZE_ARGS="${FEATURIZE_ARGS:-}"   # e.g. "--libraries beet"
 RUN_ARGS="${RUN_ARGS:-}"               # e.g. "--gpu-min-molecules 20000"
 ENCODE_ARGS="${ENCODE_ARGS:-}"         # e.g. "--campaigns 0-12" (one part of the codebooks per node)
 OBJECTIVES_ARGS="${OBJECTIVES_ARGS:-}" # e.g. "--objectives qm9_gap qm9_dipole"
+MORGAN_ARGS="${MORGAN_ARGS:-}"         # e.g. "--sizes 256"
 
 source "$VENV/bin/activate"
 export PYTHONPATH="$CODE"
@@ -72,6 +75,7 @@ python -c "import os, sys, graph_hdc; sys.exit(not os.path.realpath(graph_hdc.__
 
 case "$EX24_STAGE" in
     featurize) python bo_benchmark.py featurize --workers "$WORKERS" $FEATURIZE_ARGS ;;
+    morgan)    python bo_benchmark.py morgan --workers "$WORKERS" $MORGAN_ARGS ;;
     encode)    python bo_benchmark.py encode --workers "$WORKERS" --threads "$THREADS" $ENCODE_ARGS ;;
     objectives) python bo_benchmark.py objectives $OBJECTIVES_ARGS ;;
     calibrate) python bo_benchmark.py calibrate --gpus "$GPUS" $CALIBRATE_ARGS ;;

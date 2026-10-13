@@ -2,7 +2,7 @@
 LaTeX tables of the Bayesian optimization benchmark ex_24 for the Supplementary Information.
 
 - ``bo_hdf_linear.tex``: median regret AUC of HDF with the linear (cosine) kernel next to the Matern kernel of
-  the main comparison, per objective and embedding size (all objectives except QED on ZINC250k).
+  the main comparison, per objective and embedding size (QED included since the rerun of 2026-10-13).
 - ``bo_runtime.tex``: median wall-clock seconds of a complete campaign on ZINC250k (QED objective), per
   representation and embedding size.
 
@@ -17,9 +17,9 @@ import pandas as pd
 
 PATH = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.environ.get('EX24_ROOT', os.path.join(PATH, '_ex24'))
-SIZES = [8, 16, 32, 64, 128, 512, 1024]
+SIZES = [8, 16, 32, 64, 128, 256, 512, 1024]
 OBJECTIVES = [
-    ('clogp', 'ClogP'), ('solubility', 'Solubility'), ('lipophilicity', 'Lipophilicity'),
+    ('clogp', 'ClogP'), ('qed', 'QED'), ('solubility', 'Solubility'), ('lipophilicity', 'Lipophilicity'),
     ('freesolv', 'Hydration free energy'), ('beet', 'Bee toxicity'), ('qm9_gap', 'HOMO--LUMO gap'),
     ('qm9_dipole', 'Dipole moment'), ('melting_point', 'Melting point'),
 ]
@@ -30,7 +30,7 @@ RUNTIME_METHODS = [('morgan_tanimoto', 'Morgan FP (Tanimoto)'), ('morgan_pca', '
 def hdf_linear_table(df: pd.DataFrame) -> str:
     medians = df[df.method.isin(['hdf_linear', 'hdf_matern'])].groupby(['objective', 'method', 'size']).auc.median()
     lines = [
-        '\\begin{tabular}{llrrrrrrr}',
+        '\\begin{tabular}{ll' + 'r' * len(SIZES) + '}',
         '\\toprule',
         '\\textbf{Objective} & \\textbf{Kernel} & ' + ' & '.join(f'\\textbf{{{s}}}' for s in SIZES) + ' \\\\',
         '\\midrule',
