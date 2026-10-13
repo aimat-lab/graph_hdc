@@ -171,7 +171,7 @@ def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods
     ax.axhline(random_median, color=COLORS['random'], ls='--', lw=0.9, zorder=1)
     # the axis starts at zero unless all values lie far above it; then it starts just below the data, so that
     # the boxes fill the panel. Below the data, a strip holds the significance brackets.
-    base = 0.0 if low < 0.3 * high else low - 0.06 * (high - low)
+    base = 0.0 if low < 0.15 * high else low - 0.06 * (high - low)
     top = high + 0.05 * (high - base)
     span = top - base
     for i, size in enumerate(sizes):
