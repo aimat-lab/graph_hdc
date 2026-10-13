@@ -51,10 +51,12 @@ DATASET_PARAM_TUPLES: dict[str, dict] = [
     ('freesolv', {'TARGET_INDEX': 0, 'DATASET_NAME': 'freesolv', 'DATASET_TYPE': 'regression', 'NOTE': 'freesolv_hfe'}),
     ('lipophilicity', {'TARGET_INDEX': 0, 'DATASET_NAME': 'lipophilicity', 'DATASET_TYPE': 'regression', 'NOTE': 'lipophilicity_logD'}),
     ('bace_reg', {'TARGET_INDEX': 0, 'DATASET_NAME': 'bace_reg', 'DATASET_TYPE': 'regression', 'NOTE': 'bace_ic50'}),
-    ('hopv15_exp', {'TARGET_INDEX': 2, 'DATASET_NAME': 'hopv15_exp', 'DATASET_TYPE': 'regression', 'NOTE': 'hopv15_gap'}),
-    ('hopv15_exp', {'TARGET_INDEX': 3, 'DATASET_NAME': 'hopv15_exp', 'DATASET_TYPE': 'regression', 'NOTE': 'hopv15_jsc'}),
-    ('hopv15_exp', {'TARGET_INDEX': 4, 'DATASET_NAME': 'hopv15_exp', 'DATASET_TYPE': 'regression', 'NOTE': 'hopv15_voc'}),
-    ('hopv15_exp', {'TARGET_INDEX': 5, 'DATASET_NAME': 'hopv15_exp', 'DATASET_TYPE': 'regression', 'NOTE': 'hopv15_pce'}),
+    # HOPV15 label columns: 0 Voc, 1 Jsc, 2 fill factor, 3 PCE, 4 / 5 band gaps (see _slurm_ex_13.DATASETS). The indices
+    # were 2 / 3 / 4 / 5 until 2026-10-13, so the archives of this experiment with "voc" and "pce" predicted band gaps.
+    ('hopv15_exp', {'TARGET_INDEX': 4, 'DATASET_NAME': 'hopv15_exp', 'DATASET_TYPE': 'regression', 'NOTE': 'hopv15_gap'}),
+    ('hopv15_exp', {'TARGET_INDEX': 1, 'DATASET_NAME': 'hopv15_exp', 'DATASET_TYPE': 'regression', 'NOTE': 'hopv15_jsc'}),
+    ('hopv15_exp', {'TARGET_INDEX': 0, 'DATASET_NAME': 'hopv15_exp', 'DATASET_TYPE': 'regression', 'NOTE': 'hopv15_voc'}),
+    ('hopv15_exp', {'TARGET_INDEX': 3, 'DATASET_NAME': 'hopv15_exp', 'DATASET_TYPE': 'regression', 'NOTE': 'hopv15_pce'}),
     ('compas', {'TARGET_INDEX': 3, 'NOTE': 'compas_dipole'}),
     ('compas', {'TARGET_INDEX': 2, 'NOTE': 'compas_gap'}),
     ('compas', {'TARGET_INDEX': 4, 'NOTE': 'compas_energy'}),

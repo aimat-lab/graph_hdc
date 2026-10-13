@@ -66,7 +66,7 @@ import sys
 import glob
 import json
 
-from _slurm_ex_13 import DATASETS as TABLE1_DATASETS
+from _slurm_ex_13 import DATASETS as TABLE1_DATASETS, target_matches
 from _slurm_ex_14 import (DATASETS as EX14_DATASETS, VARIANTS, HDF_ROUND, DOWNSTREAM, _command, params_of_line,
                           hdf_cache_name)
 from _slurm_ex_19 import REPRESENTATIONS as EX19_REPRESENTATIONS
@@ -210,8 +210,18 @@ def identity_of_line(line: str) -> tuple:
     return arm_of_params(module, params), params['NOTE'], params['SEED']
 
 
+def labels_valid(note: str, data: dict) -> bool:
+    """
+    Whether the archive data of a run of this target come from the corrected label pipeline where that matters: the
+    ClogP labels of mixin_clogp are standardized only since 2026-10-13 ("labels/scaled_after_hooks", see
+    predict_molecules.py); before, the scaler was fitted on the logS labels of AqSolDB.
+    """
+    uses_mixin = any(ds[0] == note and ds[3].get('__INCLUDE__') == 'mixin_clogp.py' for ds in DATASETS)
+    return not uses_mixin or bool(data.get('labels', {}).get('scaled_after_hooks'))
+
+
 def completed(prefix: str) -> set:
-    """(arm, NOTE, SEED) of every completed (status 'done', no error) archive of the prefix."""
+    """(arm, NOTE, SEED) of every completed (status 'done', no error) archive of the prefix with the current target."""
     done = set()
     for module in ('hdc', 'fp'):
         for meta_path in glob.glob(os.path.join(PATH, 'results', f'predict_molecules__{module}', '*',
@@ -221,8 +231,17 @@ def completed(prefix: str) -> set:
             except Exception:
                 continue
             params = {k: v.get('value') for k, v in meta.get('parameters', {}).items() if isinstance(v, dict)}
-            if params.get('__PREFIX__') == prefix and meta.get('status') == 'done' and not meta.get('has_error'):
-                done.add((arm_of_params(module, params), params.get('NOTE'), params.get('SEED')))
+            if params.get('__PREFIX__') != prefix or meta.get('status') != 'done' or meta.get('has_error') \
+                    or not target_matches(params):
+                continue
+            if params.get('NOTE') == 'clogp':
+                try:
+                    data = json.load(open(meta_path.replace('experiment_meta.json', 'experiment_data.json')))
+                except Exception:
+                    continue
+                if not labels_valid('clogp', data):
+                    continue
+            done.add((arm_of_params(module, params), params.get('NOTE'), params.get('SEED')))
     return done
 
 

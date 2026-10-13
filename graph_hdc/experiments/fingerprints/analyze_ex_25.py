@@ -48,7 +48,8 @@ import numpy as np
 from scipy.stats import wilcoxon, t as t_dist
 
 from analyze_ex_14 import holm, HARTREE_EV, ROW_META as EX14_ROW_META
-from _slurm_ex_25 import TABLE1_NOTES, EX14_NOTES, MLP, DATASETS, arm_of_params
+from _slurm_ex_13 import target_matches
+from _slurm_ex_25 import TABLE1_NOTES, EX14_NOTES, MLP, DATASETS, arm_of_params, labels_valid
 
 PATH = os.path.dirname(os.path.abspath(__file__))
 RESULTS = os.path.join(PATH, 'results')
@@ -67,12 +68,10 @@ DATASET_OF = {ds[0]: ds[1] for ds in DATASETS}
 
 # Table rows in the order of Table 1: dataset name, quantity, unit and the factor that converts the raw MAE into that
 # unit, as in the SI tables of ex_14 (QM9 energies are in hartree, the gaps and the ZPVE given in millihartree, the
-# COMPAS-3X energies are in eV). Two caveats inherited from Table 1:
-# * ClogP is computed by mixin_clogp after the labels of AqSolDB have been standardized, so its MAE, like in Table 1,
-#   is multiplied by the standard deviation of logS in the training split (about 2.3).
-# * The HOPV15 targets of Table 1 (TARGET_INDEX 5 "PCE" and 4 "Voc") are two band gaps in eV: in the labels of
-#   hopv15_exp, columns 0-3 are Voc, Jsc, FF and PCE (column 3 = column 0 x 1 x 2 / 100) and columns 4 and 5 range from
-#   1.1 to 3.3. The labels below follow Table 1 until the paper is corrected.
+# COMPAS-3X energies are in eV). Two corrections of 2026-10-13 decide which archives count (see collect): the HOPV15
+# targets use the real PCE and Voc columns (target_matches; the earlier indices were two band gaps), and the ClogP
+# labels are standardized after mixin_clogp has set them ("labels/scaled_after_hooks"; before, the scaler was fitted
+# on logS and the reported ClogP errors were the true ones times the standard deviation of logS, about 2.3).
 ROW_META = {
     **EX14_ROW_META,
     'hopv15_voc': ('HOPV15', '$V_{oc}$', 'V', 1.0),
@@ -144,7 +143,7 @@ def collect(prefix: str) -> dict:
         source = params['__PREFIX__']
         arm = arm_of_params(module, params)
         note = params.get('NOTE')
-        if arm is None or note not in TABLE1_NOTES or not mlp_matches(params):
+        if arm is None or note not in TABLE1_NOTES or not mlp_matches(params) or not target_matches(params):
             continue
         if source != prefix and not (note in EX14_NOTES and arm == ('hdf' if source == HDF_PREFIX else 'morgan')):
             continue
@@ -152,6 +151,8 @@ def collect(prefix: str) -> dict:
             data = json.load(open(os.path.join(folder, 'experiment_data.json')))
         except Exception as error:
             print(f'skipping unreadable archive {folder}: {error}')
+            continue
+        if not labels_valid(note, data):
             continue
         metric = data.get('metrics', {}).get('test_neural_net2')
         if metric is None:

@@ -62,6 +62,8 @@ import sys
 import glob
 import json
 
+from _slurm_ex_13 import target_matches
+
 PATH = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(PATH, '_ex14')
 
@@ -79,7 +81,8 @@ DATASETS = [
     ('aqsoldb_logs',       'aqsoldb',      None, {}, False),
     ('lipophilicity_logD', 'lipophilicity', 0,   {}, False),
     ('bace_ic50',          'bace_reg',     0,    {}, False),
-    ('hopv15_pce',         'hopv15_exp',   5,    {}, False),
+    # the real PCE (column 3) since 2026-10-13; index 5, used before, is a band gap (see _slurm_ex_13.DATASETS)
+    ('hopv15_pce',         'hopv15_exp',   3,    {}, False),
     ('compas_gap',         'compas_3x',    2,    {}, True),
     ('qm9_gap',            'qm9_smiles',   7,    {}, True),
     ('qm9_energy',         'qm9_smiles',   10,   {}, True),
@@ -133,8 +136,12 @@ HDF_ROUND = {'SPECTRUM': 'unit'}
 
 
 def is_current(module: str, params: dict) -> bool:
-    """Whether a run of ``predict_molecules__<module>`` with these parameters belongs to the current round."""
-    return all(params.get(key) == value for key, value in CURRENT.get(module, {}).items())
+    """
+    Whether a run of ``predict_molecules__<module>`` with these parameters belongs to the current round and predicted
+    the current target of its NOTE (the HOPV15 indices were corrected on 2026-10-13, see _slurm_ex_13.DATASETS).
+    """
+    return (all(params.get(key) == value for key, value in CURRENT.get(module, {}).items())
+            and target_matches(params))
 
 
 def params_of_line(line: str) -> dict:

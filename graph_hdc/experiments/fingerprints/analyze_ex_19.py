@@ -30,6 +30,7 @@ import numpy as np
 
 import analyze_ex_14
 from analyze_ex_14 import table
+from _slurm_ex_13 import target_matches
 
 PATH = os.path.dirname(os.path.abspath(__file__))
 RESULTS = os.path.join(PATH, 'results')
@@ -56,6 +57,9 @@ def collect_fingerprints(prefix: str):
             params = {k: v.get('value') for k, v in meta.get('parameters', {}).items() if isinstance(v, dict)}
             # a killed or timed-out run keeps status 'running' (and has_error False), so require 'done'
             if params.get('__PREFIX__') != prefix or meta.get('status') != 'done' or meta.get('has_error'):
+                continue
+            # the HOPV15 runs from before the correction of the target indices (2026-10-13) predicted a band gap
+            if not target_matches(params):
                 continue
             archives.append((meta.get('start_time') or 0, module, params, os.path.dirname(meta_path)))
 

@@ -46,16 +46,21 @@ HPO_BIG_NUM_DATA = 0.1          # subsample the big datasets during HPO only
 #   note          -> grouping key used by analyze_ex_13 (must be unique)
 #   DATASET_NAME  -> drives the load/featurization cache key (clogp shares aqsoldb's molecules)
 #   big           -> subsample during HPO, route to GPU during the table eval
+# HOPV15 (hopv15_exp): the label columns are 0 Voc (V), 1 Jsc (mA/cm2), 2 fill factor (%), 3 PCE (%) (= column 0 x 1
+# x 2 / 100) and 4 / 5 two band gaps in eV, most likely the optical and the electrochemical gap (the dataset metadata
+# names the six columns HOMO, LUMO, gap, JSC, VOC, PCE, which do not match the values). Until 2026-10-13 the HOPV15
+# targets used the indices of those names (gap 2, jsc 3, voc 4, pce 5), so the archives of that time with "voc" and
+# "pce" in fact predicted the two band gaps; analyses must skip archives whose TARGET_INDEX differs from this list.
 DATASETS = [
     ('aqsoldb_logs',       'aqsoldb',      None, {}, False),
     ('clogp',              'aqsoldb',      None, {'__INCLUDE__': 'mixin_clogp.py'}, False),
     ('freesolv_hfe',       'freesolv',     0,    {}, False),
     ('lipophilicity_logD', 'lipophilicity',0,    {}, False),
     ('bace_ic50',          'bace_reg',     0,    {}, False),
-    ('hopv15_gap',         'hopv15_exp',   2,    {}, False),
-    ('hopv15_jsc',         'hopv15_exp',   3,    {}, False),
-    ('hopv15_voc',         'hopv15_exp',   4,    {}, False),
-    ('hopv15_pce',         'hopv15_exp',   5,    {}, False),
+    ('hopv15_gap',         'hopv15_exp',   4,    {}, False),
+    ('hopv15_jsc',         'hopv15_exp',   1,    {}, False),
+    ('hopv15_voc',         'hopv15_exp',   0,    {}, False),
+    ('hopv15_pce',         'hopv15_exp',   3,    {}, False),
     ('compas_dipole',      'compas_3x',    3,    {}, True),
     ('compas_gap',         'compas_3x',    2,    {}, True),
     ('compas_energy',      'compas_3x',    4,    {}, True),
@@ -67,6 +72,16 @@ DATASETS = [
     ('qm9_enthalpy',       'qm9_smiles',   12,   {}, True),
     ('qm9_cv',             'qm9_smiles',   14,   {}, True),
 ]
+
+
+def target_matches(params: dict) -> bool:
+    """
+    Whether a run used the TARGET_INDEX that DATASETS defines for its NOTE (always True for notes that are not in
+    DATASETS). Analyses use it to skip the archives with the HOPV15 indices from before 2026-10-13 (see above).
+    """
+    expected = {note: index for note, _, index, _, _ in DATASETS}
+    note = params.get('NOTE')
+    return note not in expected or params.get('TARGET_INDEX') == expected[note]
 
 # representation -> (encoding module suffix, featurization grid)
 REPS = {

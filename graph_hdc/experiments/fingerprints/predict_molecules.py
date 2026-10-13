@@ -1320,10 +1320,26 @@ def experiment(e: Experiment):
         np.savez_compressed(npz_path, indices=indices, smiles=smiles, labels=labels, features=features)
         e.log(f'💾 saved dataset as NPZ @ {npz_path}')
         
+    # :hook after_dataset:
+    #       An action hook that is called after the dataset has been loaded and processed. This hook
+    #       presents the opportunity to perform additional processing on the dataset before training
+    #       the models. It may also replace the labels (mixin_clogp sets the ClogP values here), which is why the
+    #       labels are only standardized afterwards.
+    e.apply_hook(
+        'after_dataset',
+        index_data_map=index_data_map,
+        train_indices=train_indices,
+        val_indices=val_indices,
+        test_indices=test_indices,
+    )
+
     ## --- dataset scaling ---
-    # For regression datasets we want to apply a standard scaler to the labels so it is easier for 
-    # the simple models to learn later on.
-    
+    # For regression datasets we want to apply a standard scaler to the labels so it is easier for
+    # the simple models to learn later on. Until 2026-10-13 the scaler was fitted before the after_dataset hook, so
+    # for ClogP (mixin_clogp) it was fitted on the logS labels of AqSolDB while the models were trained on the raw
+    # ClogP values, and the reported ClogP errors were the true ones times the standard deviation of logS in the
+    # training split. "labels/scaled_after_hooks" marks the archives with the corrected order.
+
     scaler = None
     if e.DATASET_TYPE == 'regression':
         e.log('scaling the regression labels...')
@@ -1334,23 +1350,14 @@ def experiment(e: Experiment):
 
         for index in index_data_map:
             index_data_map[index]['graph_labels'] = scaler.transform(index_data_map[index]['graph_labels'].reshape(1, -1)).flatten()
-    
+
         scaler_path = os.path.join(e.path, 'standard_scaler.joblib')
         joblib.dump(scaler, scaler_path)
         e.log(f'💾 saved standard scaler as joblib @ {scaler_path}')
-    
-    # :hook after_dataset:
-    #       An action hook that is called after the dataset has been loaded and processed. This hook
-    #       presents the opportunity to perform additional processing on the dataset before training
-    #       the models.
-    e.apply_hook(
-        'after_dataset',
-        index_data_map=index_data_map,
-        train_indices=train_indices,
-        val_indices=val_indices,
-        test_indices=test_indices,
-    )
-    
+        e['labels/scaler_mean'] = scaler.mean_.tolist()
+        e['labels/scaler_scale'] = scaler.scale_.tolist()
+    e['labels/scaled_after_hooks'] = True
+
     example_graph = index_data_map[train_indices[0]]
     e.log(f'example graph'
           f' - num_nodes: {len(example_graph["node_indices"])}'
