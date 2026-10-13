@@ -64,8 +64,10 @@ HDF_DEPTH = 2
 MORGAN_RADIUS = 2
 PCA_SOURCE_BITS = 2048
 PCA_COMPONENTS = max(SIZES)
-# Libraries with more molecules than this run their acquisition on a GPU (if the worker has one).
-GPU_MIN_MOLECULES = 20000
+# Libraries with more molecules than this run their acquisition on a GPU (if the worker has one). The KCIST
+# calibration (2026-10-12) measured about 0.01 s per acquisition on an RTX 4090 for AqSolDB (8,574 molecules)
+# at every size, against 0.04-0.38 s on one CPU core; FreeSolv and BEET are too small to gain anything.
+GPU_MIN_MOLECULES = 2000
 
 # name -> chem_mat_data dataset, SMILES column and the property columns used as objectives
 LIBRARIES = {
@@ -394,7 +396,7 @@ def estimated_cost(task: dict, num_molecules: int) -> float:
     rounds = OBJECTIVES[task['objective']]['num_rounds']
     scan = num_molecules * task['size'] / 2e7
     if num_molecules > GPU_MIN_MOLECULES:
-        scan /= 20.0  # GPU acquisition
+        scan /= 20.0  # GPU acquisition (only the order of the task list depends on this)
     return rounds * (0.5 + scan)
 
 

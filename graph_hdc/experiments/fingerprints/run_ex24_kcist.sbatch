@@ -19,7 +19,9 @@
 #     (each encode worker holds the PyG graphs of the library, ~5 GB for ZINC250k: keep WORKERS at about 32)
 #   EX24_STAGE=calibrate sbatch --job-name=ex24cal --dependency=afterok:<enc> --time=03:00:00 run_ex24_kcist.sbatch
 #   python bo_benchmark.py tasks          # on the login node, after featurize
-#   EX24_STAGE=run WORKERS=64 THREADS=1 sbatch --job-name=ex24run --array=0-3 run_ex24_kcist.sbatch
+#   EX24_STAGE=run WORKERS=32 THREADS=1 sbatch --job-name=ex24run --array=0-1 run_ex24_kcist.sbatch
+#     (the calibration of 2026-10-12: 32 workers x 1 thread per node, one per physical core, give the highest
+#      throughput; 64 workers bring nothing on the 32-core nodes, 2 threads per worker are slower)
 #
 # Every result file is written atomically and finished campaigns are skipped, so a killed or timed-out run is
 # resumed by submitting the same stage again (python bo_benchmark.py status shows what is missing).
@@ -45,6 +47,7 @@ SHARD="${SLURM_ARRAY_TASK_ID:-0}"
 NUM_SHARDS="${SLURM_ARRAY_TASK_COUNT:-1}"
 CALIBRATE_ARGS="${CALIBRATE_ARGS:-}"
 FEATURIZE_ARGS="${FEATURIZE_ARGS:-}"   # e.g. "--libraries beet"
+RUN_ARGS="${RUN_ARGS:-}"               # e.g. "--gpu-min-molecules 20000"
 
 source "$VENV/bin/activate"
 export PYTHONPATH="$CODE"
@@ -70,7 +73,7 @@ case "$EX24_STAGE" in
     encode)    python bo_benchmark.py encode --workers "$WORKERS" --threads "$THREADS" ;;
     calibrate) python bo_benchmark.py calibrate --gpus "$GPUS" $CALIBRATE_ARGS ;;
     run)       python bo_benchmark.py run --workers "$WORKERS" --threads "$THREADS" --gpus "$GPUS" \
-                   --shard "$SHARD" --num-shards "$NUM_SHARDS" ;;
+                   --shard "$SHARD" --num-shards "$NUM_SHARDS" $RUN_ARGS ;;
     *)         echo "!!! unknown EX24_STAGE=$EX24_STAGE"; exit 2 ;;
 esac
 RC=$?
