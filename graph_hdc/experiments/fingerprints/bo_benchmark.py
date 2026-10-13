@@ -454,10 +454,12 @@ def verify_objectives(objectives: List[str], backup: str) -> None:
         old = np.load(old_path)
         new = np.load(os.path.join(DATA, 'objectives', f'{objective}.npz'))
         n = len(old['initial'])
+        # files written before the QM9 mask (2026-10-13) have no mask: every molecule is a candidate (as in run_task)
+        old_allowed = old['allowed'] if 'allowed' in old.files else np.ones(len(old['objective']), dtype=bool)
         same = {
             'values': np.array_equal(old['values'], new['values'], equal_nan=True),
             'objective': np.array_equal(old['objective'], new['objective']),
-            'allowed': np.array_equal(old['allowed'], new['allowed']),
+            'allowed': np.array_equal(old_allowed, new['allowed']),
             'range': float(old['objective_max']) == float(new['objective_max'])
             and float(old['objective_min']) == float(new['objective_min']),
             f'initial[:{n}]': np.array_equal(old['initial'], new['initial'][:n]),
