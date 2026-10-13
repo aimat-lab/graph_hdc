@@ -593,16 +593,32 @@ def run_task(task: dict) -> dict:
     features = load_features(task['objective'], task['method'], task['size'], task['campaign'])
     time_features = time.time() - start
     allowed = data['allowed'] if 'allowed' in data.files else None
-    result = run_campaign(
-        method=task['method'],
-        objective=data['objective'],
-        initial=data['initial'][task['campaign']],
-        num_rounds=spec['num_rounds'],
-        seed=campaign_seed(task['campaign']),
-        features=features,
-        device=device,
-        allowed=allowed,
-    )
+    oom_retries = 0
+    while True:
+        try:
+            result = run_campaign(
+                method=task['method'],
+                objective=data['objective'],
+                initial=data['initial'][task['campaign']],
+                num_rounds=spec['num_rounds'],
+                seed=campaign_seed(task['campaign']),
+                features=features,
+                device=device,
+                allowed=allowed,
+            )
+            break
+        except torch.OutOfMemoryError:
+            # Several workers share each GPU, and the largest libraries at the largest sizes (about 1 GB of
+            # candidates each) can exhaust its memory when they run at the same time. Free the cached memory,
+            # wait for the others and try again; the last attempt runs on the CPU. The campaign is seeded, so a
+            # retry repeats it exactly (up to the device).
+            oom_retries += 1
+            torch.cuda.empty_cache()
+            if oom_retries > 3:
+                raise
+            if oom_retries == 3:
+                device = 'cpu'
+            time.sleep(30 * oom_retries)
     meta = {
         **{k: task[k] for k in ('objective', 'method', 'size', 'campaign')},
         'hdf_seed': hdf_seed(task['campaign']) if task['method'].startswith('hdf') else None,
@@ -611,7 +627,8 @@ def run_task(task: dict) -> dict:
         'num_molecules': num_molecules,
         'num_candidates': int(num_molecules if allowed is None else allowed.sum()),
         'objective_max': float(data['objective_max']), 'objective_min': float(data['objective_min']),
-        'device': device, 'threads': _WORKER.get('threads'), 'host': socket.gethostname(),
+        'device': device, 'oom_retries': oom_retries, 'threads': _WORKER.get('threads'),
+        'host': socket.gethostname(),
         'git': _WORKER.setdefault('git', git_commit()), 'torch': torch.__version__,
         'botorch': botorch.__version__, 'gpytorch': gpytorch.__version__,
         'seconds_features': time_features, 'seconds_total': time.time() - start,
