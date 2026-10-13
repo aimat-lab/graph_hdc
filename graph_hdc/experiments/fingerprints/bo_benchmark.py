@@ -652,6 +652,10 @@ def run(workers: int, threads: int, gpus: int, shard: int, num_shards: int, limi
     tasks = [t for t in tasks if not os.path.exists(result_path(t))]
     if limit is not None:
         tasks = tasks[:limit]
+    # Alternate expensive and cheap campaigns (the list is sorted by cost). Starting with only the largest
+    # libraries at the largest sizes would put about 1 GB of candidates per worker on every GPU at once; the mix
+    # keeps the GPU memory and the load of cores and GPUs even.
+    tasks = [tasks[i // 2] if i % 2 == 0 else tasks[len(tasks) - 1 - i // 2] for i in range(len(tasks))]
     log(f'shard {shard}/{num_shards}: {len(tasks)} open campaigns, {workers} workers x {threads} threads, '
         f'{gpus} GPUs, host {socket.gethostname()}, code {git_commit()}')
     if not tasks:
@@ -678,11 +682,20 @@ def run(workers: int, threads: int, gpus: int, shard: int, num_shards: int, limi
 
 
 def _run_task_safe(task: dict) -> dict:
+    import gc
     import traceback
+    import torch
     try:
         return run_task(task)
     except Exception as error:
         return {**task, 'status': 'error', 'error': f'{error!r}\n{traceback.format_exc()}'}
+    finally:
+        # Give the GPU memory of the finished campaign back to the device. Several workers share each GPU, and
+        # memory that PyTorch keeps cached for finished campaigns would otherwise fill it up, so that the next
+        # large campaign of any worker fails with CUDA out-of-memory.
+        if torch.cuda.is_available() and torch.cuda.is_initialized():
+            gc.collect()
+            torch.cuda.empty_cache()
 
 
 # == CALIBRATION ==
