@@ -1,3 +1,4 @@
+import gc
 import os
 import time
 import copy
@@ -420,11 +421,14 @@ class TorchKNNRegressor:
     exactly the same distance, the one that comes first in the training data is chosen. Binary fingerprints of small
     molecules often have several neighbors at the same Tanimoto distance (26 of 63 FreeSolv test molecules have a tie
     between their 5th and 6th neighbor), so the MAE can differ slightly from sklearn's, whose choice among ties is
-    arbitrary. Similarities are computed in float64; the tie-breaking offset (1e-13 per training position) is far
-    below the smallest difference between two Tanimoto similarities of fingerprints with up to 4096 bits (~6e-8).
+    arbitrary. Similarities are computed in float64 (for bit vectors the Tanimoto similarity is a ratio of exact
+    integer counts, so CPU and GPU agree exactly), and the neighbors are the first k entries of a stable descending
+    sort of the similarities, which keeps tied entries in the training order. The queries are processed in batches
+    of ``batch_size``; a batch needs about four batch_size x n_train float64 matrices of device memory besides the
+    training matrix (QM9: 0.25 GB each for 256 queries).
     """
 
-    def __init__(self, n_neighbors: int = 5, metric: str = 'minkowski', batch_size: int = 1024):
+    def __init__(self, n_neighbors: int = 5, metric: str = 'minkowski', batch_size: int = 256):
         if metric not in ('minkowski', 'euclidean', 'cosine', 'jaccard'):
             raise ValueError(f'TorchKNNRegressor does not support the metric "{metric}"')
         self.n_neighbors = n_neighbors
@@ -433,16 +437,18 @@ class TorchKNNRegressor:
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> 'TorchKNNRegressor':
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.X = torch.tensor(np.asarray(X), dtype=torch.float64, device=self.device)
+        X = np.asarray(X, dtype=np.float64)
         if self.metric == 'jaccard':
-            self.X = (self.X != 0).double()
+            X = (X != 0).astype(np.float64)
+        self.X = torch.tensor(X, device=self.device)
+        if self.metric == 'jaccard':
             self.counts = self.X.sum(dim=1)
         elif self.metric == 'cosine':
-            self.X = torch.nn.functional.normalize(self.X, dim=1)
+            # in place, otherwise as torch.nn.functional.normalize (x / max(||x||, 1e-12))
+            self.X.div_(self.X.norm(dim=1, keepdim=True).clamp_min(1e-12))
         self.y = torch.tensor(np.asarray(y), dtype=torch.float64, device=self.device)
         if self.y.dim() == 1:
             self.y = self.y[:, None]
-        self.tiebreak = torch.arange(len(self.X), dtype=torch.float64, device=self.device) * 1e-13
         return self
 
     def similarity(self, query: torch.Tensor) -> torch.Tensor:
@@ -451,9 +457,13 @@ class TorchKNNRegressor:
         if self.metric == 'jaccard':
             query = (query != 0).double()
             intersection = query @ self.X.T
-            union = query.sum(dim=1, keepdim=True) + self.counts[None, :] - intersection
+            union = self.counts[None, :] - intersection
+            union += query.sum(dim=1, keepdim=True)
             # two empty fingerprints have Jaccard distance 0 (as in scipy)
-            return torch.where(union > 0, intersection / union.clamp(min=1), torch.ones_like(intersection))
+            empty = union == 0
+            similarity = intersection.div_(union.clamp_(min=1))
+            similarity[empty] = 1.0
+            return similarity
         if self.metric == 'cosine':
             return torch.nn.functional.normalize(query, dim=1) @ self.X.T
         return -torch.cdist(query, self.X)
@@ -464,8 +474,8 @@ class TorchKNNRegressor:
         with torch.no_grad():
             for start in range(0, len(X), self.batch_size):
                 query = torch.tensor(X[start:start + self.batch_size], dtype=torch.float64, device=self.device)
-                neighbors = (self.similarity(query) - self.tiebreak[None, :]).topk(self.n_neighbors, dim=1).indices
-                out.append(self.y[neighbors].mean(dim=1))
+                order = torch.sort(self.similarity(query), dim=1, descending=True, stable=True).indices
+                out.append(self.y[order[:, :self.n_neighbors]].mean(dim=1))
         return torch.cat(out).cpu().numpy()
 
 
@@ -984,19 +994,22 @@ def train_model__neural_net2(e: Experiment,
         loader_kwargs['prefetch_factor'] = 2
         loader_kwargs['persistent_workers'] = True
 
+    device_datasets = []
     if e.NN_DEVICE_DATA:
         # The data as tensors on the training device, indexed one whole batch at a time. The samplers are those that
         # the DataLoaders below build internally (RandomSampler / SequentialSampler in a BatchSampler of 64), so the
         # batches come in the same order, drawn from the same seeded global generator.
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        device_datasets = [DeviceBatchDataset(index_data_map, train_indices, device),
+                           DeviceBatchDataset(index_data_map, val_indices_, device)]
         train_loader = torch.utils.data.DataLoader(
-            DeviceBatchDataset(index_data_map, train_indices, device),
+            device_datasets[0],
             batch_size=None,
             sampler=torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(train_indices))),
                                                   batch_size=64, drop_last=True),
         )
         val_loader = torch.utils.data.DataLoader(
-            DeviceBatchDataset(index_data_map, val_indices_, device),
+            device_datasets[1],
             batch_size=None,
             sampler=torch.utils.data.BatchSampler(torch.utils.data.SequentialSampler(range(len(val_indices_))),
                                                   batch_size=64, drop_last=False),
@@ -1071,6 +1084,11 @@ def train_model__neural_net2(e: Experiment,
     )
     # the device the network was trained on ('cpu' or 'cuda:0'), e.g. to tell GPU from CPU runs apart (ex_27)
     e['nn/device'] = str(trainer.strategy.root_device)
+    # The model and the trainer reference each other and keep the data loaders alive until the garbage collector
+    # runs; release the device copies of the data now (the next target of TARGET_INDICES or another run on the same
+    # GPU needs the memory).
+    for dataset in device_datasets:
+        dataset.features = dataset.labels = None
     # important: After the training is done, we need to put the model into evaluation
     # mode to ensure it uses the running statistics for the batch norm.
     model.eval()
@@ -1536,6 +1554,13 @@ def experiment(e: Experiment):
                     scaler=scaler,
                 )
 
+            # Release the device memory of the model (the torch KNN keeps its training matrix there) before the next
+            # model or target: several runs share a GPU, and the caching allocator holds freed memory otherwise.
+            del model
+            if torch.cuda.is_available():
+                gc.collect()
+                torch.cuda.empty_cache()
+
     e['labels/scaled_after_hooks'] = True
     example_graph = index_data_map[train_indices[0]]
     e.log(f'example graph'
@@ -1547,14 +1572,19 @@ def experiment(e: Experiment):
         scale_train_evaluate()
     else:
         # a hook that set the labels itself (e.g. mixin_clogp) would be overwritten below
-        if any(index_data_map[i]['graph_labels'].shape != index_data_map[i]['graph_labels_all'].shape
-               for i in train_indices[:10]):
+        if any(not np.array_equal(graph['graph_labels'], graph['graph_labels_all'], equal_nan=True)
+               for graph in index_data_map.values()):
             raise ValueError('a hook changed the labels; TARGET_INDICES cannot be combined with it')
         for target in e.TARGET_INDICES:
             e.log(f'\n=== target {target} ===')
             for graph in index_data_map.values():
                 graph['graph_labels'] = graph['graph_labels_all'][target:target + 1].copy()
             scale_train_evaluate(f'__t{target}')
+
+    # peak device memory of the run, for packing several runs onto one GPU (ex_27)
+    if torch.cuda.is_available():
+        e['gpu/max_memory_allocated'] = torch.cuda.max_memory_allocated()
+        e['gpu/max_memory_reserved'] = torch.cuda.max_memory_reserved()
 
     # ~ comparison of models
     

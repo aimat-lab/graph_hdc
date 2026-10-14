@@ -26,16 +26,19 @@ options reproduce the earlier code exactly (NN_DEVICE_DATA, TARGET_INDICES) or u
 Stages, with their files in ``_ex27/`` (``run_ex27.sbatch`` runs a stage on one Booster node: the warmup file first,
 as a barrier, then the GPU file and the CPU file side by side):
 
-* ``check`` (prefix ex_27_check): FreeSolv, AqSolDB and the QM9 gap; HDF and Morgan; seeds 0-2; three variants:
+* ``check`` (prefix ex_27_check): FreeSolv, AqSolDB and the QM9 gap; HDF and Morgan; seeds 0-2; four variants:
     ``cpu``         the data path of the earlier tables (NN_DEVICE_DATA off) on the CPU (the runner hides the GPUs);
                     KNN with the torch backend on the CPU
+    ``cpu_prod``    (prefix ex_27_cpuprod) the production code path on the CPU: NN_DEVICE_DATA, and for QM9 the gap as
+                    the one target of a TARGET_INDICES run. It must reproduce the cpu variant exactly, so that the
+                    differences between gpu and cpu come from the GPU arithmetic alone.
     ``gpu``         the production configuration on a GPU; QM9 with all seven targets in one run (TARGET_INDICES),
-                    which also gives the run time of a production QM9 run
+                    which also gives the run time and the GPU memory of a production QM9 run
     ``cpu_nnseed``  the cpu variant with another network seed (NN_SEED = SEED + 100), MLP only: the run-to-run
                     variation of the training, against which the differences between cpu and gpu are judged
   The same job runs the smoke test of the fixed stage (prefix ex_27_smoke): seed 0 of the production commands of the
   small groups HOPV15 (two targets in one run), FreeSolv and ClogP (mixin_clogp), all five methods, on the GPUs.
-  Files: check_warmup.txt, check_gpu.txt (gpu variant + smoke), check_cpu.txt (cpu and cpu_nnseed variants)
+  Files: check_warmup.txt, check_gpu.txt (gpu variant + smoke), check_cpu.txt (the three CPU variants)
 * ``fixed`` (prefix ex_27_fixed): 8 dataset groups x 5 methods x 10 seeds = 400 runs, all on the GPUs.
   Files: fixed_warmup.txt, fixed_gpu.txt (longest first)
 
@@ -67,6 +70,7 @@ OUT = os.path.join(PATH, '_ex27')
 
 PREFIX_WARMUP = 'ex_27_warmup'
 PREFIX_CHECK = 'ex_27_check'
+PREFIX_CPUPROD = 'ex_27_cpuprod'
 PREFIX_SMOKE = 'ex_27_smoke'
 PREFIX_FIXED = 'ex_27_fixed'
 SEEDS = list(range(10))
@@ -127,11 +131,11 @@ def group_of_note(note: str) -> str:
     return next(group for group, _, notes, _ in GROUPS if note in notes)
 
 
-def _command(module: str, prefix: str, seed: int, group: str, notes: list, params: dict) -> str:
+def _command(module: str, prefix: str, seed: int, group: str, notes: list, params: dict, multi: bool = None) -> str:
     """
     One ``python predict_molecules__<module>.py --K="repr(v)" ...`` line (the format of ex_13 / ex_14) for the given
     targets of a group: a single target as in the earlier experiments (NOTE = its note, TARGET_INDEX), several as one
-    run with TARGET_INDICES (NOTE = the group).
+    run with TARGET_INDICES (NOTE = the group). ``multi`` forces the TARGET_INDICES form for a single target.
     """
     name, group_notes, extra = GROUP[group]
     assert notes and all(note in group_notes for note in notes)
@@ -140,7 +144,8 @@ def _command(module: str, prefix: str, seed: int, group: str, notes: list, param
         'NUM_TEST': 0.1, 'NUM_TRAIN': 1.0, 'NUM_DATA': 1.0,
         'DATASET_NAME': name, 'DATASET_TYPE': 'regression', 'NN_NUM_WORKERS': 0,
     }
-    if len(notes) == 1:
+    if not (len(notes) > 1 if multi is None else multi):
+        assert len(notes) == 1
         full['NOTE'] = notes[0]
         if TARGET_INDEX[notes[0]] is not None:
             full['TARGET_INDEX'] = TARGET_INDEX[notes[0]]
@@ -192,7 +197,9 @@ def method_of_params(module: str, params: dict):
 
 
 def check_variant(params: dict) -> str:
-    """The variant of a check run: 'gpu', 'cpu' or 'cpu_nnseed'."""
+    """The variant of a check run: 'cpu_prod' (prefix ex_27_cpuprod), 'gpu', 'cpu' or 'cpu_nnseed'."""
+    if params.get('__PREFIX__') == PREFIX_CPUPROD:
+        return 'cpu_prod'
     if params.get('NN_DEVICE_DATA'):
         return 'gpu'
     return 'cpu_nnseed' if params.get('NN_SEED') is not None else 'cpu'
@@ -208,12 +215,13 @@ def check_commands() -> tuple:
                 module, feat, metric = METHOD[method]
                 cpu_params = {**feat, **MLP, **KNN, 'MODELS': ['neural_net2', 'k_neighbors'], 'KN_METRIC': metric,
                               'NN_DEVICE_DATA': False}
+                production = {**feat, **PRODUCTION, 'KN_METRIC': metric}
                 cpu.append(_command(module, PREFIX_CHECK, seed, group, [note], cpu_params))
                 cpu.append(_command(module, PREFIX_CHECK, seed, group, [note],
                                     {**cpu_params, 'MODELS': ['neural_net2'], 'NN_SEED': seed + NN_SEED_OFFSET}))
+                cpu.append(_command(module, PREFIX_CPUPROD, seed, group, [note], production, multi=group == 'qm9'))
                 notes = GROUP[group][1] if group == 'qm9' else [note]
-                gpu.append(_command(module, PREFIX_CHECK, seed, group, notes,
-                                    {**feat, **PRODUCTION, 'KN_METRIC': metric}))
+                gpu.append(_command(module, PREFIX_CHECK, seed, group, notes, production))
     # the QM9 runs first: they take longest
     gpu.sort(key=lambda line: -expected_cost(group_of_note_line(line)))
     cpu.sort(key=lambda line: -expected_cost(group_of_note_line(line)))

@@ -39,6 +39,10 @@ module load parallel 2>/dev/null || true
 source "$CODE/.venv/bin/activate"
 cd "$FP" || exit 2
 export PYTHONWARNINGS=ignore
+# pycomex decompresses every cache it reads into a temporary file (the HDF encoding of QM9: several GB per run);
+# put them on the scratch file system instead of the node's /tmp
+export TMPDIR="${SCRATCH:-/tmp}/tmp/ex27_${SLURM_JOB_ID}"
+mkdir -p "$TMPDIR"
 
 # pycomex creates the namespace folder of a module non-atomically; create them up front (see run_ex13.sbatch)
 mkdir -p results/predict_molecules__fp results/predict_molecules__hdc
@@ -70,6 +74,7 @@ run_cpu "$WARMUP_FILE"
 failed=$?
 if [ "$failed" -ne 0 ]; then
     echo "FATAL: $failed warmup run(s) failed; delete their (possibly truncated) hdc_* cache files before a new attempt"
+    rm -rf "$TMPDIR"
     exit 3
 fi
 run_gpu "$GPU_FILE" &
@@ -78,4 +83,5 @@ run_cpu "$CPU_FILE"
 echo "CPU pool: $? failed run(s) $(date)"
 wait "$gpu_pid"
 echo "GPU pool: $? failed run(s) $(date)"
+rm -rf "$TMPDIR"
 echo "=== ex27 stage=$STAGE DONE $(date) ==="
