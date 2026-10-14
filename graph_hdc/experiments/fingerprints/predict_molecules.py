@@ -1069,10 +1069,12 @@ def train_model__neural_net2(e: Experiment,
         train_dataloaders=train_loader,
         val_dataloaders=val_loader,
     )
-    # important: After the training is done, we need to put the model into evaluation 
+    # the device the network was trained on ('cpu' or 'cuda:0'), e.g. to tell GPU from CPU runs apart (ex_27)
+    e['nn/device'] = str(trainer.strategy.root_device)
+    # important: After the training is done, we need to put the model into evaluation
     # mode to ensure it uses the running statistics for the batch norm.
     model.eval()
-    
+
     return model
     
 
