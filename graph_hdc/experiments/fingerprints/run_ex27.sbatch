@@ -23,7 +23,7 @@
 
 set -uo pipefail
 # not "STAGE": loading the Stages/... module sets an environment variable of that name
-RUN_STAGE="${EX27_STAGE:?set EX27_STAGE=check|fixed|opt|opteval}"
+RUN_STAGE="${EX27_STAGE:?set EX27_STAGE=check|fixed|opt|opteval|envtest}"
 GPU_J="${GPU_J:-32}"
 CPU_J="${CPU_J:-64}"
 CPU_THREADS="${CPU_THREADS:-4}"
@@ -35,13 +35,15 @@ PRIMER_FILE="$OUT/${PRIMER_FILE:-${RUN_STAGE}_primer.txt}"
 WARMUP_FILE="$OUT/${WARMUP_FILE:-${RUN_STAGE}_warmup.txt}"
 GPU_FILE="$OUT/${GPU_FILE:-${RUN_STAGE}_gpu.txt}"
 CPU_FILE="$OUT/${CPU_FILE:-${RUN_STAGE}_cpu.txt}"
-if [ ! -s "$GPU_FILE" ] && [ ! -s "$CPU_FILE" ]; then
+if [ "$RUN_STAGE" != envtest ] && [ ! -s "$GPU_FILE" ] && [ ! -s "$CPU_FILE" ]; then
     echo "FATAL: no command files for stage $RUN_STAGE ($GPU_FILE, $CPU_FILE)"
     exit 4
 fi
 
 jutil env activate -p aimatchem
 module load Stages/2025 GCCcore/.13.3.0 Python/3.12.3
+# the compute nodes have no X11 libraries, which RDKit's drawing extension (imported by chem_mat_data) links against
+module load X11
 module load parallel 2>/dev/null || true
 source "$CODE/.venv/bin/activate"
 cd "$FP" || exit 2
@@ -64,10 +66,13 @@ mkdir -p results/predict_molecules__fp results/predict_molecules__hdc
 echo "=== ex27 stage=$RUN_STAGE host=$(hostname) commit=$(cat "$OUT/deployed_commit.txt" 2>/dev/null) $(date) ==="
 nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv
 python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.is_available(), torch.cuda.device_count())"
-python -c "from chem_mat_data.main import load_graph_dataset; from chem_mat_data.processing import MoleculeProcessing; \
-import graph_hdc, rdkit, pycomex, optuna, pytorch_lightning; print('imports ok')" \
-    || { echo "FATAL: the Python environment cannot import the packages of the experiments"; exit 5; }
+# import the experiment modules themselves (everything their runs import at startup), before the first run
+python check_imports_ex27.py || { echo "FATAL: the experiment modules cannot be imported on this node"; exit 5; }
 command -v parallel >/dev/null || { echo "FATAL: GNU parallel not available"; exit 1; }
+if [ "$RUN_STAGE" = envtest ]; then
+    echo "=== ex27 envtest: environment ok $(date) ==="
+    exit 0
+fi
 
 run_cpu() {  # $1 = command file; returns the number of failed runs (0 = all succeeded)
     [ -s "$1" ] || { echo "(skip: empty or missing $1)"; return 0; }
