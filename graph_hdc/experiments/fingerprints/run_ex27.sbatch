@@ -5,7 +5,7 @@
 #   GPU pool: GPU_J slots over the 4 GPUs, slot s on GPU (s - 1) mod 4, so that several small MLPs share a GPU.
 #   CPU pool: CPU_J slots with CPU_THREADS threads each and the GPUs hidden.
 # Environment:
-#     EX27_STAGE=check|fixed      (required; selects _ex27/<stage>_warmup.txt, <stage>_gpu.txt, <stage>_cpu.txt)
+#     EX27_STAGE=check|fixed|opt|opteval   (required; selects _ex27/<stage>_warmup.txt, <stage>_gpu.txt, <stage>_cpu.txt)
 #     WARMUP_FILE / GPU_FILE / CPU_FILE   (optional overrides, relative to _ex27/)
 #     GPU_J (default 32), CPU_J (default 64), CPU_THREADS (default 4), MEMFREE (default 20G)
 # Example (from the fingerprints folder of the ex_27 worktree, after python _slurm_ex_27.py):
@@ -21,7 +21,8 @@
 #SBATCH --error=/e/project1/aimatchem/teufel1/graph_hdc_ex27/graph_hdc/experiments/fingerprints/_ex27/slurm_%x_%j.out
 
 set -uo pipefail
-STAGE="${EX27_STAGE:?set EX27_STAGE=check|fixed}"
+# not "STAGE": loading the Stages/... module sets an environment variable of that name
+RUN_STAGE="${EX27_STAGE:?set EX27_STAGE=check|fixed|opt|opteval}"
 GPU_J="${GPU_J:-32}"
 CPU_J="${CPU_J:-64}"
 CPU_THREADS="${CPU_THREADS:-4}"
@@ -29,9 +30,13 @@ MEMFREE="${MEMFREE:-20G}"   # GNU parallel starts a run only while this much RAM
 CODE=/e/project1/aimatchem/teufel1/graph_hdc_ex27
 FP="$CODE/graph_hdc/experiments/fingerprints"
 OUT="$FP/_ex27"
-WARMUP_FILE="$OUT/${WARMUP_FILE:-${STAGE}_warmup.txt}"
-GPU_FILE="$OUT/${GPU_FILE:-${STAGE}_gpu.txt}"
-CPU_FILE="$OUT/${CPU_FILE:-${STAGE}_cpu.txt}"
+WARMUP_FILE="$OUT/${WARMUP_FILE:-${RUN_STAGE}_warmup.txt}"
+GPU_FILE="$OUT/${GPU_FILE:-${RUN_STAGE}_gpu.txt}"
+CPU_FILE="$OUT/${CPU_FILE:-${RUN_STAGE}_cpu.txt}"
+if [ ! -s "$GPU_FILE" ] && [ ! -s "$CPU_FILE" ]; then
+    echo "FATAL: no command files for stage $RUN_STAGE ($GPU_FILE, $CPU_FILE)"
+    exit 4
+fi
 
 jutil env activate -p aimatchem
 module load Stages/2025 GCCcore/.13.3.0 Python/3.12.3
@@ -47,7 +52,8 @@ mkdir -p "$TMPDIR"
 # pycomex creates the namespace folder of a module non-atomically; create them up front (see run_ex13.sbatch)
 mkdir -p results/predict_molecules__fp results/predict_molecules__hdc
 
-echo "=== ex27 stage=$STAGE host=$(hostname) commit=$(git -C "$CODE" log -1 --format=%h) $(date) ==="
+# the compute nodes have no git: the deploy script records the commit
+echo "=== ex27 stage=$RUN_STAGE host=$(hostname) commit=$(cat "$OUT/deployed_commit.txt" 2>/dev/null) $(date) ==="
 nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv
 python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.is_available(), torch.cuda.device_count())"
 command -v parallel >/dev/null || { echo "FATAL: GNU parallel not available"; exit 1; }
@@ -84,4 +90,4 @@ echo "CPU pool: $? failed run(s) $(date)"
 wait "$gpu_pid"
 echo "GPU pool: $? failed run(s) $(date)"
 rm -rf "$TMPDIR"
-echo "=== ex27 stage=$STAGE DONE $(date) ==="
+echo "=== ex27 stage=$RUN_STAGE DONE $(date) ==="

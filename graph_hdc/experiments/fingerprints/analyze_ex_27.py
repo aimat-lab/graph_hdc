@@ -3,6 +3,10 @@ Analysis of Experiment 27 (see _slurm_ex_27.py): the re-run of Table 1 and of th
 
     python analyze_ex_27.py check     # the GPU equivalence check and the smoke test of the fixed stage
     python analyze_ex_27.py fixed     # the fixed MLP and KNN tables
+    python analyze_ex_27.py opt       # the optimized MLP table and the chosen configurations
+
+``opt`` writes opt_runs.csv, opt_configs.csv (the best trial of every study: its validation MAE and parameters) and,
+once every cell has results, dataset_comparison_ex27_opt.tex (the format of the fixed tables).
 
 ``fixed`` writes to _ex27/: fixed_runs.csv (one row per target, method and seed: test MAE of the MLP and the KNN),
 fixed_summary.csv (mean, standard deviation and number of seeds per target, method and model) and the two tables in
@@ -35,15 +39,19 @@ import json
 
 import numpy as np
 
-from _slurm_ex_27 import (PATH, OUT, PREFIX_CHECK, PREFIX_CPUPROD, PREFIX_SMOKE, PREFIX_FIXED, GROUP, TARGET_INDEX,
-                          METHODS, CHECK_TARGETS, CHECK_METHODS, CHECK_SEEDS, SMOKE_GROUPS, method_of_params,
-                          check_variant, group_of_note)
+from _slurm_ex_27 import (PATH, OUT, PREFIX_CHECK, PREFIX_CPUPROD, PREFIX_SMOKE, PREFIX_FIXED, PREFIX_OPT, GROUP,
+                          TARGET_INDEX, METHODS, CHECK_TARGETS, CHECK_METHODS, CHECK_SEEDS, SMOKE_GROUPS,
+                          method_of_params, method_of_module, check_variant, group_of_note, best_trial)
 
 VARIANTS = ['cpu', 'cpu_prod', 'gpu', 'cpu_nnseed']
 
 
-def load_runs(prefix: str) -> list:
-    """Every archive of the prefix as a dict: module, method, params, meta, data, path."""
+def load_runs(prefix: str, any_config: bool = False) -> list:
+    """
+    Every archive of the prefix as a dict: module, method, params, meta, data, path. The method is recognized by the
+    fixed configurations of _slurm_ex_27 (None for other configurations), or with ``any_config`` by the module and the
+    fingerprint type alone (the optimized runs).
+    """
     runs = []
     for module in ('hdc', 'fp'):
         pattern = os.path.join(PATH, 'results', f'predict_molecules__{module}', f'{prefix}__*', 'experiment_meta.json')
@@ -60,7 +68,8 @@ def load_runs(prefix: str) -> list:
                 data = json.load(open(data_path))
             except Exception:
                 data = {}
-            runs.append({'module': module, 'method': method_of_params(module, params), 'params': params,
+            method = method_of_module(module, params) if any_config else method_of_params(module, params)
+            runs.append({'module': module, 'method': method, 'params': params,
                          'meta': meta, 'data': data, 'path': os.path.dirname(meta_path)})
     return runs
 
@@ -347,6 +356,61 @@ def report_fixed(lines: list):
         say('\nnot every cell has results: wrote only fixed_runs.csv and fixed_summary.csv')
 
 
+# the parameters of a chosen configuration in the table of the optimized configurations (opt_configs.csv)
+CONFIG_KEYS = ['EMBEDDING_SIZE', 'NUM_LAYERS', 'GRAPH_ATTRIBUTES', 'FINGERPRINT_SIZE', 'FINGERPRINT_RADIUS',
+               'FINGERPRINT_MAX_DISTANCE', 'FINGERPRINT_TORSION_ATOMS', 'NN_HIDDEN_LAYER_SIZES', 'NN_LEARNING_RATE_INIT']
+
+
+def report_opt(lines: list):
+    """The optimized MLP table (best configuration of every study over the seeds) and the chosen configurations."""
+    say = lines.append
+    runs = load_runs(PREFIX_OPT, any_config=True)
+    failed = [run for run in runs if not ok(run)]
+    say(f'{len(runs)} archives of {PREFIX_OPT}, {len(runs) - len(failed)} done')
+    for run in failed:
+        say(f'   NOT DONE {os.path.basename(run["path"])}: error={run["meta"].get("error_type")}')
+
+    records, datapoints = [], {}
+    for run in filter(ok, runs):
+        indices = run['data'].get('indices', {})
+        for note, values in target_results(run).items():
+            records.append((note, run['method'], run['params']['SEED'], values['mlp']))
+            datapoints[note] = sum(len(indices.get(split, [])) for split in ('train', 'val', 'test'))
+    summary = {}
+    for note, _, _ in ROWS:
+        for method, *_ in METHODS:
+            values = [r[3] for r in records if r[0] == note and r[1] == method and r[3] is not None]
+            summary[(note, method, 'mlp')] = (float(np.mean(values)) if values else np.nan,
+                                              float(np.std(values, ddof=1)) if len(values) > 1 else np.nan,
+                                              len(values))
+        say(f'{note:20s} ' + '  '.join(f'{m} {summary[(note, m, "mlp")][0]:.5g}+-{summary[(note, m, "mlp")][1]:.2g}'
+                                       f' ({summary[(note, m, "mlp")][2]})' for m, *_ in METHODS))
+
+    os.makedirs(OUT, exist_ok=True)
+    with open(os.path.join(OUT, 'opt_runs.csv'), 'w') as f:
+        f.write('target,method,seed,mlp_test_mae\n')
+        for note, method, seed, mlp in sorted(records, key=lambda r: (r[0], r[1], r[2])):
+            f.write(f'{note},{method},{seed},{mlp!r}\n')
+    with open(os.path.join(OUT, 'opt_configs.csv'), 'w') as f:
+        f.write('target,method,validation_mae,' + ','.join(CONFIG_KEYS) + '\n')
+        for note, _, _ in ROWS:
+            for method, *_ in METHODS:
+                try:
+                    trial = best_trial(method, note)
+                except Exception as error:
+                    say(f'no complete study {method}__{note}: {error}')
+                    continue
+                params = json.loads(trial.user_attrs['params'])
+                cells = [str(params.get(k, '')).replace(',', ';') for k in CONFIG_KEYS]
+                f.write(f'{note},{method},{trial.value!r},' + ','.join(cells) + '\n')
+    if all(summary[(note, method, 'mlp')][2] > 0 for note, *_ in ROWS for method, *_ in METHODS):
+        with open(os.path.join(OUT, 'dataset_comparison_ex27_opt.tex'), 'w') as f:
+            f.write(tabular(summary, 'mlp', datapoints))
+        say('\nwrote _ex27/opt_runs.csv, opt_configs.csv, dataset_comparison_ex27_opt.tex')
+    else:
+        say('\nnot every cell has results: wrote only opt_runs.csv and opt_configs.csv')
+
+
 if __name__ == '__main__':
     mode = sys.argv[1] if len(sys.argv) > 1 else 'check'
     lines = []
@@ -354,6 +418,8 @@ if __name__ == '__main__':
         report_check(lines)
     elif mode == 'fixed':
         report_fixed(lines)
+    elif mode == 'opt':
+        report_opt(lines)
     else:
         sys.exit(f'unknown mode {mode}')
     text = '\n'.join(lines)

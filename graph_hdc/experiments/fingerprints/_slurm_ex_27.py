@@ -10,7 +10,8 @@ unit-modulus codebooks) and the HOPV15 and ClogP targets were corrected, so both
    same MLP ((100, 100), learning rate 1e-3, 200 epochs, batch size 64), and the KNN table with the same KNN for every
    method (k = 5, uniform weights; the KNN is never optimized). Every run trains the MLP and then the KNN on the same
    featurization and split.
-2. ``opt`` (not yet in this file): every method gets the same small Bayesian-optimization budget.
+2. ``opt`` / ``opteval``: every method gets the same small Bayesian-optimization budget, 30 trials of TPE per method and
+   target (_optuna_ex_27.py), on a tuning split; the best configuration is then evaluated over the 10 seeds (MLP only).
 
 Common settings: the 17 targets of Table 1, the five columns HDF, Morgan, RDKit, topological torsion and atom pair,
 the seeds 0-9 (split and network), and one fixed HDF codebook for all seeds (CODEBOOK_SEED 0), so that, as for the
@@ -41,11 +42,20 @@ as a barrier, then the GPU file and the CPU file side by side):
   Files: check_warmup.txt, check_gpu.txt (gpu variant + smoke), check_cpu.txt (the three CPU variants)
 * ``fixed`` (prefix ex_27_fixed): 8 dataset groups x 5 methods x 10 seeds = 400 runs, all on the GPUs.
   Files: fixed_warmup.txt, fixed_gpu.txt (longest first)
+* ``opt``: one Optuna study per method and target (5 x 17 = 85 studies of OPT_TRIALS trials), each a process of
+  _optuna_ex_27.py that runs its trials one after the other on the GPU of its slot. A trial is a run (prefix
+  ex_27_trial__<method>__<target>__<number>) with the trial's parameters on the tuning split: SEED OPT_SEED (as the
+  tuning seed of ex_13, not one of the evaluation seeds), QM9 and COMPAS-3X subsampled to 10% (NUM_DATA 0.1), MLP only;
+  the objective is its validation MAE. Search spaces: see suggest_params (user decisions 2026-10-13).
+  Files: opt_warmup.txt (every HDF encoding the trials can ask for), opt_gpu.txt (the studies)
+* ``opteval`` (prefix ex_27_opt): the best configuration of every study, evaluated over the seeds 0-9 on the full data
+  (MLP only; one run per target, as the configurations differ). Written by ``python _slurm_ex_27.py opteval`` after the
+  studies: opteval_warmup.txt (the HDF encodings of the chosen configurations), opteval_gpu.txt
 
-The warmup encodes every dataset once with the fixed codebook (one short linear-model run per DATASET_NAME), so that
-the parallel runs only read the HDF encoding cache, which none of them could write without racing the others. The
-runner stops if a warmup run fails, because pycomex writes its caches in place and a failed run can leave a truncated
-cache file behind; delete that file before the next attempt.
+The warmups encode the datasets once with the fixed codebook (short runs without models), so that the parallel runs
+only read the HDF encoding caches, which none of them could write without racing the others. The runner stops if a
+warmup run fails, because pycomex writes its caches in place and a failed run can leave a truncated cache file behind;
+delete that file before the next attempt.
 
 Usage (from the fingerprints folder of the ex_27 worktree on JUPITER):
     python _slurm_ex_27.py              # writes all command files
@@ -54,6 +64,10 @@ Usage (from the fingerprints folder of the ex_27 worktree on JUPITER):
     sbatch --export=ALL,EX27_STAGE=fixed run_ex27.sbatch
     python _slurm_ex_27.py missing      # after an interrupted fixed stage (no ex_27 job running): fixed_missing.txt
     sbatch --export=ALL,EX27_STAGE=fixed,GPU_FILE=fixed_missing.txt run_ex27.sbatch
+    sbatch --export=ALL,EX27_STAGE=opt,GPU_J=88 run_ex27.sbatch     # an interrupted study resumes when resubmitted
+    python _slurm_ex_27.py opteval      # after all studies are complete
+    sbatch --export=ALL,EX27_STAGE=opteval run_ex27.sbatch
+    python analyze_ex_27.py opt
 """
 import os
 import re
@@ -126,6 +140,46 @@ CHECK_METHODS = ['hdf', 'morgan']
 SMOKE_GROUPS = ['hopv15', 'freesolv', 'clogp']
 NN_SEED_OFFSET = 100
 
+# --- optimized table (stages opt and opteval) ---
+PREFIX_TRIAL = 'ex_27_trial'
+PREFIX_OPT = 'ex_27_opt'
+OPT_TRIALS = 30
+OPT_SEED = 420
+# the groups whose datasets are subsampled to 10% on the tuning split (as in ex_13)
+OPT_SUBSAMPLED = {'qm9': 0.1, 'compas': 0.1}
+OPT_DIR = os.path.join(OUT, 'optuna')
+SIZES = [1024, 2048, 4096, 8192]
+HDF_DEPTHS = [1, 2, 3]
+HIDDEN = {'10,10': (10, 10), '50,50': (50, 50), '100,100': (100, 100)}
+
+
+def suggest_params(trial, method: str) -> dict:
+    """
+    The parameters of one Optuna trial of a method (user decisions 2026-10-13): the size (1024-8192) and one
+    structural parameter of every representation, for HDF its depth and whether the graph size and diameter are
+    encoded, and the same MLP space for all (hidden layers as in ex_13, learning rate log-uniform in [1e-4, 1e-2]).
+    """
+    module, feat, _ = METHOD[method]
+    params = dict(feat)
+    if method == 'hdf':
+        params['EMBEDDING_SIZE'] = trial.suggest_categorical('size', SIZES)
+        params['NUM_LAYERS'] = trial.suggest_categorical('depth', HDF_DEPTHS)
+        params['GRAPH_ATTRIBUTES'] = trial.suggest_categorical('global_descriptors', [True, False])
+    else:
+        params['FINGERPRINT_SIZE'] = trial.suggest_categorical('size', SIZES)
+        if method == 'morgan':
+            params['FINGERPRINT_RADIUS'] = trial.suggest_categorical('radius', [1, 2, 3])
+        elif method == 'rdkit':
+            # predict_molecules__fp builds RDKit fingerprints from paths of up to 2 x FINGERPRINT_RADIUS bonds
+            params['FINGERPRINT_RADIUS'] = trial.suggest_categorical('max_path_half', [1, 2, 3, 4])
+        elif method == 'atompair':
+            params['FINGERPRINT_MAX_DISTANCE'] = trial.suggest_categorical('max_distance', [4, 8, 16, 30])
+        elif method == 'torsion':
+            params['FINGERPRINT_TORSION_ATOMS'] = trial.suggest_categorical('torsion_atoms', [3, 4, 5, 6])
+    params['NN_HIDDEN_LAYER_SIZES'] = HIDDEN[trial.suggest_categorical('hidden', list(HIDDEN))]
+    params['NN_LEARNING_RATE_INIT'] = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
+    return params
+
 
 def group_of_note(note: str) -> str:
     return next(group for group, _, notes, _ in GROUPS if note in notes)
@@ -178,6 +232,97 @@ def warmup_commands(groups: list) -> list:
         lines.append(_command('hdc', PREFIX_WARMUP, 0, plain, GROUP[plain][1][:1],
                               {**HDF, 'MODELS': ['linear']}))
     return lines
+
+
+def plain_group(name: str) -> str:
+    """The group of a DATASET_NAME without extra parameters (ClogP shares the molecules of AqSolDB)."""
+    return next(g for g, n, _, x in GROUPS if n == name and not x)
+
+
+def hdf_warmup_command(name: str, seed: int, num_data: float, encoder: dict) -> str:
+    """A run without models (MODELS=[]) that writes the HDF encoding cache of an encoder configuration."""
+    group = plain_group(name)
+    return _command('hdc', PREFIX_WARMUP, seed, group, GROUP[group][1][:1],
+                    {**HDF, **encoder, 'MODELS': [], 'NUM_DATA': num_data})
+
+
+def opt_num_data(group: str) -> float:
+    return OPT_SUBSAMPLED.get(group, 1.0)
+
+
+def opt_trial_command(prefix: str, method: str, note: str, params: dict) -> str:
+    """A trial: the trial's parameters (suggest_params) on the tuning split, MLP only."""
+    group = group_of_note(note)
+    return _command(METHOD[method][0], prefix, OPT_SEED, group, [note],
+                    {**params, 'MODELS': ['neural_net2'], 'NN_DEVICE_DATA': True, 'NUM_DATA': opt_num_data(group)})
+
+
+def opt_warmup_commands() -> list:
+    """Every HDF encoding the trials can ask for (size x depth x graph size and diameter) on the tuning splits."""
+    lines, seen = [], set()
+    for group, name, _notes, _extra in GROUPS:
+        if name in seen:
+            continue
+        seen.add(name)
+        for size in reversed(SIZES):
+            for depth in HDF_DEPTHS:
+                for attributes in (True, False):
+                    encoder = {'EMBEDDING_SIZE': size, 'NUM_LAYERS': depth, 'GRAPH_ATTRIBUTES': attributes}
+                    lines.append((group, hdf_warmup_command(name, OPT_SEED, opt_num_data(plain_group(name)), encoder)))
+    return [line for group, line in sorted(lines, key=lambda gl: -expected_cost(gl[0]))]
+
+
+def opt_study_commands() -> list:
+    """One line per study (method x target), the longest first."""
+    lines = [(group, f'python _optuna_ex_27.py {method} {note}')
+             for method, *_ in METHODS for group, _, notes, _ in GROUPS for note in notes]
+    return [line for group, line in sorted(lines, key=lambda gl: -expected_cost(gl[0]))]
+
+
+def study_storage(method: str, note: str):
+    import optuna
+    path = os.path.join(OPT_DIR, f'{method}__{note}.log')
+    return optuna.storages.JournalStorage(optuna.storages.journal.JournalFileBackend(path))
+
+
+def best_trial(method: str, note: str):
+    """The best complete trial of a study (raises if the study has fewer than OPT_TRIALS complete trials)."""
+    import optuna
+    study = optuna.load_study(study_name=f'{method}__{note}', storage=study_storage(method, note))
+    complete = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    if len(complete) < OPT_TRIALS:
+        raise RuntimeError(f'study {method}__{note} has {len(complete)} of {OPT_TRIALS} complete trials')
+    return min(complete, key=lambda t: t.value)
+
+
+def best_params(method: str, note: str) -> dict:
+    """The run parameters of the best trial of a study (stored by _optuna_ex_27.py as the user attribute 'params')."""
+    params = json.loads(best_trial(method, note).user_attrs['params'])
+    params['NN_HIDDEN_LAYER_SIZES'] = tuple(params['NN_HIDDEN_LAYER_SIZES'])
+    return params
+
+
+def opteval_commands() -> tuple:
+    """(warmup lines, GPU lines) of the evaluation of the best configurations over the seeds on the full data."""
+    warmup, runs, seen = [], [], set()
+    for method, module, *_ in METHODS:
+        for group, name, notes, _extra in GROUPS:
+            for note in notes:
+                params = best_params(method, note)
+                if module == 'hdc':
+                    encoder = {k: params[k] for k in ('EMBEDDING_SIZE', 'NUM_LAYERS', 'GRAPH_ATTRIBUTES')}
+                    if (name, *encoder.values()) not in seen:
+                        seen.add((name, *encoder.values()))
+                        warmup.append(hdf_warmup_command(name, 0, 1.0, encoder))
+                for seed in SEEDS:
+                    runs.append((group, _command(module, PREFIX_OPT, seed, group, [note],
+                                                 {**params, 'MODELS': ['neural_net2'], 'NN_DEVICE_DATA': True})))
+    return warmup, [line for group, line in sorted(runs, key=lambda gl: -expected_cost(gl[0]))]
+
+
+def method_of_module(module: str, params: dict):
+    """The method of a run of any configuration (opt and trial runs): HDF or the fingerprint type."""
+    return 'hdf' if module == 'hdc' else FINGERPRINT_METHOD.get(params.get('FINGERPRINT_TYPE'))
 
 
 def expected_cost(group: str) -> int:
@@ -280,6 +425,11 @@ if __name__ == '__main__':
         done = completed(PREFIX_FIXED)
         _write('fixed_missing.txt', [line for line in fixed_commands() if identity_of_line(line) not in done])
         sys.exit(0)
+    if 'opteval' in sys.argv[1:]:
+        opteval_warmup, opteval_gpu = opteval_commands()
+        _write('opteval_warmup.txt', opteval_warmup)
+        _write('opteval_gpu.txt', opteval_gpu)
+        sys.exit(0)
 
     # every generated line must map back to its method (the analysis recognizes the methods by their parameters)
     fixed = fixed_commands()
@@ -294,3 +444,5 @@ if __name__ == '__main__':
     _write('check_cpu.txt', check_cpu)
     _write('fixed_warmup.txt', warmup_commands([group for group, *_ in GROUPS]))
     _write('fixed_gpu.txt', fixed)
+    _write('opt_warmup.txt', opt_warmup_commands())
+    _write('opt_gpu.txt', opt_study_commands())

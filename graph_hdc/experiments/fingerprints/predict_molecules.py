@@ -1587,11 +1587,14 @@ def experiment(e: Experiment):
         e['gpu/max_memory_reserved'] = torch.cuda.max_memory_reserved()
 
     # ~ comparison of models
-    
+    # (none without models: MODELS=[] only featurizes the dataset, e.g. to write the HDF encoding cache in a warmup)
+    if not e.MODELS:
+        return
+
     e.log('creating model comparison plots...')
     keys = list(e['metrics'].keys())
     metrics = list(e['metrics'][keys[0]].keys())
-    
+
     for metric in metrics:
         
         fig, ax = plt.subplots(figsize=(10, 8))
