@@ -14,7 +14,8 @@ left-aligned titles.
   Tanimoto, Morgan PCA + Matern, HDF + Matern, HDF + linear kernel), at every second embedding size so that the
   panels stay readable (user, 2026-10-13).
 
-Random search is explained by the legend only, without a label in every panel (user, 2026-10-13). Sizes without
+Random search is explained by the legend only, without a label in every panel (user, 2026-10-13). Significance
+brackets are black where HDF is better and red where Morgan + Tanimoto is better (user, 2026-10-14). Sizes without
 data (e.g. 256 before its campaigns ran) are left out. Reads ``_ex24/campaigns.tsv``, ``_ex24/runs/`` and
 ``_ex24/analysis/tests.tsv`` (``bo_benchmark.py collect`` and ``analyze_ex_24.py``; EX24_ROOT points elsewhere).
 
@@ -65,6 +66,8 @@ TITLES = {
     'qm9_gap': 'HOMO-LUMO gap (QM9)', 'qm9_dipole': 'Dipole moment (QM9)', 'melting_point': 'Melting point',
 }
 SIGNIFICANCE = [(0.001, '***'), (0.01, '**'), (0.05, '*')]
+# significance marks where Morgan + Tanimoto is significantly better than HDF + Matern
+MORGAN_BETTER_COLOR = '#D62728'
 
 # sizes in points at the final print size (the original figure: about 8 pt text, 10 pt panel letters)
 FONT_SIZE = 7.5
@@ -138,10 +141,11 @@ def progression_panel(ax, objective: str, size: int, methods: list) -> None:
     ax.grid(True, alpha=0.3, linestyle='--', lw=0.5)
 
 
-def bracket(ax, x0: float, x1: float, y: float, height: float, label: str) -> None:
+def bracket(ax, x0: float, x1: float, y: float, height: float, label: str, color: str = 'black') -> None:
     """Significance bracket between two box positions, opening upwards, with the label below (as before)."""
-    ax.plot([x0, x0, x1, x1], [y + height, y, y, y + height], color='black', lw=0.7, clip_on=False)
-    ax.text((x0 + x1) / 2, y - 0.4 * height, label, ha='center', va='top', fontsize=FONT_SIZE, clip_on=False)
+    ax.plot([x0, x0, x1, x1], [y + height, y, y, y + height], color=color, lw=0.7, clip_on=False)
+    ax.text((x0 + x1) / 2, y - 0.4 * height, label, ha='center', va='top', fontsize=FONT_SIZE, color=color,
+            clip_on=False)
 
 
 def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods: list, sizes: list) -> None:
@@ -181,8 +185,10 @@ def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods
         p = float(row.p_holm.iloc[0])
         label = next((mark for threshold, mark in SIGNIFICANCE if p < threshold), None)
         if label:
+            # black where HDF is better, red where Morgan + Tanimoto is better (user, 2026-10-14)
+            morgan_better = float(row.auc_median_b.iloc[0]) < float(row.auc_median_a.iloc[0])
             bracket(ax, i + offsets['morgan_tanimoto'], i + offsets['hdf_matern'], base - 0.05 * span,
-                    0.025 * span, label)
+                    0.025 * span, label, MORGAN_BETTER_COLOR if morgan_better else 'black')
     ax.set_xticks(range(len(sizes)))
     ax.set_xticklabels([str(s) for s in sizes])
     ax.set_xlim(-0.55, len(sizes) - 0.45)
