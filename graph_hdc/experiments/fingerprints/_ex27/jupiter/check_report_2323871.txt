@@ -1,0 +1,82 @@
+== status ==
+check: 72 archives, 72 done, 0 not done
+smoke: 15 archives, 15 done, 0 not done
+MLP devices: cpu: ['cpu'], cpu_nnseed: ['cpu'], gpu: ['cuda:0'], cpu_prod: ['cpu'], smoke: ['cuda:0']
+
+== production code path on the CPU (cpu_prod) vs the earlier data path (cpu): must be identical ==
+mlp: 18 pairs, identical 18, max |difference| 0
+knn: 18 pairs, identical 18, max |difference| 0
+
+== MLP test MAE per seed: cpu / cpu_prod / gpu / cpu_nnseed ==
+freesolv_hfe hdf
+   seed 0: cpu 0.6395  cpu_prod 0.6395  gpu 0.6466  cpu_nnseed 0.6170
+   seed 1: cpu 0.9201  cpu_prod 0.9201  gpu 0.9306  cpu_nnseed 0.8914
+   seed 2: cpu 0.8094  cpu_prod 0.8094  gpu 0.8852  cpu_nnseed 0.8375
+   mean:   cpu 0.7897  cpu_prod 0.7897  gpu 0.8208  cpu_nnseed 0.7820
+   gpu - cpu: mean 0.0311, mean |.| 0.0311 (3.9% of the cpu MAE) | nnseed - cpu: mean -0.0077, mean |.| 0.0264 (3.3%) [3 seeds]
+freesolv_hfe morgan
+   seed 0: cpu 1.1438  cpu_prod 1.1438  gpu 1.1325  cpu_nnseed 1.0950
+   seed 1: cpu 1.0488  cpu_prod 1.0488  gpu 1.0488  cpu_nnseed 1.2647
+   seed 2: cpu 1.0415  cpu_prod 1.0415  gpu 1.0965  cpu_nnseed 1.2198
+   mean:   cpu 1.0780  cpu_prod 1.0780  gpu 1.0926  cpu_nnseed 1.1932
+   gpu - cpu: mean 0.0146, mean |.| 0.0221 (2.1% of the cpu MAE) | nnseed - cpu: mean 0.1151, mean |.| 0.1477 (13.7%) [3 seeds]
+aqsoldb_logs hdf
+   seed 0: cpu 0.5914  cpu_prod 0.5914  gpu 0.6055  cpu_nnseed 0.6035
+   seed 1: cpu 0.6151  cpu_prod 0.6151  gpu 0.6175  cpu_nnseed 0.6070
+   seed 2: cpu 0.6041  cpu_prod 0.6041  gpu 0.6041  cpu_nnseed 0.6039
+   mean:   cpu 0.6036  cpu_prod 0.6036  gpu 0.6090  cpu_nnseed 0.6048
+   gpu - cpu: mean 0.0055, mean |.| 0.0055 (0.9% of the cpu MAE) | nnseed - cpu: mean 0.0013, mean |.| 0.0068 (1.1%) [3 seeds]
+aqsoldb_logs morgan
+   seed 0: cpu 0.8091  cpu_prod 0.8091  gpu 0.7799  cpu_nnseed 0.7717
+   seed 1: cpu 0.7858  cpu_prod 0.7858  gpu 0.7675  cpu_nnseed 0.7381
+   seed 2: cpu 0.7630  cpu_prod 0.7630  gpu 0.7593  cpu_nnseed 0.7432
+   mean:   cpu 0.7860  cpu_prod 0.7860  gpu 0.7689  cpu_nnseed 0.7510
+   gpu - cpu: mean -0.0171, mean |.| 0.0171 (2.2% of the cpu MAE) | nnseed - cpu: mean -0.0350, mean |.| 0.0350 (4.4%) [3 seeds]
+qm9_gap hdf
+   seed 0: cpu 0.0072  cpu_prod 0.0072  gpu 0.0072  cpu_nnseed 0.0072
+   seed 1: cpu 0.0073  cpu_prod 0.0073  gpu 0.0073  cpu_nnseed 0.0072
+   seed 2: cpu 0.0073  cpu_prod 0.0073  gpu 0.0074  cpu_nnseed 0.0074
+   mean:   cpu 0.0073  cpu_prod 0.0073  gpu 0.0073  cpu_nnseed 0.0073
+   gpu - cpu: mean 0.0000, mean |.| 0.0000 (0.4% of the cpu MAE) | nnseed - cpu: mean -0.0000, mean |.| 0.0001 (1.1%) [3 seeds]
+qm9_gap morgan
+   seed 0: cpu 0.0071  cpu_prod 0.0071  gpu 0.0072  cpu_nnseed 0.0072
+   seed 1: cpu 0.0070  cpu_prod 0.0070  gpu 0.0070  cpu_nnseed 0.0071
+   seed 2: cpu 0.0071  cpu_prod 0.0071  gpu 0.0071  cpu_nnseed 0.0073
+   mean:   cpu 0.0071  cpu_prod 0.0071  gpu 0.0071  cpu_nnseed 0.0072
+   gpu - cpu: mean 0.0001, mean |.| 0.0001 (0.9% of the cpu MAE) | nnseed - cpu: mean 0.0001, mean |.| 0.0001 (1.5%) [3 seeds]
+pooled gpu - cpu: 18 pairs, mean +0.87%, mean |.| 1.73%, larger than cpu in 11
+pooled cpu_nnseed - cpu: 18 pairs, mean +1.15%, mean |.| 4.24%, larger than cpu in 8
+
+== KNN test MAE per seed: cpu / gpu (torch backend) ==
+freesolv_hfe   hdf     1.8603/1.8603  2.0306/2.0306  2.0051/2.0051   max |diff| 0
+freesolv_hfe   morgan  1.7794/1.7794  1.7363/1.7363  1.6410/1.6410   max |diff| 2.22e-16
+aqsoldb_logs   hdf     0.7424/0.7427  0.7742/0.7740  0.7828/0.7828   max |diff| 0.000233
+aqsoldb_logs   morgan  0.9693/0.9693  1.0072/1.0072  0.9832/0.9832   max |diff| 2.22e-16
+qm9_gap        hdf     0.0104/0.0104  0.0105/0.0105  0.0105/0.0105   max |diff| 2.36e-06
+qm9_gap        morgan  0.0109/0.0109  0.0108/0.0108  0.0108/0.0108   max |diff| 1.73e-18
+
+== MLP training time per target (s, mean over seeds): cpu / gpu ==
+freesolv_hfe   hdf     cpu 6.2  gpu 16.0
+freesolv_hfe   morgan  cpu 16.4  gpu 29.9
+aqsoldb_logs   hdf     cpu 136.4  gpu 113.0
+aqsoldb_logs   morgan  cpu 146.9  gpu 128.5
+qm9_gap        hdf     cpu 1979.8  gpu 1048.9
+qm9_gap        morgan  cpu 1866.6  gpu 1072.1
+run durations (s, mean over seeds; the gpu runs of QM9 train all seven targets) and peak GPU memory (GB):
+freesolv_hfe   hdf     cpu 8 (n=3)  cpu_prod 7 (n=3)  gpu 19 (n=3)  cpu_nnseed 9 (n=3)  | GPU reserved max 0.10
+freesolv_hfe   morgan  cpu 18 (n=3)  cpu_prod 15 (n=3)  gpu 32 (n=3)  cpu_nnseed 13 (n=3)  | GPU reserved max 0.10
+aqsoldb_logs   hdf     cpu 142 (n=3)  cpu_prod 110 (n=3)  gpu 118 (n=3)  cpu_nnseed 146 (n=3)  | GPU reserved max 0.31
+aqsoldb_logs   morgan  cpu 157 (n=3)  cpu_prod 123 (n=3)  gpu 139 (n=3)  cpu_nnseed 162 (n=3)  | GPU reserved max 0.31
+qm9_gap        hdf     cpu 2154 (n=3)  cpu_prod 1538 (n=3)  gpu 7473 (n=3)  cpu_nnseed 2010 (n=3)  | GPU reserved max 3.61
+qm9_gap        morgan  cpu 2121 (n=3)  cpu_prod 1443 (n=3)  gpu 7688 (n=3)  cpu_nnseed 1976 (n=3)  | GPU reserved max 3.64
+smoke runs: peak GPU memory reserved max 0.31 GB
+
+== QM9, gpu runs: test MAE of all seven targets (mean over seeds) ==
+hdf: qm9_energy MLP 0.5228 KNN 3.5224 (n=3), qm9_enthalpy MLP 0.5608 KNN 3.5223 (n=3), qm9_zpve MLP 0.0008 KNN 0.0042 (n=3), qm9_alpha MLP 0.6251 KNN 1.2798 (n=3), qm9_cv MLP 0.3360 KNN 0.9184 (n=3), qm9_gap MLP 0.0073 KNN 0.0105 (n=3), qm9_dipole MLP 0.5605 KNN 0.6958 (n=3)
+morgan: qm9_energy MLP 7.4127 KNN 23.8428 (n=3), qm9_enthalpy MLP 7.3353 KNN 23.8425 (n=3), qm9_zpve MLP 0.0050 KNN 0.0127 (n=3), qm9_alpha MLP 1.8397 KNN 4.8616 (n=3), qm9_cv MLP 0.8131 KNN 2.0035 (n=3), qm9_gap MLP 0.0071 KNN 0.0108 (n=3), qm9_dipole MLP 0.5792 KNN 0.6700 (n=3)
+
+== smoke (fixed-stage commands, seed 0): test MAE MLP / KNN ==
+hopv15_pce     hdf 1.3116/1.8914  morgan 0.8593/1.7355  rdkit 0.9209/1.6668  torsion 1.1535/1.7401  atompair 0.9782/1.5311
+hopv15_voc     hdf 0.1040/0.1078  morgan 0.1058/0.0877  rdkit 0.1027/0.0964  torsion 0.1059/0.1015  atompair 0.0986/0.1057
+freesolv_hfe   hdf 0.6466/1.8603  morgan 1.1325/1.7794  rdkit 0.8101/1.1517  torsion 1.7473/2.1104  atompair 1.1655/1.7539
+clogp          hdf 0.1827/0.4502  morgan 0.5800/0.8347  rdkit 0.6813/0.9052  torsion 0.5206/0.8053  atompair 0.3117/0.5591

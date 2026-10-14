@@ -74,6 +74,14 @@ if [ "$RUN_STAGE" = envtest ]; then
     exit 0
 fi
 
+# GPU utilization and memory, and the node's free memory, once a minute (for choosing GPU_J)
+nvidia-smi --query-gpu=timestamp,index,utilization.gpu,memory.used --format=csv,noheader -l 60 \
+    > "$OUT/gpu_util_${SLURM_JOB_ID}.csv" 2>/dev/null &
+monitor_pids="$!"
+( while true; do echo "$(date +%T) $(free -g | awk '/Mem:/ {print "used_gb", $3, "available_gb", $7}')"; sleep 60; done ) \
+    > "$OUT/memory_${SLURM_JOB_ID}.log" 2>&1 &
+monitor_pids="$monitor_pids $!"
+
 run_cpu() {  # $1 = command file; returns the number of failed runs (0 = all succeeded)
     [ -s "$1" ] || { echo "(skip: empty or missing $1)"; return 0; }
     echo "--- CPU pool -j $CPU_J x $CPU_THREADS threads: $(wc -l < "$1") runs from $(basename "$1") $(date) ---"
@@ -108,5 +116,6 @@ run_cpu "$CPU_FILE"
 echo "CPU pool: $? failed run(s) $(date)"
 wait "$gpu_pid"
 echo "GPU pool: $? failed run(s) $(date)"
+kill $monitor_pids 2>/dev/null
 rm -rf "$TMPDIR"
 echo "=== ex27 stage=$RUN_STAGE DONE $(date) ==="
