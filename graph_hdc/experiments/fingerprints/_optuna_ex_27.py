@@ -33,14 +33,18 @@ def run_trial(method: str, note: str, trial: optuna.Trial) -> float:
     trial.set_user_attr('params', json.dumps(params))
     trial.set_user_attr('prefix', prefix)
     line = opt_trial_command(prefix, method, note, params)
+    # the archive of this run is the one folder of the prefix that is new afterwards (an earlier attempt of a study
+    # whose journal was deleted can have left archives with the same prefix)
+    pattern = os.path.join(PATH, 'results', f'predict_molecules__{METHOD[method][0]}', f'{prefix}__*',
+                           'experiment_data.json')
+    before = set(glob.glob(pattern))
     result = subprocess.run(shlex.split(line), cwd=PATH, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                             text=True)
-    module = METHOD[method][0]
-    archives = sorted(glob.glob(os.path.join(PATH, 'results', f'predict_molecules__{module}', f'{prefix}__*',
-                                             'experiment_data.json')))
-    if result.returncode != 0 or not archives:
-        raise RuntimeError(f'trial run {prefix} failed (exit code {result.returncode}): {result.stderr[-3000:]}')
-    data = json.load(open(archives[-1]))
+    new = set(glob.glob(pattern)) - before
+    if result.returncode != 0 or len(new) != 1:
+        raise RuntimeError(f'trial run {prefix} failed (exit code {result.returncode}, {len(new)} new archives): '
+                           f'{result.stderr[-3000:]}')
+    data = json.load(open(new.pop()))
     return float(data['metrics']['val_neural_net2']['mae'])
 
 
@@ -48,11 +52,14 @@ def main(method: str, note: str, n_trials: int = OPT_TRIALS):
     assert method in METHOD and group_of_note(note)
     os.makedirs(OPT_DIR, exist_ok=True)
     name = f'{method}__{note}'
-    # a fixed sampler seed per study (an interrupted study continues with a fresh sampler state, which TPE allows)
-    sampler = optuna.samplers.TPESampler(seed=zlib.crc32(name.encode()))
-    study = optuna.create_study(study_name=name, storage=study_storage(method, note), sampler=sampler,
-                                direction='minimize', load_if_exists=True)
+    seed = zlib.crc32(name.encode())
+    study = optuna.create_study(study_name=name, storage=study_storage(method, note), direction='minimize',
+                                load_if_exists=True)
     while True:
+        # A new sampler for every trial, seeded with the study and its number of trials so far: reproducible for a
+        # given history, and a resumed study does not repeat the random start-up configurations of its first trials
+        # (TPE keeps no state besides its random generator).
+        study.sampler = optuna.samplers.TPESampler(seed=(seed + len(study.trials)) % 2 ** 32)
         states = [t.state for t in study.trials]
         complete = states.count(optuna.trial.TrialState.COMPLETE)
         failed = states.count(optuna.trial.TrialState.FAIL)

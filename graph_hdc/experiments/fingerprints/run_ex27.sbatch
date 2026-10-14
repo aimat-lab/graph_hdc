@@ -1,12 +1,13 @@
 #!/bin/bash
 # Whole-node Booster runner of Experiment 27 (_slurm_ex_27.py) on JUPITER. Runs the command files of a stage with GNU
-# parallel: first the warmup file on the CPUs (a barrier that writes the HDF encoding caches; the job stops if a warmup
-# run fails), then the GPU file and the CPU file side by side.
+# parallel: first the primer and then the warmup file on the CPUs (barriers that write the dataset and HDF encoding
+# caches; the job stops if one of their runs fails), then the GPU file and the CPU file side by side.
 #   GPU pool: GPU_J slots over the 4 GPUs, slot s on GPU (s - 1) mod 4, so that several small MLPs share a GPU.
 #   CPU pool: CPU_J slots with CPU_THREADS threads each and the GPUs hidden.
 # Environment:
-#     EX27_STAGE=check|fixed|opt|opteval   (required; selects _ex27/<stage>_warmup.txt, <stage>_gpu.txt, <stage>_cpu.txt)
-#     WARMUP_FILE / GPU_FILE / CPU_FILE   (optional overrides, relative to _ex27/)
+#     EX27_STAGE=check|fixed|opt|opteval   (required; selects _ex27/<stage>_primer.txt, <stage>_warmup.txt,
+#                                           <stage>_gpu.txt and <stage>_cpu.txt; missing files are skipped)
+#     PRIMER_FILE / WARMUP_FILE / GPU_FILE / CPU_FILE   (optional overrides, relative to _ex27/)
 #     GPU_J (default 32), CPU_J (default 64), CPU_THREADS (default 4), MEMFREE (default 20G)
 # Example (from the fingerprints folder of the ex_27 worktree, after python _slurm_ex_27.py):
 #     sbatch --export=ALL,EX27_STAGE=check --time=04:00:00 run_ex27.sbatch
@@ -30,6 +31,7 @@ MEMFREE="${MEMFREE:-20G}"   # GNU parallel starts a run only while this much RAM
 CODE=/e/project1/aimatchem/teufel1/graph_hdc_ex27
 FP="$CODE/graph_hdc/experiments/fingerprints"
 OUT="$FP/_ex27"
+PRIMER_FILE="$OUT/${PRIMER_FILE:-${RUN_STAGE}_primer.txt}"
 WARMUP_FILE="$OUT/${WARMUP_FILE:-${RUN_STAGE}_warmup.txt}"
 GPU_FILE="$OUT/${GPU_FILE:-${RUN_STAGE}_gpu.txt}"
 CPU_FILE="$OUT/${CPU_FILE:-${RUN_STAGE}_cpu.txt}"
@@ -44,6 +46,12 @@ module load parallel 2>/dev/null || true
 source "$CODE/.venv/bin/activate"
 cd "$FP" || exit 2
 export PYTHONWARNINGS=ignore
+# The compute nodes have no libcairo, which cairosvg loads on import; chem_mat_data imports cairosvg for molecule
+# drawings that the experiments never call. A stub module (jupiter_stubs/cairosvg) lets the import succeed.
+if ! ldconfig -p 2>/dev/null | grep -q "libcairo.so.2"; then
+    export PYTHONPATH="$FP/jupiter_stubs${PYTHONPATH:+:$PYTHONPATH}"
+    echo "no libcairo on this node: using the cairosvg stub"
+fi
 # pycomex decompresses every cache it reads into a temporary file (the HDF encoding of QM9: several GB per run);
 # put them on the scratch file system instead of the node's /tmp
 export TMPDIR="${SCRATCH:-/tmp}/tmp/ex27_${SLURM_JOB_ID}"
@@ -56,6 +64,9 @@ mkdir -p results/predict_molecules__fp results/predict_molecules__hdc
 echo "=== ex27 stage=$RUN_STAGE host=$(hostname) commit=$(cat "$OUT/deployed_commit.txt" 2>/dev/null) $(date) ==="
 nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv
 python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.is_available(), torch.cuda.device_count())"
+python -c "from chem_mat_data.main import load_graph_dataset; from chem_mat_data.processing import MoleculeProcessing; \
+import graph_hdc, rdkit, pycomex, optuna, pytorch_lightning; print('imports ok')" \
+    || { echo "FATAL: the Python environment cannot import the packages of the experiments"; exit 5; }
 command -v parallel >/dev/null || { echo "FATAL: GNU parallel not available"; exit 1; }
 
 run_cpu() {  # $1 = command file; returns the number of failed runs (0 = all succeeded)
@@ -76,13 +87,16 @@ run_gpu() {  # $1 = command file; slot s runs on GPU (s - 1) mod 4
         'CUDA_VISIBLE_DEVICES=$(( ({%} - 1) % 4 )) bash -c {}' :::: "$1"
 }
 
-run_cpu "$WARMUP_FILE"
-failed=$?
-if [ "$failed" -ne 0 ]; then
-    echo "FATAL: $failed warmup run(s) failed; delete their (possibly truncated) hdc_* cache files before a new attempt"
-    rm -rf "$TMPDIR"
-    exit 3
-fi
+for barrier in "$PRIMER_FILE" "$WARMUP_FILE"; do
+    run_cpu "$barrier"
+    failed=$?
+    if [ "$failed" -ne 0 ]; then
+        echo "FATAL: $failed run(s) of $(basename "$barrier") failed; delete their (possibly truncated) cache files" \
+             "(hdc_*, load__*, stats_*) before a new attempt"
+        rm -rf "$TMPDIR"
+        exit 3
+    fi
+done
 run_gpu "$GPU_FILE" &
 gpu_pid=$!
 run_cpu "$CPU_FILE"

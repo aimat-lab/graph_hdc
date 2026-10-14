@@ -47,15 +47,19 @@ as a barrier, then the GPU file and the CPU file side by side):
   ex_27_trial__<method>__<target>__<number>) with the trial's parameters on the tuning split: SEED OPT_SEED (as the
   tuning seed of ex_13, not one of the evaluation seeds), QM9 and COMPAS-3X subsampled to 10% (NUM_DATA 0.1), MLP only;
   the objective is its validation MAE. Search spaces: see suggest_params (user decisions 2026-10-13).
-  Files: opt_warmup.txt (every HDF encoding the trials can ask for), opt_gpu.txt (the studies)
+  Files: opt_primer.txt and opt_warmup.txt (every HDF encoding the trials can ask for), opt_gpu.txt (the studies)
 * ``opteval`` (prefix ex_27_opt): the best configuration of every study, evaluated over the seeds 0-9 on the full data
   (MLP only; one run per target, as the configurations differ). Written by ``python _slurm_ex_27.py opteval`` after the
-  studies: opteval_warmup.txt (the HDF encodings of the chosen configurations), opteval_gpu.txt
+  studies: opteval_primer.txt and opteval_warmup.txt (the HDF encodings of the chosen configurations), opteval_gpu.txt;
+  ``python _slurm_ex_27.py opteval_missing`` writes opteval_missing.txt (the runs without a completed archive)
 
 The warmups encode the datasets once with the fixed codebook (short runs without models), so that the parallel runs
-only read the HDF encoding caches, which none of them could write without racing the others. The runner stops if a
-warmup run fails, because pycomex writes its caches in place and a failed run can leave a truncated cache file behind;
-delete that file before the next attempt.
+only read the HDF encoding caches, which none of them could write without racing the others. The runs of a dataset
+(subsample) also share its dataset caches (load__, stats_): the first warmup of every dataset forms the primer, which
+the runner completes before the other warmups. The full-data dataset caches also fix the molecule order, and thereby
+the splits of every stage: they are written once (on JUPITER they were copied from the ex_13 checkout) and must not be
+rebuilt while runs are going. The runner stops if a primer or warmup run fails, because pycomex writes its caches in
+place and a failed run can leave a truncated cache file behind; delete that file before the next attempt.
 
 Usage (from the fingerprints folder of the ex_27 worktree on JUPITER):
     python _slurm_ex_27.py              # writes all command files
@@ -67,6 +71,8 @@ Usage (from the fingerprints folder of the ex_27 worktree on JUPITER):
     sbatch --export=ALL,EX27_STAGE=opt,GPU_J=88 run_ex27.sbatch     # an interrupted study resumes when resubmitted
     python _slurm_ex_27.py opteval      # after all studies are complete
     sbatch --export=ALL,EX27_STAGE=opteval run_ex27.sbatch
+    python _slurm_ex_27.py opteval_missing   # after an interrupted opteval (no ex_27 job running)
+    sbatch --export=ALL,EX27_STAGE=opteval,GPU_FILE=opteval_missing.txt run_ex27.sbatch
     python analyze_ex_27.py opt
 """
 import os
@@ -257,8 +263,26 @@ def opt_trial_command(prefix: str, method: str, note: str, params: dict) -> str:
                     {**params, 'MODELS': ['neural_net2'], 'NN_DEVICE_DATA': True, 'NUM_DATA': opt_num_data(group)})
 
 
-def opt_warmup_commands() -> list:
-    """Every HDF encoding the trials can ask for (size x depth x graph size and diameter) on the tuning splits."""
+def split_primer(lines: list) -> tuple:
+    """
+    (primer, rest) of warmup lines: the first line of every (DATASET_NAME, NUM_DATA, SEED) goes into the primer, which
+    the runner completes before the rest, because the runs of a subsample share its dataset caches (load__, stats_),
+    which a run writes when they do not exist yet (e.g. the 10% tuning subsamples of QM9 and COMPAS-3X).
+    """
+    primer, rest, seen = [], [], set()
+    for line in lines:
+        params = params_of_line(line)
+        key = (params['DATASET_NAME'], params['NUM_DATA'], params['SEED'])
+        (rest if key in seen else primer).append(line)
+        seen.add(key)
+    return primer, rest
+
+
+def opt_warmup_commands() -> tuple:
+    """
+    (primer, rest): every HDF encoding the trials can ask for (size x depth x graph size and diameter) on the tuning
+    splits, the first of every dataset in the primer (see split_primer).
+    """
     lines, seen = [], set()
     for group, name, _notes, _extra in GROUPS:
         if name in seen:
@@ -269,7 +293,7 @@ def opt_warmup_commands() -> list:
                 for attributes in (True, False):
                     encoder = {'EMBEDDING_SIZE': size, 'NUM_LAYERS': depth, 'GRAPH_ATTRIBUTES': attributes}
                     lines.append((group, hdf_warmup_command(name, OPT_SEED, opt_num_data(plain_group(name)), encoder)))
-    return [line for group, line in sorted(lines, key=lambda gl: -expected_cost(gl[0]))]
+    return split_primer([line for group, line in sorted(lines, key=lambda gl: -expected_cost(gl[0]))])
 
 
 def opt_study_commands() -> list:
@@ -286,13 +310,19 @@ def study_storage(method: str, note: str):
 
 
 def best_trial(method: str, note: str):
-    """The best complete trial of a study (raises if the study has fewer than OPT_TRIALS complete trials)."""
+    """
+    The best of the first OPT_TRIALS complete trials of a study (by trial number, so that a study that got more
+    complete trials, e.g. from two processes, still has the same budget as the others). Raises if the study has fewer.
+    """
     import optuna
+    # (loading a study whose journal does not exist would create an empty journal file)
+    if not os.path.exists(os.path.join(OPT_DIR, f'{method}__{note}.log')):
+        raise RuntimeError(f'study {method}__{note} does not exist')
     study = optuna.load_study(study_name=f'{method}__{note}', storage=study_storage(method, note))
-    complete = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    complete = sorted((t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE), key=lambda t: t.number)
     if len(complete) < OPT_TRIALS:
         raise RuntimeError(f'study {method}__{note} has {len(complete)} of {OPT_TRIALS} complete trials')
-    return min(complete, key=lambda t: t.value)
+    return min(complete[:OPT_TRIALS], key=lambda t: t.value)
 
 
 def best_params(method: str, note: str) -> dict:
@@ -302,10 +332,21 @@ def best_params(method: str, note: str) -> dict:
     return params
 
 
+def matches_params(params: dict, expected: dict) -> bool:
+    """Whether the parameters of a run (as read from its archive, tuples as lists) include the expected ones."""
+    def normal(value):
+        return list(value) if isinstance(value, tuple) else value
+    return all(normal(params.get(key)) == normal(value) for key, value in expected.items())
+
+
 def opteval_commands() -> tuple:
-    """(warmup lines, GPU lines) of the evaluation of the best configurations over the seeds on the full data."""
+    """
+    (primer, warmup, GPU lines) of the evaluation of the best configurations over the seeds on the full data. The GPU
+    lines are ordered by cost class, then seed, target and method, so that the costly HDF runs of QM9 (which load the
+    largest encodings) are spread over the start instead of all starting at once.
+    """
     warmup, runs, seen = [], [], set()
-    for method, module, *_ in METHODS:
+    for index, (method, module, *_) in enumerate(METHODS):
         for group, name, notes, _extra in GROUPS:
             for note in notes:
                 params = best_params(method, note)
@@ -315,9 +356,31 @@ def opteval_commands() -> tuple:
                         seen.add((name, *encoder.values()))
                         warmup.append(hdf_warmup_command(name, 0, 1.0, encoder))
                 for seed in SEEDS:
-                    runs.append((group, _command(module, PREFIX_OPT, seed, group, [note],
-                                                 {**params, 'MODELS': ['neural_net2'], 'NN_DEVICE_DATA': True})))
-    return warmup, [line for group, line in sorted(runs, key=lambda gl: -expected_cost(gl[0]))]
+                    line = _command(module, PREFIX_OPT, seed, group, [note],
+                                    {**params, 'MODELS': ['neural_net2'], 'NN_DEVICE_DATA': True})
+                    runs.append(((-expected_cost(group), seed, note, index), line))
+    return (*split_primer(warmup), [line for key, line in sorted(runs)])
+
+
+def completed_opteval() -> set:
+    """(method, NOTE, SEED) of every completed opteval archive whose parameters are the best ones of its study."""
+    done, best = set(), {}
+    for module in ('hdc', 'fp'):
+        for meta_path in glob.glob(os.path.join(PATH, 'results', f'predict_molecules__{module}', f'{PREFIX_OPT}__*',
+                                                'experiment_meta.json')):
+            try:
+                meta = json.load(open(meta_path))
+            except Exception:
+                continue
+            params = {k: v.get('value') for k, v in meta.get('parameters', {}).items() if isinstance(v, dict)}
+            if params.get('__PREFIX__') != PREFIX_OPT or meta.get('status') != 'done' or meta.get('has_error'):
+                continue
+            method, note = method_of_module(module, params), params.get('NOTE')
+            if (method, note) not in best:
+                best[(method, note)] = best_params(method, note)
+            if matches_params(params, best[(method, note)]):
+                done.add((method, note, params.get('SEED')))
+    return done
 
 
 def method_of_module(module: str, params: dict):
@@ -396,6 +459,13 @@ def identity_of_line(line: str) -> tuple:
     return method_of_params(module, params), params['NOTE'], params['SEED']
 
 
+def identity_of_opt_line(line: str) -> tuple:
+    """(method, NOTE, SEED) of a command line of any configuration (opteval)."""
+    module = re.search(r'predict_molecules__(\w+)\.py', line).group(1)
+    params = params_of_line(line)
+    return method_of_module(module, params), params['NOTE'], params['SEED']
+
+
 def completed(prefix: str) -> set:
     """(method, NOTE, SEED) of every completed archive (status 'done', no error) of the prefix."""
     done = set()
@@ -426,9 +496,15 @@ if __name__ == '__main__':
         _write('fixed_missing.txt', [line for line in fixed_commands() if identity_of_line(line) not in done])
         sys.exit(0)
     if 'opteval' in sys.argv[1:]:
-        opteval_warmup, opteval_gpu = opteval_commands()
+        opteval_primer, opteval_warmup, opteval_gpu = opteval_commands()
+        _write('opteval_primer.txt', opteval_primer)
         _write('opteval_warmup.txt', opteval_warmup)
         _write('opteval_gpu.txt', opteval_gpu)
+        sys.exit(0)
+    if 'opteval_missing' in sys.argv[1:]:
+        done = completed_opteval()
+        _, _, opteval_gpu = opteval_commands()
+        _write('opteval_missing.txt', [line for line in opteval_gpu if identity_of_opt_line(line) not in done])
         sys.exit(0)
 
     # every generated line must map back to its method (the analysis recognizes the methods by their parameters)
@@ -444,5 +520,7 @@ if __name__ == '__main__':
     _write('check_cpu.txt', check_cpu)
     _write('fixed_warmup.txt', warmup_commands([group for group, *_ in GROUPS]))
     _write('fixed_gpu.txt', fixed)
-    _write('opt_warmup.txt', opt_warmup_commands())
+    opt_primer, opt_warmup = opt_warmup_commands()
+    _write('opt_primer.txt', opt_primer)
+    _write('opt_warmup.txt', opt_warmup)
     _write('opt_gpu.txt', opt_study_commands())

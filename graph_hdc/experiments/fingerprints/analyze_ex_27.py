@@ -41,7 +41,8 @@ import numpy as np
 
 from _slurm_ex_27 import (PATH, OUT, PREFIX_CHECK, PREFIX_CPUPROD, PREFIX_SMOKE, PREFIX_FIXED, PREFIX_OPT, GROUP,
                           TARGET_INDEX, METHODS, CHECK_TARGETS, CHECK_METHODS, CHECK_SEEDS, SMOKE_GROUPS,
-                          method_of_params, method_of_module, check_variant, group_of_note, best_trial)
+                          method_of_params, method_of_module, check_variant, group_of_note, best_trial, best_params,
+                          matches_params)
 
 VARIANTS = ['cpu', 'cpu_prod', 'gpu', 'cpu_nnseed']
 
@@ -370,8 +371,24 @@ def report_opt(lines: list):
     for run in failed:
         say(f'   NOT DONE {os.path.basename(run["path"])}: error={run["meta"].get("error_type")}')
 
+    # only the runs with the best configuration of their study, the latest one per target, method and seed
+    latest, best, stale = {}, {}, 0
+    for run in sorted(filter(ok, runs), key=lambda r: r['meta'].get('start_time', 0)):
+        key = (run['params']['NOTE'], run['method'])
+        if key not in best:
+            try:
+                best[key] = best_params(*key[::-1])
+            except Exception as error:
+                say(f'no best configuration for {key}: {error}')
+                best[key] = None
+        if best[key] is None or not matches_params(run['params'], best[key]):
+            stale += 1
+            continue
+        latest[(*key, run['params']['SEED'])] = run
+    if stale:
+        say(f'skipped {stale} archives whose configuration is not (or no longer) the best of their study')
     records, datapoints = [], {}
-    for run in filter(ok, runs):
+    for run in latest.values():
         indices = run['data'].get('indices', {})
         for note, values in target_results(run).items():
             records.append((note, run['method'], run['params']['SEED'], values['mlp']))
