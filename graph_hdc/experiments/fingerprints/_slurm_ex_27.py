@@ -77,6 +77,8 @@ Usage (from the fingerprints folder of the ex_27 worktree on JUPITER):
     python _slurm_ex_27.py opteval_split   # alternatively: stages opteval_a and opteval_b
     python _slurm_ex_27.py opteval_missing   # after an interrupted opteval (no ex_27 job running)
     sbatch --export=ALL,EX27_STAGE=opteval,GPU_FILE=opteval_missing.txt run_ex27.sbatch
+    python _slurm_ex_27.py opteval_missing_split   # the same as two jobs (stages opteval_missing_a / _b)
+    (opteval with up to 8192 dimensions: a QM9 run needs up to ~8 GB of GPU memory, so GPU_J=24, not 48)
     python analyze_ex_27.py opt
 """
 import os
@@ -588,6 +590,15 @@ if __name__ == '__main__':
         for name, lines in zip(('opteval_a_primer', 'opteval_a_warmup', 'opteval_a_gpu', 'opteval_b_gpu'),
                                opteval_split()):
             _write(f'{name}.txt', lines)
+        sys.exit(0)
+    if 'opteval_missing_split' in sys.argv[1:]:
+        # the missing opteval runs as two jobs (stages opteval_missing_a / _b), alternating by line; the warmup of the
+        # opteval stage has written every encoding they need
+        done = completed_opteval()
+        _, _, opteval_gpu = opteval_commands()
+        missing = [line for line in opteval_gpu if identity_of_opt_line(line) not in done]
+        _write('opteval_missing_a_gpu.txt', missing[0::2])
+        _write('opteval_missing_b_gpu.txt', missing[1::2])
         sys.exit(0)
     if 'opteval_missing' in sys.argv[1:]:
         done = completed_opteval()
