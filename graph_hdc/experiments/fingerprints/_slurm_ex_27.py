@@ -68,6 +68,8 @@ Usage (from the fingerprints folder of the ex_27 worktree on JUPITER):
     sbatch --export=ALL,EX27_STAGE=fixed run_ex27.sbatch
     python _slurm_ex_27.py missing      # after an interrupted fixed stage (no ex_27 job running): fixed_missing.txt
     sbatch --export=ALL,EX27_STAGE=fixed,GPU_FILE=fixed_missing.txt run_ex27.sbatch
+    python _slurm_ex_27.py fixed_split  # alternatively: the (remaining) fixed stage as two shorter jobs side by side
+    sbatch --export=ALL,EX27_STAGE=fixed_a --time=04:00:00 run_ex27.sbatch     (and the same with fixed_b)
     sbatch --export=ALL,EX27_STAGE=opt,GPU_J=88 run_ex27.sbatch     # an interrupted study resumes when resubmitted
     python _slurm_ex_27.py opteval      # after all studies are complete
     sbatch --export=ALL,EX27_STAGE=opteval run_ex27.sbatch
@@ -452,6 +454,37 @@ def fixed_commands() -> list:
     return [line for group, line in sorted(lines, key=lambda gl: -expected_cost(gl[0]))]
 
 
+def standard_hdf_cache_exists(name: str) -> bool:
+    """Whether the full-data encoding of a dataset with the standard HDF encoder (HDF) is in the .cache folder."""
+    key = (f'hdc_{name}__codebook_{CODEBOOK_SEED}__size_{HDF["EMBEDDING_SIZE"]}__depth_{HDF["NUM_LAYERS"]}'
+           f'__bidir__totalh__unitspec')
+    return bool(glob.glob(os.path.join(PATH, '.cache', key + '.pkl*')))
+
+
+def fixed_split(lines: list) -> tuple:
+    """
+    (warmup A, runs A, runs B) of the given fixed-stage lines for two jobs on two nodes at the same time (short jobs
+    start sooner on JUPITER): B gets only datasets whose standard HDF encoding already exists, so that it writes no
+    cache and needs no warmup; A gets the warmup of the other datasets and their runs. The QM9 runs alternate between
+    A and B (they take longest); the other runs of datasets with an existing encoding go to B.
+    """
+    warmup, runs_a, runs_b = [], [], []
+    missing = {name for _, name, _, _ in GROUPS if not standard_hdf_cache_exists(name)}
+    qm9 = 0
+    for line in lines:
+        name = params_of_line(line)['DATASET_NAME']
+        if name in missing:
+            runs_a.append(line)
+        elif group_of_note_line(line) == 'qm9':
+            (runs_a if qm9 % 2 == 0 else runs_b).append(line)
+            qm9 += 1
+        else:
+            runs_b.append(line)
+    warmup = [line for line in warmup_commands([group for group, *_ in GROUPS])
+              if params_of_line(line)['DATASET_NAME'] in missing]
+    return warmup, runs_a, runs_b
+
+
 def identity_of_line(line: str) -> tuple:
     """(method, NOTE, SEED) of a command line."""
     module = re.search(r'predict_molecules__(\w+)\.py', line).group(1)
@@ -494,6 +527,15 @@ if __name__ == '__main__':
     if 'missing' in sys.argv[1:]:
         done = completed(PREFIX_FIXED)
         _write('fixed_missing.txt', [line for line in fixed_commands() if identity_of_line(line) not in done])
+        sys.exit(0)
+    if 'fixed_split' in sys.argv[1:]:
+        # the not yet completed fixed-stage runs as two jobs (stages fixed_a and fixed_b, see fixed_split)
+        done = completed(PREFIX_FIXED)
+        split_warmup, split_a, split_b = fixed_split([line for line in fixed_commands()
+                                                      if identity_of_line(line) not in done])
+        _write('fixed_a_warmup.txt', split_warmup)
+        _write('fixed_a_gpu.txt', split_a)
+        _write('fixed_b_gpu.txt', split_b)
         sys.exit(0)
     if 'opteval' in sys.argv[1:]:
         opteval_primer, opteval_warmup, opteval_gpu = opteval_commands()
