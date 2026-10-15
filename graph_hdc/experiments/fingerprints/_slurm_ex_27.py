@@ -71,8 +71,10 @@ Usage (from the fingerprints folder of the ex_27 worktree on JUPITER):
     python _slurm_ex_27.py fixed_split  # alternatively: the (remaining) fixed stage as two shorter jobs side by side
     sbatch --export=ALL,EX27_STAGE=fixed_a --time=04:00:00 run_ex27.sbatch     (and the same with fixed_b)
     sbatch --export=ALL,EX27_STAGE=opt,GPU_J=88 run_ex27.sbatch     # an interrupted study resumes when resubmitted
+    python _slurm_ex_27.py opt_split    # alternatively: two shorter jobs side by side (stages opt_a and opt_b)
     python _slurm_ex_27.py opteval      # after all studies are complete
     sbatch --export=ALL,EX27_STAGE=opteval run_ex27.sbatch
+    python _slurm_ex_27.py opteval_split   # alternatively: stages opteval_a and opteval_b
     python _slurm_ex_27.py opteval_missing   # after an interrupted opteval (no ex_27 job running)
     sbatch --export=ALL,EX27_STAGE=opteval,GPU_FILE=opteval_missing.txt run_ex27.sbatch
     python analyze_ex_27.py opt
@@ -485,6 +487,41 @@ def fixed_split(lines: list) -> tuple:
     return warmup, runs_a, runs_b
 
 
+# rough minutes of a single-target run on a GPU, by group (JUPITER check 2323871: QM9 ~17 min per target + loading)
+RUN_MINUTES = {'qm9': 20, 'compas': 7}
+
+
+def opt_split() -> tuple:
+    """
+    (primer A, warmup A, studies A, studies B) of the opt stage for two jobs side by side: the HDF studies need the
+    warmup (their encodings), so they run in job A after it; the fingerprint studies read only the dataset caches,
+    which exist (JUPITER: copied from ex_13, including the 10% tuning subsamples of seed 420), and start at once in B.
+    """
+    primer, warmup = opt_warmup_commands()
+    studies = opt_study_commands()
+    return (primer, warmup, [line for line in studies if line.split()[2] == 'hdf'],
+            [line for line in studies if line.split()[2] != 'hdf'])
+
+
+def opteval_split() -> tuple:
+    """
+    (primer A, warmup A, runs A, runs B) of the opteval stage for two jobs side by side: job A runs the warmup (the
+    encodings of the chosen HDF configurations) and all HDF runs; the fingerprint runs, which need no warmup, are
+    assigned to the job with less expected work (A's HDF work counted first), the longest first.
+    """
+    primer, warmup, runs = opteval_commands()
+    runs_a = [line for line in runs if 'predict_molecules__hdc.py' in line]
+    load = {'a': sum(RUN_MINUTES.get(group_of_note_line(line), 1.5) for line in runs_a), 'b': 0.0}
+    runs_b = []
+    for line in runs:
+        if 'predict_molecules__hdc.py' in line:
+            continue
+        job = min(load, key=load.get)
+        (runs_a if job == 'a' else runs_b).append(line)
+        load[job] += RUN_MINUTES.get(group_of_note_line(line), 1.5)
+    return primer, warmup, runs_a, runs_b
+
+
 def identity_of_line(line: str) -> tuple:
     """(method, NOTE, SEED) of a command line."""
     module = re.search(r'predict_molecules__(\w+)\.py', line).group(1)
@@ -542,6 +579,15 @@ if __name__ == '__main__':
         _write('opteval_primer.txt', opteval_primer)
         _write('opteval_warmup.txt', opteval_warmup)
         _write('opteval_gpu.txt', opteval_gpu)
+        sys.exit(0)
+    if 'opt_split' in sys.argv[1:]:
+        for name, lines in zip(('opt_a_primer', 'opt_a_warmup', 'opt_a_gpu', 'opt_b_gpu'), opt_split()):
+            _write(f'{name}.txt', lines)
+        sys.exit(0)
+    if 'opteval_split' in sys.argv[1:]:
+        for name, lines in zip(('opteval_a_primer', 'opteval_a_warmup', 'opteval_a_gpu', 'opteval_b_gpu'),
+                               opteval_split()):
+            _write(f'{name}.txt', lines)
         sys.exit(0)
     if 'opteval_missing' in sys.argv[1:]:
         done = completed_opteval()
