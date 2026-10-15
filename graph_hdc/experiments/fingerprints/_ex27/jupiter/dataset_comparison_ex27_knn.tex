@@ -1,0 +1,187 @@
+\begin{tabular}{llrccccc}
+\toprule
+ &  &  & HDF & Morgan & RDKit & Torsion & AtomPair \\
+\midrule
+
+\multicolumn{3}{l}{Median Rank} &
+$2$ &
+$3$ &
+$5$ &
+$3$ &
+$2$ \\
+
+\multicolumn{3}{l}{Median rel. deviation} &
+$2.0\%$ &
+$27.3\%$ &
+$47.6\%$ &
+$58.8\%$ &
+$22.8\%$ \\
+
+\multicolumn{3}{l}{Max. rel. deviation} &
+$45\%$ &
+$76{,}454\%$ &
+$104{,}797\%$ &
+$66{,}301\%$ &
+$57{,}464\%$ \\
+
+\arrayrulecolor{gray}\midrule\arrayrulecolor{black}
+
+Dataset & Quantity & Datapoints & HDF & Morgan & RDKit & Torsion & AtomPair \\
+
+\arrayrulecolor{gray}\midrule\arrayrulecolor{black}
+
+HOPV15 &
+PCE \qunit{\%} &
+176 &
+$\underset{\color{darkgray} \pm0.22}{ 1.857 }$ &
+$\underset{\color{darkgray} \pm0.28}{ 1.608 }$ &
+$\underset{\color{darkgray} \pm0.28}{ 1.569 }$ &
+$\underset{\color{darkgray} \pm0.27}{\mathbf{ 1.566 }}$ &
+$\underset{\color{darkgray} \pm0.22}{ 1.612 }$ \\
+
+ &
+$V_{oc}$ \qunit{V} &
+176 &
+$\underset{\color{darkgray} \pm0.02}{ 0.117 }$ &
+$\underset{\color{darkgray} \pm0.03}{ 0.110 }$ &
+$\underset{\color{darkgray} \pm0.02}{ 0.115 }$ &
+$\underset{\color{darkgray} \pm0.02}{ 0.110 }$ &
+$\underset{\color{darkgray} \pm0.02}{\mathbf{ 0.106 }}$ \\
+
+FreeSolv &
+$\Delta G$ \qunit{kcal/mol} &
+639 &
+$\underset{\color{darkgray} \pm0.11}{ 1.994 }$ &
+$\underset{\color{darkgray} \pm0.24}{ 1.755 }$ &
+$\underset{\color{darkgray} \pm0.19}{\mathbf{ 1.379 }}$ &
+$\underset{\color{darkgray} \pm0.17}{ 2.292 }$ &
+$\underset{\color{darkgray} \pm0.20}{ 1.693 }$ \\
+
+BACE &
+IC50 \qunit{pIC50} &
+1513 &
+$\underset{\color{darkgray} \pm0.04}{ 0.575 }$ &
+$\underset{\color{darkgray} \pm0.04}{ 0.559 }$ &
+$\underset{\color{darkgray} \pm0.04}{ 0.612 }$ &
+$\underset{\color{darkgray} \pm0.05}{ 0.559 }$ &
+$\underset{\color{darkgray} \pm0.06}{\mathbf{ 0.554 }}$ \\
+
+LIPOP &
+LogD &
+4199 &
+$\underset{\color{darkgray} \pm0.03}{ 0.673 }$ &
+$\underset{\color{darkgray} \pm0.02}{ 0.694 }$ &
+$\underset{\color{darkgray} \pm0.03}{ 0.724 }$ &
+$\underset{\color{darkgray} \pm0.02}{ 0.696 }$ &
+$\underset{\color{darkgray} \pm0.02}{\mathbf{ 0.660 }}$ \\
+
+AqSolDB &
+logS \qunit{log\,M} &
+9887 &
+$\underset{\color{darkgray} \pm0.01}{\mathbf{ 0.767 }}$ &
+$\underset{\color{darkgray} \pm0.02}{ 0.978 }$ &
+$\underset{\color{darkgray} \pm0.02}{ 1.021 }$ &
+$\underset{\color{darkgray} \pm0.02}{ 0.953 }$ &
+$\underset{\color{darkgray} \pm0.03}{ 0.796 }$ \\
+
+clogp &
+ClogP &
+9887 &
+$\underset{\color{darkgray} \pm0.02}{\mathbf{ 0.486 }}$ &
+$\underset{\color{darkgray} \pm0.02}{ 0.807 }$ &
+$\underset{\color{darkgray} \pm0.03}{ 0.913 }$ &
+$\underset{\color{darkgray} \pm0.02}{ 0.772 }$ &
+$\underset{\color{darkgray} \pm0.02}{ 0.566 }$ \\
+
+COMPAS-3X &
+$U_0$ \qunit{eV} &
+39482 &
+$\underset{\color{darkgray} \pm0.06}{\mathbf{ 0.145 }}$ &
+$\underset{\color{darkgray} \pm1.58}{ 111.004 }$ &
+$\underset{\color{darkgray} \pm26.56}{ 152.101 }$ &
+$\underset{\color{darkgray} \pm3.39}{ 96.281 }$ &
+$\underset{\color{darkgray} \pm2.98}{ 83.468 }$ \\
+
+ &
+Gap \qunit{eV} &
+39482 &
+$\underset{\color{darkgray} \pm0.00}{ 0.153 }$ &
+$\underset{\color{darkgray} \pm0.00}{\mathbf{ 0.109 }}$ &
+$\underset{\color{darkgray} \pm0.02}{ 0.249 }$ &
+$\underset{\color{darkgray} \pm0.00}{ 0.190 }$ &
+$\underset{\color{darkgray} \pm0.00}{ 0.234 }$ \\
+
+ &
+$\mu$ \qunit{D} &
+39482 &
+$\underset{\color{darkgray} \pm0.000}{ 0.0484 }$ &
+$\underset{\color{darkgray} \pm0.000}{\mathbf{ 0.0389 }}$ &
+$\underset{\color{darkgray} \pm0.004}{ 0.0574 }$ &
+$\underset{\color{darkgray} \pm0.001}{ 0.0546 }$ &
+$\underset{\color{darkgray} \pm0.001}{ 0.0563 }$ \\
+
+QM9 &
+$\mu$ \qunit{D} &
+133882 &
+$\underset{\color{darkgray} \pm0.01}{ 0.688 }$ &
+$\underset{\color{darkgray} \pm0.00}{ 0.669 }$ &
+$\underset{\color{darkgray} \pm0.00}{\mathbf{ 0.648 }}$ &
+$\underset{\color{darkgray} \pm0.01}{ 0.827 }$ &
+$\underset{\color{darkgray} \pm0.00}{ 0.656 }$ \\
+
+ &
+$C_v$ \qunit{cal/(mol\,K)} &
+133882 &
+$\underset{\color{darkgray} \pm0.01}{\mathbf{ 0.911 }}$ &
+$\underset{\color{darkgray} \pm0.01}{ 1.994 }$ &
+$\underset{\color{darkgray} \pm0.02}{ 2.517 }$ &
+$\underset{\color{darkgray} \pm0.01}{ 1.909 }$ &
+$\underset{\color{darkgray} \pm0.01}{ 1.136 }$ \\
+
+ &
+$ZPVE$ \qunit{Ha} &
+133882 &
+$\underset{\color{darkgray} \pm0.0000}{\mathbf{ 0.00415 }}$ &
+$\underset{\color{darkgray} \pm0.0001}{ 0.01269 }$ &
+$\underset{\color{darkgray} \pm0.0001}{ 0.01431 }$ &
+$\underset{\color{darkgray} \pm0.0001}{ 0.01305 }$ &
+$\underset{\color{darkgray} \pm0.0001}{ 0.00792 }$ \\
+
+ &
+$\alpha$ \qunit{$a_0^3$} &
+133882 &
+$\underset{\color{darkgray} \pm0.01}{\mathbf{ 1.274 }}$ &
+$\underset{\color{darkgray} \pm0.02}{ 4.842 }$ &
+$\underset{\color{darkgray} \pm0.02}{ 4.280 }$ &
+$\underset{\color{darkgray} \pm0.02}{ 4.513 }$ &
+$\underset{\color{darkgray} \pm0.02}{ 2.772 }$ \\
+
+ &
+$\Delta H$ \qunit{Ha} &
+133882 &
+$\underset{\color{darkgray} \pm0.06}{\mathbf{ 3.471 }}$ &
+$\underset{\color{darkgray} \pm0.19}{ 23.786 }$ &
+$\underset{\color{darkgray} \pm0.10}{ 17.483 }$ &
+$\underset{\color{darkgray} \pm0.24}{ 22.380 }$ &
+$\underset{\color{darkgray} \pm0.11}{ 13.951 }$ \\
+
+ &
+$U_0$ \qunit{Ha} &
+133882 &
+$\underset{\color{darkgray} \pm0.06}{\mathbf{ 3.471 }}$ &
+$\underset{\color{darkgray} \pm0.19}{ 23.787 }$ &
+$\underset{\color{darkgray} \pm0.10}{ 17.484 }$ &
+$\underset{\color{darkgray} \pm0.24}{ 22.380 }$ &
+$\underset{\color{darkgray} \pm0.11}{ 13.952 }$ \\
+
+ &
+Gap \qunit{Ha} &
+133882 &
+$\underset{\color{darkgray} \pm0.0001}{ 0.01050 }$ &
+$\underset{\color{darkgray} \pm0.0001}{ 0.01087 }$ &
+$\underset{\color{darkgray} \pm0.0001}{\mathbf{ 0.00950 }}$ &
+$\underset{\color{darkgray} \pm0.0001}{ 0.01392 }$ &
+$\underset{\color{darkgray} \pm0.0001}{ 0.00986 }$ \\
+
+\bottomrule
+\end{tabular}
