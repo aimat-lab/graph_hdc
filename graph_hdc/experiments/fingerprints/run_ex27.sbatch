@@ -106,6 +106,10 @@ for barrier in "$PRIMER_FILE" "$WARMUP_FILE"; do
     if [ "$failed" -ne 0 ]; then
         echo "FATAL: $failed run(s) of $(basename "$barrier") failed; delete their (possibly truncated) cache files" \
              "(hdc_*, load__*, stats_*) before a new attempt"
+        # queued follow-up rounds of this chain (same job name) would only fail on the same cache files: cancel them
+        scancel --user="$USER" --state=PENDING --name="$SLURM_JOB_NAME" \
+            && echo "cancelled the pending jobs named $SLURM_JOB_NAME"
+        kill $monitor_pids 2>/dev/null
         rm -rf "$TMPDIR"
         exit 3
     fi

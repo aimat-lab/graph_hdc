@@ -40,7 +40,7 @@ import json
 import numpy as np
 
 from _slurm_ex_27 import (PATH, OUT, PREFIX_CHECK, PREFIX_CPUPROD, PREFIX_SMOKE, PREFIX_FIXED, PREFIX_OPT, GROUP,
-                          TARGET_INDEX, METHODS, CHECK_TARGETS, CHECK_METHODS, CHECK_SEEDS, SMOKE_GROUPS,
+                          TARGET_INDEX, METHODS, SEEDS, CHECK_TARGETS, CHECK_METHODS, CHECK_SEEDS, SMOKE_GROUPS,
                           method_of_params, method_of_module, check_variant, group_of_note, best_trial, best_params,
                           matches_params)
 
@@ -345,16 +345,21 @@ def report_fixed(lines: list):
         f.write('target,method,model,mean,std,n\n')
         for (note, method, model), (mean, std, n) in summary.items():
             f.write(f'{note},{method},{model},{mean!r},{std!r},{n}\n')
-    complete = all(summary[(note, method, model)][2] > 0 for note, *_ in ROWS for method, *_ in METHODS
+    # the tables only with every seed in every cell; an older table of an incomplete state is removed
+    complete = all(summary[(note, method, model)][2] == len(SEEDS) for note, *_ in ROWS for method, *_ in METHODS
                    for model in ('mlp', 'knn'))
-    if complete:
-        for model in ('mlp', 'knn'):
-            with open(os.path.join(OUT, f'dataset_comparison_ex27_{model}.tex'), 'w') as f:
+    for model in ('mlp', 'knn'):
+        path = os.path.join(OUT, f'dataset_comparison_ex27_{model}.tex')
+        if complete:
+            with open(path, 'w') as f:
                 f.write(tabular(summary, model, datapoints))
+        elif os.path.exists(path):
+            os.remove(path)
+    if complete:
         say('\nwrote _ex27/fixed_runs.csv, fixed_summary.csv, dataset_comparison_ex27_mlp.tex, '
             'dataset_comparison_ex27_knn.tex')
     else:
-        say('\nnot every cell has results: wrote only fixed_runs.csv and fixed_summary.csv')
+        say(f'\nnot every cell has all {len(SEEDS)} seeds: wrote only fixed_runs.csv and fixed_summary.csv')
 
 
 # the parameters of a chosen configuration in the table of the optimized configurations (opt_configs.csv)
@@ -420,12 +425,16 @@ def report_opt(lines: list):
                 params = json.loads(trial.user_attrs['params'])
                 cells = [str(params.get(k, '')).replace(',', ';') for k in CONFIG_KEYS]
                 f.write(f'{note},{method},{trial.value!r},' + ','.join(cells) + '\n')
-    if all(summary[(note, method, 'mlp')][2] > 0 for note, *_ in ROWS for method, *_ in METHODS):
-        with open(os.path.join(OUT, 'dataset_comparison_ex27_opt.tex'), 'w') as f:
+    # the table only with every seed of the current best configuration in every cell; an older table is removed
+    path = os.path.join(OUT, 'dataset_comparison_ex27_opt.tex')
+    if all(summary[(note, method, 'mlp')][2] == len(SEEDS) for note, *_ in ROWS for method, *_ in METHODS):
+        with open(path, 'w') as f:
             f.write(tabular(summary, 'mlp', datapoints))
         say('\nwrote _ex27/opt_runs.csv, opt_configs.csv, dataset_comparison_ex27_opt.tex')
     else:
-        say('\nnot every cell has results: wrote only opt_runs.csv and opt_configs.csv')
+        if os.path.exists(path):
+            os.remove(path)
+        say(f'\nnot every cell has all {len(SEEDS)} seeds: wrote only opt_runs.csv and opt_configs.csv')
 
 
 if __name__ == '__main__':

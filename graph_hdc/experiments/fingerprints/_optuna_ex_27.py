@@ -3,11 +3,12 @@ One Optuna study of the optimized table of Experiment 27 (stage ``opt`` of _slur
 
 Every method gets the same budget (user decisions 2026-10-13): OPT_TRIALS complete trials of TPE per method and target.
 A trial runs predict_molecules__<module>.py with the trial's representation and MLP parameters (suggest_params) on the
-tuning split (seed OPT_SEED, not one of the evaluation seeds; QM9 and COMPAS-3X subsampled to 10%), MLP only, as a
+tuning split (seed OPT_SEED, not one of the evaluation seeds; the full dataset, see OPT_SUBSAMPLED), MLP only, as a
 subprocess on the GPU of the calling slot, and reads the objective from the run's archive: the MAE on the run's
 held-out validation split (metrics val_neural_net2), in the units of the target. The study is stored as a journal in
-_ex27/optuna/<method>__<target>.log, so that a resubmitted study continues with its complete trials. A trial whose run
-fails is recorded as failed and not counted; after MAX_FAILURES failed trials the study stops.
+OPT_DIR/<method>__<target>.log (round 2: _ex27/optuna_full), so that a resubmitted study continues with its complete
+trials. A trial whose run fails is recorded as failed and not counted; after MAX_FAILURES failed trials (counted over
+all submissions) the study stops.
 
     python _optuna_ex_27.py <method> <target note> [number of trials, default OPT_TRIALS; for tests]
 """
