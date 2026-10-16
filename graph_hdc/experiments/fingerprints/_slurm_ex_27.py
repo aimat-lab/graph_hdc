@@ -44,9 +44,10 @@ as a barrier, then the GPU file and the CPU file side by side):
   Files: fixed_warmup.txt, fixed_gpu.txt (longest first)
 * ``opt``: one Optuna study per method and target (5 x 17 = 85 studies of OPT_TRIALS trials), each a process of
   _optuna_ex_27.py that runs its trials one after the other on the GPU of its slot. A trial is a run (prefix
-  ex_27_trial__<method>__<target>__<number>) with the trial's parameters on the tuning split: SEED OPT_SEED (as the
-  tuning seed of ex_13, not one of the evaluation seeds), QM9 and COMPAS-3X subsampled to 10% (NUM_DATA 0.1), MLP only;
-  the objective is its validation MAE. Search spaces: see suggest_params (user decisions 2026-10-13).
+  <PREFIX_TRIAL>__<method>__<target>__<number>) with the trial's parameters on the tuning split: SEED OPT_SEED (as the
+  tuning seed of ex_13, not one of the evaluation seeds), the full dataset, MLP only; the objective is its validation
+  MAE. Search spaces: see suggest_params (user decisions 2026-10-13). Round 1 tuned QM9 and COMPAS-3X on a 10%
+  subsample; round 2 re-tunes these 50 studies on the full data (see OPT_DIR; stage optfull_a / optfull_b).
   Files: opt_primer.txt and opt_warmup.txt (every HDF encoding the trials can ask for), opt_gpu.txt (the studies)
 * ``opteval`` (prefix ex_27_opt): the best configuration of every study, evaluated over the seeds 0-9 on the full data
   (MLP only; one run per target, as the configurations differ). Written by ``python _slurm_ex_27.py opteval`` after the
@@ -72,6 +73,9 @@ Usage (from the fingerprints folder of the ex_27 worktree on JUPITER):
     sbatch --export=ALL,EX27_STAGE=fixed_a --time=04:00:00 run_ex27.sbatch     (and the same with fixed_b)
     sbatch --export=ALL,EX27_STAGE=opt,GPU_J=88 run_ex27.sbatch     # an interrupted study resumes when resubmitted
     python _slurm_ex_27.py opt_split    # alternatively: two shorter jobs side by side (stages opt_a and opt_b)
+    python _slurm_ex_27.py opt_full_init   # round 2, once: the 35 full-data journals of round 1 into OPT_DIR
+    python _slurm_ex_27.py optfull_split   # round 2: stages optfull_a (warmup + HDF studies) and optfull_b; a study
+                                           # needs more than one 4 h job, so resubmit (or chain) until all are done
     python _slurm_ex_27.py opteval      # after all studies are complete
     sbatch --export=ALL,EX27_STAGE=opteval run_ex27.sbatch
     python _slurm_ex_27.py opteval_split   # alternatively: stages opteval_a and opteval_b
@@ -153,13 +157,20 @@ SMOKE_GROUPS = ['hopv15', 'freesolv', 'clogp']
 NN_SEED_OFFSET = 100
 
 # --- optimized table (stages opt and opteval) ---
-PREFIX_TRIAL = 'ex_27_trial'
+# Round 2 (user decision 2026-10-16): every study tunes on the full dataset. Round 1 (journals in _ex27/optuna, trials
+# ex_27_trial__*) tuned QM9 and COMPAS-3X on a 10% subsample, as ex_13 did; with the epochs fixed, its trials made 10x
+# fewer gradient steps, and the configurations chosen there (larger learning rates, smaller networks and embeddings)
+# transferred poorly to the full data. The 35 studies of the other datasets were already tuned on the full data and are
+# taken over unchanged (opt_full_init copies their journals); the 50 studies of ROUND2_GROUPS are run again.
+PREFIX_TRIAL = 'ex_27_trialfull'
 PREFIX_OPT = 'ex_27_opt'
 OPT_TRIALS = 30
 OPT_SEED = 420
-# the groups whose datasets are subsampled to 10% on the tuning split (as in ex_13)
-OPT_SUBSAMPLED = {'qm9': 0.1, 'compas': 0.1}
-OPT_DIR = os.path.join(OUT, 'optuna')
+# the groups whose datasets are subsampled on the tuning split (round 1: {'qm9': 0.1, 'compas': 0.1})
+OPT_SUBSAMPLED = {}
+OPT_DIR = os.path.join(OUT, 'optuna_full')
+OPT_DIR_ROUND1 = os.path.join(OUT, 'optuna')
+ROUND2_GROUPS = ('qm9', 'compas')
 SIZES = [1024, 2048, 4096, 8192]
 HDF_DEPTHS = [1, 2, 3]
 HIDDEN = {'10,10': (10, 10), '50,50': (50, 50), '100,100': (100, 100)}
@@ -284,14 +295,14 @@ def split_primer(lines: list) -> tuple:
     return primer, rest
 
 
-def opt_warmup_commands() -> tuple:
+def opt_warmup_commands(groups: tuple = None) -> tuple:
     """
     (primer, rest): every HDF encoding the trials can ask for (size x depth x graph size and diameter) on the tuning
-    splits, the first of every dataset in the primer (see split_primer).
+    splits of the datasets of the groups (default: all), the first of every dataset in the primer (see split_primer).
     """
     lines, seen = [], set()
     for group, name, _notes, _extra in GROUPS:
-        if name in seen:
+        if name in seen or (groups is not None and group not in groups):
             continue
         seen.add(name)
         for size in reversed(SIZES):
@@ -300,6 +311,50 @@ def opt_warmup_commands() -> tuple:
                     encoder = {'EMBEDDING_SIZE': size, 'NUM_LAYERS': depth, 'GRAPH_ATTRIBUTES': attributes}
                     lines.append((group, hdf_warmup_command(name, OPT_SEED, opt_num_data(plain_group(name)), encoder)))
     return split_primer([line for group, line in sorted(lines, key=lambda gl: -expected_cost(gl[0]))])
+
+
+def opt_full_init():
+    """
+    Round 2: copy the journals of the round-1 studies that were already tuned on the full data (all groups except
+    ROUND2_GROUPS) into OPT_DIR, so that OPT_DIR holds all 85 studies of the final protocol. Existing files are kept.
+    """
+    import shutil
+    os.makedirs(OPT_DIR, exist_ok=True)
+    copied = 0
+    for method, *_ in METHODS:
+        for group, _, notes, _ in GROUPS:
+            if group in ROUND2_GROUPS:
+                continue
+            for note in notes:
+                source = os.path.join(OPT_DIR_ROUND1, f'{method}__{note}.log')
+                target = os.path.join(OPT_DIR, f'{method}__{note}.log')
+                if not os.path.exists(target):
+                    shutil.copy2(source, target)
+                    copied += 1
+    print(f'copied {copied} round-1 journals of full-data studies to {os.path.relpath(OPT_DIR, PATH)}')
+
+
+def optfull_split() -> tuple:
+    """
+    Round 2 as two jobs side by side: (primer A, warmup A, studies A, studies B) for the studies of ROUND2_GROUPS. Job A
+    writes the full-data HDF encodings and runs the HDF studies after them; the fingerprint studies, which need no
+    warmup, are assigned to the job with less expected work (a QM9 study counts 1, a COMPAS-3X study 0.3).
+    """
+    primer, warmup = opt_warmup_commands(ROUND2_GROUPS)
+    studies = [(group, method, f'python _optuna_ex_27.py {method} {note}')
+               for method, *_ in METHODS for group, _, notes, _ in GROUPS if group in ROUND2_GROUPS for note in notes]
+    cost = {'qm9': 1.0, 'compas': 0.3}
+    studies_a = [(g, line) for g, method, line in studies if method == 'hdf']
+    studies_b = []
+    load = {'a': sum(cost[g] for g, _ in studies_a), 'b': 0.0}
+    for group, method, line in sorted(studies, key=lambda s: -cost[s[0]]):
+        if method == 'hdf':
+            continue
+        job = min(load, key=load.get)
+        (studies_a if job == 'a' else studies_b).append((group, line))
+        load[job] += cost[group]
+    order = lambda pairs: [line for g, line in sorted(pairs, key=lambda gl: -cost[gl[0]])]
+    return primer, warmup, order(studies_a), order(studies_b)
 
 
 def opt_study_commands() -> list:
@@ -581,6 +636,14 @@ if __name__ == '__main__':
         _write('opteval_primer.txt', opteval_primer)
         _write('opteval_warmup.txt', opteval_warmup)
         _write('opteval_gpu.txt', opteval_gpu)
+        sys.exit(0)
+    if 'opt_full_init' in sys.argv[1:]:
+        opt_full_init()
+        sys.exit(0)
+    if 'optfull_split' in sys.argv[1:]:
+        for name, lines in zip(('optfull_a_primer', 'optfull_a_warmup', 'optfull_a_gpu', 'optfull_b_gpu'),
+                               optfull_split()):
+            _write(f'{name}.txt', lines)
         sys.exit(0)
     if 'opt_split' in sys.argv[1:]:
         for name, lines in zip(('opt_a_primer', 'opt_a_warmup', 'opt_a_gpu', 'opt_b_gpu'), opt_split()):
