@@ -1,0 +1,70 @@
+1399 archives of ex_27_opt, 1350 done
+   NOT DONE ex_27_opt__15_10_2026__16_52__1DZv: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__16_52__Ha4h: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__16_52__Kdim: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__16_52__WlAd: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__16_52__XZg4: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__16_52__z4gC: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__16_58__KDcA: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__16_58__maYP: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__16_58__tHPO: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__16_58__zfLT: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_03__JrpA: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_03__XIz1: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_03__d7Lp: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_07__5rHH: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_07__CAdk: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_07__US2g: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_08__FdBq: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_11__MZjO: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_11__RkZb: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_13__16Vz: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_15__u34N: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_15__uZou: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_17__irJj: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_18__6KPH: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_18__YTEd: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_21__gVLS: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_21__pL2j: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_22__UoRz: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_24__rr0h: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_25__tJfq: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_26__2MCG: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_29__qDaK: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_30__ISow: error=AcceleratorError
+   NOT DONE ex_27_opt__15_10_2026__17_30__jyfP: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_30__n1JU: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_31__FvYx: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_31__pxZN: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_34__44uX: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_34__nYJC: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_34__tXZ9: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_35__5stb: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_35__LVM9: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__17_35__nRQo: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__18_04__RPNu: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__18_12__oNYc: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__18_13__WmJk: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__18_23__XTjg: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__18_24__QQAk: error=OutOfMemoryError
+   NOT DONE ex_27_opt__15_10_2026__18_29__Hurl: error=OutOfMemoryError
+skipped 500 archives whose configuration is not (or no longer) the best of their study
+hopv15_pce           hdf 1.656+-0.36 (10)  morgan 1.6426+-0.23 (10)  rdkit 1.6363+-0.39 (10)  torsion 1.5726+-0.25 (10)  atompair 1.4786+-0.28 (10)
+hopv15_voc           hdf 0.10754+-0.026 (10)  morgan 0.10343+-0.022 (10)  rdkit 0.11423+-0.027 (10)  torsion 0.10615+-0.026 (10)  atompair 0.10849+-0.014 (10)
+freesolv_hfe         hdf 0.80706+-0.12 (10)  morgan 0.94446+-0.17 (10)  rdkit 0.95638+-0.13 (10)  torsion 1.1387+-0.17 (10)  atompair 1.064+-0.14 (10)
+bace_ic50            hdf 0.54286+-0.038 (10)  morgan 0.5275+-0.056 (10)  rdkit 0.53393+-0.043 (10)  torsion 0.52022+-0.044 (10)  atompair 0.52681+-0.045 (10)
+lipophilicity_logD   hdf 0.46915+-0.018 (10)  morgan 0.51501+-0.027 (10)  rdkit 0.5872+-0.023 (10)  torsion 0.52324+-0.013 (10)  atompair 0.49438+-0.018 (10)
+aqsoldb_logs         hdf 0.59807+-0.02 (10)  morgan 0.72292+-0.023 (10)  rdkit 0.71527+-0.022 (10)  torsion 0.65912+-0.014 (10)  atompair 0.59972+-0.011 (10)
+clogp                hdf 0.17905+-0.01 (10)  morgan 0.48159+-0.025 (10)  rdkit 0.55038+-0.028 (10)  torsion 0.39557+-0.02 (10)  atompair 0.26436+-0.017 (10)
+compas_energy        hdf 0.95753+-0.16 (10)  morgan 18.495+-0.94 (10)  rdkit 133.41+-3.2 (10)  torsion 36.629+-0.99 (10)  atompair 77.811+-1.4 (10)
+compas_gap           hdf 0.096626+-0.0016 (10)  morgan 0.024195+-0.00041 (10)  rdkit 0.22756+-0.0032 (10)  torsion 0.089473+-0.0012 (10)  atompair 0.22078+-0.005 (10)
+compas_dipole        hdf 0.04187+-0.00046 (10)  morgan 0.018887+-0.00033 (10)  rdkit 0.054118+-0.0006 (10)  torsion 0.041683+-0.00059 (10)  atompair 0.052228+-0.0013 (10)
+qm9_dipole           hdf 0.53004+-0.0038 (10)  morgan 0.5045+-0.0052 (10)  rdkit 0.54801+-0.0064 (10)  torsion 0.57775+-0.005 (10)  atompair 0.57682+-0.0057 (10)
+qm9_cv               hdf 0.27172+-0.0046 (10)  morgan 0.53768+-0.008 (10)  rdkit 0.41225+-0.0067 (10)  torsion 0.42092+-0.0075 (10)  atompair 0.28316+-0.0048 (10)
+qm9_zpve             hdf 0.00072324+-1.7e-05 (10)  morgan 0.0028396+-6e-05 (10)  rdkit 0.0021913+-0.00011 (10)  torsion 0.0015663+-5.4e-05 (10)  atompair 0.0011208+-2.4e-05 (10)
+qm9_alpha            hdf 0.52594+-0.0079 (10)  morgan 1.1994+-0.02 (10)  rdkit 0.89967+-0.018 (10)  torsion 0.82797+-0.024 (10)  atompair 0.59066+-0.0096 (10)
+qm9_enthalpy         hdf 0.52435+-0.038 (10)  morgan 4.4386+-0.14 (10)  rdkit 2.1681+-0.046 (10)  torsion 2.1372+-0.068 (10)  atompair 1.1553+-0.03 (10)
+qm9_energy           hdf 0.58874+-0.052 (10)  morgan 4.0039+-0.11 (10)  rdkit 2.4859+-0.032 (10)  torsion 2.0308+-0.084 (10)  atompair 1.3117+-0.039 (10)
+qm9_gap              hdf 0.0065653+-5.2e-05 (10)  morgan 0.0059729+-5e-05 (10)  rdkit 0.0054075+-6.6e-05 (10)  torsion 0.0067085+-0.00011 (10)  atompair 0.0065711+-8.1e-05 (10)
+
+wrote _ex27/opt_runs.csv, opt_configs.csv, dataset_comparison_ex27_opt.tex
