@@ -75,36 +75,39 @@ CPU_J, GPU_J = max(1, 240 // RF_THREADS), 24
 SUBMIT = f'CPU_J={CPU_J},CPU_THREADS={RF_THREADS},GPU_J={GPU_J}'
 
 
-def suggest_params(trial, model: str, method: str) -> dict:
-    """The run parameters of one trial: the representation space of ex_27 and the model space (see the docstring)."""
-    _module, feat, metric = METHOD[method]
-    params = dict(feat)
+def search_space(model: str, method: str) -> list:
+    """
+    The search space of a study as [(Optuna parameter name, choices, run parameter)]: the representation space of
+    ex_27, then the model space (see the docstring). Every parameter is categorical.
+    """
     if method == 'hdf':
-        params['EMBEDDING_SIZE'] = trial.suggest_categorical('size', SIZES)
-        params['NUM_LAYERS'] = trial.suggest_categorical('depth', HDF_DEPTHS)
-        params['GRAPH_ATTRIBUTES'] = trial.suggest_categorical('global_descriptors', [True, False])
+        space = [('size', SIZES, 'EMBEDDING_SIZE'), ('depth', HDF_DEPTHS, 'NUM_LAYERS'),
+                 ('global_descriptors', [True, False], 'GRAPH_ATTRIBUTES')]
+    elif method == 'morgan':
+        space = [('size', SIZES, 'FINGERPRINT_SIZE'), ('radius', [1, 2, 3], 'FINGERPRINT_RADIUS')]
+    elif method == 'rdkit':
+        # predict_molecules__fp builds RDKit fingerprints from paths of up to 2 x FINGERPRINT_RADIUS bonds
+        space = [('size', SIZES, 'FINGERPRINT_SIZE'), ('max_path_half', [1, 2, 3, 4], 'FINGERPRINT_RADIUS')]
     else:
-        params['FINGERPRINT_SIZE'] = trial.suggest_categorical('size', SIZES)
-        if method == 'morgan':
-            params['FINGERPRINT_RADIUS'] = trial.suggest_categorical('radius', [1, 2, 3])
-        elif method == 'rdkit':
-            # predict_molecules__fp builds RDKit fingerprints from paths of up to 2 x FINGERPRINT_RADIUS bonds
-            params['FINGERPRINT_RADIUS'] = trial.suggest_categorical('max_path_half', [1, 2, 3, 4])
-        else:
-            raise ValueError(method)
+        raise ValueError(method)
     if model == 'random_forest':
-        params['RF_NUM_ESTIMATORS'] = trial.suggest_categorical('rf_estimators', [10, 100, 500])
-        params['RF_MAX_DEPTH'] = trial.suggest_categorical('rf_depth', [None, 10, 20])
-        params['RF_MAX_FEATURES'] = trial.suggest_categorical('rf_features', ['sqrt', 0.1])
+        space += [('rf_estimators', [10, 100, 500], 'RF_NUM_ESTIMATORS'), ('rf_depth', [None, 10, 20], 'RF_MAX_DEPTH'),
+                  ('rf_features', ['sqrt', 0.1], 'RF_MAX_FEATURES')]
     elif model == 'grad_boost':
-        params['GB_NUM_ESTIMATORS'] = trial.suggest_categorical('gb_estimators', [10, 100, 300])
-        params['GB_MAX_DEPTH'] = trial.suggest_categorical('gb_depth', [2, 3, 4])
-        params['GB_LEARNING_RATE'] = trial.suggest_categorical('gb_learning_rate', [0.01, 0.1, 0.2])
+        space += [('gb_estimators', [10, 100, 300], 'GB_NUM_ESTIMATORS'), ('gb_depth', [2, 3, 4], 'GB_MAX_DEPTH'),
+                  ('gb_learning_rate', [0.01, 0.1, 0.2], 'GB_LEARNING_RATE')]
     elif model == 'k_neighbors':
-        params['KN_NUM_NEIGHBORS'] = trial.suggest_categorical('kn_neighbors', [3, 5, 10])
-        params['KN_WEIGHTS'] = trial.suggest_categorical('kn_weights', ['uniform', 'distance'])
+        space += [('kn_neighbors', [3, 5, 10], 'KN_NUM_NEIGHBORS'), ('kn_weights', ['uniform', 'distance'], 'KN_WEIGHTS')]
     else:
         raise ValueError(model)
+    return space
+
+
+def suggest_params(trial, model: str, method: str) -> dict:
+    """The run parameters of one trial: the fixed parameters of the method and one choice per search parameter."""
+    params = dict(METHOD[method][1])
+    for name, choices, key in search_space(model, method):
+        params[key] = trial.suggest_categorical(name, choices)
     return params
 
 
