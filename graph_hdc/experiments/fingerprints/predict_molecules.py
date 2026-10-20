@@ -141,6 +141,10 @@ SAVE_DATASET: bool = False
 RF_NUM_ESTIMATORS: int = 100
 RF_MAX_DEPTH: int = 10
 RF_MAX_FEATURES: str = 'sqrt'
+# :param RF_NUM_JOBS:
+#       The number of threads of the random forest (n_jobs of sklearn). -1 (default) uses all cores; when several runs
+#       share a node (ex_28 on JUPITER), each run gets its share of the cores instead.
+RF_NUM_JOBS: int = -1
 
 GB_NUM_ESTIMATORS: int = 100
 GB_LEARNING_RATE: float = 0.01
@@ -158,9 +162,9 @@ KN_WEIGHTS: str = 'uniform'
 KN_METRIC: str = 'minkowski'
 # :param KN_BACKEND:
 #       'sklearn' (default): KNeighborsRegressor. 'torch': the same exact brute-force search with PyTorch, on the GPU if
-#       one is available (regression with uniform weights and the metrics 'minkowski' (Euclidean), 'cosine' or
-#       'jaccard'), which is much faster for the Jaccard (Tanimoto) distance on large datasets (ex_27). Neighbors at
-#       exactly equal distance may be chosen differently than by sklearn.
+#       one is available (regression with uniform or distance weights and the metrics 'minkowski' (Euclidean), 'cosine'
+#       or 'jaccard'), which is much faster for the Jaccard (Tanimoto) distance on large datasets (ex_27, ex_28).
+#       Neighbors at exactly equal distance may be chosen differently than by sklearn.
 KN_BACKEND: str = 'sklearn'
 
 NN_HIDDEN_LAYER_SIZES: Tuple[int] = (100, 100, 100)
@@ -414,10 +418,10 @@ class DeviceBatchDataset(torch.utils.data.Dataset):
 
 class TorchKNNRegressor:
     """
-    Exact brute-force k-nearest-neighbor regression with uniform weights in PyTorch, on the GPU if one is available
-    (KN_BACKEND='torch'). The same search as sklearn's KNeighborsRegressor(algorithm='brute') for the metrics
-    'minkowski'/'euclidean' (Euclidean distance), 'cosine' and 'jaccard' (binary features: the Jaccard distance is one
-    minus the Tanimoto similarity). Unlike sklearn, ties are broken deterministically: among training samples at
+    Exact brute-force k-nearest-neighbor regression in PyTorch, on the GPU if one is available (KN_BACKEND='torch').
+    The same search as sklearn's KNeighborsRegressor(algorithm='brute') for the metrics 'minkowski'/'euclidean'
+    (Euclidean distance), 'cosine' and 'jaccard' (binary features: the Jaccard distance is one minus the Tanimoto
+    similarity). Unlike sklearn, ties are broken deterministically: among training samples at
     exactly the same distance, the one that comes first in the training data is chosen. Binary fingerprints of small
     molecules often have several neighbors at the same Tanimoto distance (26 of 63 FreeSolv test molecules have a tie
     between their 5th and 6th neighbor), so the MAE can differ slightly from sklearn's, whose choice among ties is
@@ -426,14 +430,22 @@ class TorchKNNRegressor:
     sort of the similarities, which keeps tied entries in the training order. The queries are processed in batches
     of ``batch_size``; a batch needs about four batch_size x n_train float64 matrices of device memory besides the
     training matrix (QM9: 0.25 GB each for 256 queries).
+
+    ``weights`` as in sklearn: 'uniform' averages the k neighbors, 'distance' weights them by the inverse of their
+    distance (1 - Tanimoto similarity, 1 - cosine similarity, or the Euclidean distance), and a query with neighbors at
+    distance zero takes the mean of those neighbors only (sklearn's rule for exact matches; ex_28).
     """
 
-    def __init__(self, n_neighbors: int = 5, metric: str = 'minkowski', batch_size: int = 256):
+    def __init__(self, n_neighbors: int = 5, metric: str = 'minkowski', batch_size: int = 256,
+                 weights: str = 'uniform'):
         if metric not in ('minkowski', 'euclidean', 'cosine', 'jaccard'):
             raise ValueError(f'TorchKNNRegressor does not support the metric "{metric}"')
+        if weights not in ('uniform', 'distance'):
+            raise ValueError(f'TorchKNNRegressor does not support the weights "{weights}"')
         self.n_neighbors = n_neighbors
         self.metric = metric
         self.batch_size = batch_size
+        self.weights = weights
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> 'TorchKNNRegressor':
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -468,14 +480,31 @@ class TorchKNNRegressor:
             return torch.nn.functional.normalize(query, dim=1) @ self.X.T
         return -torch.cdist(query, self.X)
 
+    def distance(self, similarity: torch.Tensor) -> torch.Tensor:
+        """The distances of the metric from the similarities returned by ``similarity``."""
+        if self.metric in ('jaccard', 'cosine'):
+            # sklearn clips the cosine distance to [0, 2]; the Jaccard distance is within [0, 1] anyway
+            return (1.0 - similarity).clamp(min=0.0)
+        return -similarity
+
     def predict(self, X: np.ndarray) -> np.ndarray:
         X = np.asarray(X)
         out = []
         with torch.no_grad():
             for start in range(0, len(X), self.batch_size):
                 query = torch.tensor(X[start:start + self.batch_size], dtype=torch.float64, device=self.device)
-                order = torch.sort(self.similarity(query), dim=1, descending=True, stable=True).indices
-                out.append(self.y[order[:, :self.n_neighbors]].mean(dim=1))
+                similarity = self.similarity(query)
+                order = torch.sort(similarity, dim=1, descending=True, stable=True).indices[:, :self.n_neighbors]
+                neighbors = self.y[order]
+                if self.weights == 'uniform':
+                    out.append(neighbors.mean(dim=1))
+                    continue
+                distance = self.distance(torch.gather(similarity, 1, order))
+                exact = distance == 0
+                # 1 / distance, except for queries with exact matches, which use only those (as sklearn)
+                weight = torch.where(exact.any(dim=1, keepdim=True), exact.double(),
+                                     1.0 / distance.clamp(min=torch.finfo(torch.float64).tiny))
+                out.append((neighbors * weight[:, :, None]).sum(dim=1) / weight.sum(dim=1, keepdim=True))
         return torch.cat(out).cpu().numpy()
 
 
@@ -712,7 +741,7 @@ def train_model__random_forest(e: Experiment,
         'bootstrap': True,
         'min_samples_split': 2,
         'min_samples_leaf': 1,
-        'n_jobs': -1,
+        'n_jobs': e.RF_NUM_JOBS,
         'random_state': e.SEED,
     }
     
@@ -843,9 +872,10 @@ def train_model__k_neighbors(e: Experiment,
     elif e.DATASET_TYPE == 'regression':
 
         if e.KN_BACKEND == 'torch':
-            if e.KN_WEIGHTS != 'uniform':
-                raise ValueError('KN_BACKEND "torch" supports only uniform weights')
-            return TorchKNNRegressor(n_neighbors=e.KN_NUM_NEIGHBORS, metric=e.KN_METRIC).fit(X_train, y_train)
+            model = TorchKNNRegressor(n_neighbors=e.KN_NUM_NEIGHBORS, metric=e.KN_METRIC, weights=e.KN_WEIGHTS)
+            model.fit(X_train, y_train)
+            e['train_time/k_neighbors'] = time.time() - time_start
+            return model
 
         model = KNeighborsRegressor(**kwargs)
         model.fit(X_train, y_train)

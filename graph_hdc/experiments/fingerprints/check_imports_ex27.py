@@ -22,6 +22,8 @@ for name in ('predict_molecules', 'predict_molecules__hdc', 'predict_molecules__
 
 import optuna  # noqa: E402,F401
 import torch  # noqa: E402
+import sklearn.ensemble  # noqa: E402,F401  (gradient boosting and random forest of ex_28)
+import _optuna_ex_28  # noqa: E402,F401  (the study driver of ex_28 and its scheduler module)
 from rdkit.Chem import rdFingerprintGenerator  # noqa: E402,F401
 from rdkit.Chem.Draw import rdMolDraw2D  # noqa: E402,F401
 
