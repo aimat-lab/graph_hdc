@@ -43,7 +43,8 @@ def main(path: str, out: str, png: bool):
     plt.style.use('default')
     plt.rcParams.update({'font.family': 'Roboto Condensed', 'font.size': FONT_SIZE, 'hatch.linewidth': 0.9})
     stats = load(path)
-    fig, axes = plt.subplots(2, 2, figsize=(8.4, 6.0), sharey=True)
+    # 6.9 in wide: at the main text's 0.95 linewidth (about 340 pt) the fonts print at about 8 pt, as in Figure 3
+    fig, axes = plt.subplots(2, 2, figsize=(6.9, 5.2), sharey=True)
     lows = [m - s for (m, s, _n) in stats.values()] or [0.0]
     bottom = min(0.0, np.floor(min(lows) * 10) / 10)
     for k, (ax, (target, title)) in enumerate(zip(axes.flat, TARGETS)):
@@ -72,14 +73,16 @@ def main(path: str, out: str, png: bool):
         ax.grid(axis='y', alpha=0.3, zorder=0)
         ax.set_axisbelow(True)
         ax.set_ylim(bottom, 1.05)
+        ax.set_yticks(np.arange(bottom, 1.001, 0.25))
         if k % 2 == 0:
             ax.set_ylabel('$R^2$ $\\uparrow$', fontsize=FONT_SIZE + 1)
         ax.text(-0.13 if k % 2 == 0 else -0.06, 1.06, 'abcd'[k], transform=ax.transAxes, fontsize=FONT_SIZE + 4,
                 fontweight='bold', va='bottom', ha='left')
     handles = [Patch(facecolor=color, edgecolor=color, label=label) for _m, label, color in METHODS]
-    handles += [Patch(facecolor='#B0B0B0', edgecolor='#B0B0B0', label='fixed configuration'),
+    handles += [Patch(facecolor='#B0B0B0', edgecolor='#B0B0B0', label='standard configuration'),
                 Patch(facecolor='none', edgecolor='#404040', hatch='////', label='tuned')]
     fig.legend(handles=handles, loc='upper center', ncol=5, frameon=True, bbox_to_anchor=(0.5, 1.0),
+               handlelength=1.6, handletextpad=0.5, columnspacing=1.1,
                fontsize=FONT_SIZE)
     fig.tight_layout(rect=(0, 0, 1, 0.94), h_pad=1.2, w_pad=0.8)
     fig.savefig(out, bbox_inches='tight')

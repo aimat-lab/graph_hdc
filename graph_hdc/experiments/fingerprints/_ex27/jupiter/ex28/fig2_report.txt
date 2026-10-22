@@ -1,0 +1,21 @@
+ex_27_fixed: 240 target results used
+ex_28_fixed: 240 target results used
+ex_27_opt: 120 target results used
+ex_28_opt: 360 target results used
+all 96 bars complete: ex28/fig2_summary.csv
+
+mean test R2 (fixed / tuned):
+   clogp          hdf     GB 0.530/0.938  KNN 0.884/0.911  RF 0.882/0.926  NN 0.983/0.983
+   clogp          morgan  GB 0.160/0.728  KNN 0.712/0.757  RF 0.457/0.787  NN 0.817/0.857
+   clogp          rdkit   GB 0.190/0.768  KNN 0.596/0.706  RF 0.513/0.769  NN 0.737/0.807
+   aqsoldb_logs   hdf     GB 0.489/0.820  KNN 0.761/0.782  RF 0.784/0.831  NN 0.845/0.852
+   aqsoldb_logs   morgan  GB 0.149/0.681  KNN 0.655/0.695  RF 0.397/0.739  NN 0.763/0.777
+   aqsoldb_logs   rdkit   GB 0.217/0.728  KNN 0.615/0.718  RF 0.506/0.759  NN 0.714/0.776
+   qm9_energy     hdf     GB 0.544/0.987  KNN 0.971/0.980  RF 0.933/0.992  NN 0.999/0.999
+   qm9_energy     morgan  GB 0.106/0.670  KNN 0.409/0.544  RF 0.312/0.654  NN 0.879/0.941
+   qm9_energy     rdkit   GB 0.226/0.747  KNN 0.592/0.731  RF 0.552/0.872  NN 0.830/0.982
+   qm9_gap        hdf     GB 0.530/0.897  KNN 0.903/0.924  RF 0.838/0.915  NN 0.951/0.958
+   qm9_gap        morgan  GB 0.206/0.840  KNN 0.889/0.895  RF 0.533/0.945  NN 0.950/0.962
+   qm9_gap        rdkit   GB 0.411/0.908  KNN 0.909/0.912  RF 0.806/0.962  NN 0.950/0.966
+36 of 36 studies complete
+test splits against ex_27_fixed: {'same': 1800, 'different': 0, 'no reference': 0}
