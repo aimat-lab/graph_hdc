@@ -8,8 +8,9 @@ Reads ``_ex24/campaigns.tsv`` (``python bo_benchmark.py collect``) and writes to
   and the mean seconds per campaign.
 - ``tests.tsv`` / ``tests.md``: paired two-sided Wilcoxon signed-rank tests (campaign k against campaign k, same
   initial molecules) of HDF + Matern against Morgan + Tanimoto and against Morgan-PCA + Matern on the AUC, per
-  objective and size, Holm-corrected within each objective (2 comparisons x 7 sizes). The comparisons of every
-  method with random search are reported in the same table as a separate family per objective.
+  objective and size, Holm-corrected within each objective (2 comparisons x 8 sizes). HDF + linear kernel against
+  both Morgan methods is a second family of the same form, and the comparisons of every method with random search
+  are reported in the same table as a third family per objective.
 - ``auc_vs_size.png`` / ``.pdf``: quick-look figure (median AUC with interquartile band against the size, random
   search as a dashed line), one panel per objective. The layout of the paper figure is decided once the results
   are in.
@@ -36,7 +37,12 @@ LABELS = {'hdf_matern': 'HDF (Matérn)', 'morgan_tanimoto': 'Morgan (Tanimoto)',
           'morgan_pca': 'Morgan-2048 PCA (Matérn)', 'hdf_linear': 'HDF (linear)', 'random': 'Random search'}
 COLORS = {'hdf_matern': '#4CEB99', 'morgan_tanimoto': '#4C64EB', 'morgan_pca': '#7C92FF', 'hdf_linear': '#69F7AE',
           'random': 'gray'}
-COMPARISONS = [('hdf_matern', 'morgan_tanimoto'), ('hdf_matern', 'morgan_pca')]
+# families of HDF against both Morgan methods, each Holm-corrected within the objective. The linear kernel has its
+# own family (user, 2026-10-23: the main-text figure shows HDF + linear kernel), so the Matern tests are unchanged.
+COMPARISONS = {
+    'hdf_vs_morgan': [('hdf_matern', 'morgan_tanimoto'), ('hdf_matern', 'morgan_pca')],
+    'hdf_linear_vs_morgan': [('hdf_linear', 'morgan_tanimoto'), ('hdf_linear', 'morgan_pca')],
+}
 
 
 def holm(pvalues: list) -> list:
@@ -90,19 +96,23 @@ def tests(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for objective in OBJECTIVES:
         sizes = sorted(df[(df.objective == objective) & df['size'].notna()]['size'].unique())
-        # family 1: HDF + Matern against both Morgan methods, all sizes, Holm within the objective
-        family = []
-        for size in sizes:
-            for method_a, method_b in COMPARISONS:
-                pair = paired(df, objective, method_a, size, method_b, size)
-                if pair is None:
-                    continue
-                a, b = pair
-                family.append({'objective': objective, 'family': 'hdf_vs_morgan', 'size': int(size),
-                               'method_a': method_a, 'method_b': method_b, 'campaigns': len(a),
-                               'auc_median_a': np.median(a), 'auc_median_b': np.median(b),
-                               'a_better': int((a < b).sum()), 'p': wilcoxon_p(a, b)})
-        # family 2: every method against random search
+        # families 1 and 2: HDF + Matern / HDF + linear against both Morgan methods, all sizes, Holm within the
+        # objective
+        families = []
+        for name, comparisons in COMPARISONS.items():
+            family = []
+            for size in sizes:
+                for method_a, method_b in comparisons:
+                    pair = paired(df, objective, method_a, size, method_b, size)
+                    if pair is None:
+                        continue
+                    a, b = pair
+                    family.append({'objective': objective, 'family': name, 'size': int(size),
+                                   'method_a': method_a, 'method_b': method_b, 'campaigns': len(a),
+                                   'auc_median_a': np.median(a), 'auc_median_b': np.median(b),
+                                   'a_better': int((a < b).sum()), 'p': wilcoxon_p(a, b)})
+            families.append(family)
+        # family 3: every method against random search
         family_random = []
         for method in METHODS[:-1]:
             for size in sizes:
@@ -114,7 +124,7 @@ def tests(df: pd.DataFrame) -> pd.DataFrame:
                                       'method_a': method, 'method_b': 'random', 'campaigns': len(a),
                                       'auc_median_a': np.median(a), 'auc_median_b': np.median(b),
                                       'a_better': int((a < b).sum()), 'p': wilcoxon_p(a, b)})
-        for rows_family in (family, family_random):
+        for rows_family in families + [family_random]:
             for row, p_holm in zip(rows_family, holm([r['p'] for r in rows_family])):
                 row['p_holm'] = p_holm
                 rows.append(row)

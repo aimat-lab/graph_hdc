@@ -4,8 +4,8 @@ the paper (Fig. 4, made with analyze_ex_07.ipynb): Roboto Condensed, gray / ligh
 box plots with black medians, significance brackets, shaded progression bands, bold panel letters with
 left-aligned titles.
 
-- ``figure_bo``: main-text figure with Morgan fingerprints + Tanimoto kernel and HDF + Matern kernel only (user,
-  2026-10-13). Top row: normalized regret per BO round at 16 and 1024 dimensions for ClogP (AqSolDB) and QED
+- ``figure_bo``: main-text figure with Morgan fingerprints + Tanimoto kernel and HDF + linear kernel only (user,
+  2026-10-13; the linear instead of the Matern kernel since 2026-10-23). Top row: normalized regret per BO round at 16 and 1024 dimensions for ClogP (AqSolDB) and QED
   (ZINC250k), mean over the campaigns with the standard error as band. Bottom row: regret AUC against the embedding
   size for both objectives, box plots over the campaigns, random search as a dashed line, brackets for HDF against
   Morgan + Tanimoto (paired two-sided Wilcoxon signed-rank test, Holm-corrected within each objective as in
@@ -46,7 +46,10 @@ SIZES = [8, 16, 32, 64, 128, 256, 512, 1024]
 SI_SIZES = [8, 32, 128, 512, 1024]   # every second size plus the largest (user, 2026-10-13)
 PROGRESSION_SIZES = [16, 1024]
 # box order within a size: Morgan variants left, HDF right (as in the original figure)
-MAIN_METHODS = ['morgan_tanimoto', 'hdf_matern']
+MAIN_METHODS = ['morgan_tanimoto', 'hdf_linear']
+# the HDF surrogate that the significance brackets compare with Morgan + Tanimoto
+MAIN_HDF = 'hdf_linear'
+SI_HDF = 'hdf_matern'
 SI_METHODS = ['morgan_tanimoto', 'morgan_pca', 'hdf_matern', 'hdf_linear']
 COLORS = {
     'random': '#808080',
@@ -130,7 +133,8 @@ def load_campaigns() -> pd.DataFrame:
 
 def load_tests() -> pd.DataFrame:
     tests = pd.read_csv(os.path.join(ROOT, 'analysis', 'tests.tsv'), sep='\t')
-    return tests[(tests.family == 'hdf_vs_morgan') & (tests.method_b == 'morgan_tanimoto')]
+    families = ('hdf_vs_morgan', 'hdf_linear_vs_morgan')
+    return tests[tests.family.isin(families) & (tests.method_b == 'morgan_tanimoto')]
 
 
 def available(df: pd.DataFrame, sizes: list) -> list:
@@ -176,7 +180,7 @@ def bracket(ax, x0: float, x1: float, y: float, height: float, label: str, style
 
 
 def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods: list, sizes: list,
-              style: dict) -> None:
+              style: dict, hdf: str) -> None:
     group_width = 0.8
     box_width = group_width / len(methods)
     offsets = {m: (j - (len(methods) - 1) / 2) * box_width for j, m in enumerate(methods)}
@@ -208,7 +212,7 @@ def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods
     top = high + 0.05 * (high - base)
     span = top - base
     for i, size in enumerate(sizes):
-        row = tests[(tests.objective == objective) & (tests['size'] == size)]
+        row = tests[(tests.objective == objective) & (tests['size'] == size) & (tests.method_a == hdf)]
         if row.empty or pd.isna(row.p_holm.iloc[0]) or 'morgan_tanimoto' not in offsets:
             continue
         p = float(row.p_holm.iloc[0])
@@ -216,7 +220,7 @@ def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods
         if label:
             # black where HDF is better, red where Morgan + Tanimoto is better (user, 2026-10-14)
             morgan_better = float(row.auc_median_b.iloc[0]) < float(row.auc_median_a.iloc[0])
-            bracket(ax, i + offsets['morgan_tanimoto'], i + offsets['hdf_matern'], base - 0.05 * span,
+            bracket(ax, i + offsets['morgan_tanimoto'], i + offsets[hdf], base - 0.05 * span,
                     0.025 * span, label, style, MORGAN_BETTER_COLOR if morgan_better else 'black')
     ax.set_xticks(range(len(sizes)))
     ax.set_xticklabels([str(s) for s in sizes])
@@ -255,7 +259,7 @@ def main_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
                 ax.tick_params(labelleft=False)
     for column, objective in enumerate(('clogp', 'qed')):
         ax = fig.add_subplot(outer[1, column])
-        box_panel(ax, df, tests, objective, methods, sizes, style)
+        box_panel(ax, df, tests, objective, methods, sizes, style, MAIN_HDF)
         ax.set_xlabel('Embedding size')
         panel_title(ax, next(letters), TITLES[objective], style)
     handles = [plt.Line2D([], [], color=COLORS[m], lw=style['curve'], label=LABELS[m]) for m in methods]
@@ -275,7 +279,7 @@ def si_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
     fig, axes = plt.subplots(3, 3, figsize=(7.8, 7.0))
     fig.subplots_adjust(left=0.07, right=0.995, top=0.925, bottom=0.065, hspace=0.36, wspace=0.2)
     for ax, letter, objective in zip(axes.flat, 'abcdefghi', OBJECTIVES):
-        box_panel(ax, df, tests, objective, methods, sizes, style)
+        box_panel(ax, df, tests, objective, methods, sizes, style, SI_HDF)
         panel_title(ax, letter, TITLES[objective], style)
         if objective not in ('clogp', 'lipophilicity', 'qm9_gap'):
             ax.set_ylabel('')
