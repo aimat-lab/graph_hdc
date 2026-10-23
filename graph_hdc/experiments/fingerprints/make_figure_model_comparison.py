@@ -26,8 +26,9 @@ MODELS = ['GB', 'KNN', 'RF', 'NN']
 METHODS = [('hdf', 'HDF', '#4CEB99'), ('morgan', 'Morgan', '#4C64EB'), ('rdkit', 'RDKit', '#A14BEB')]
 WIDTH = 0.26
 # the black hatch of the standard configuration (pattern and line width in points before scaling to the text width)
-HATCH = '///'
-HATCH_LINEWIDTH = 1.6   # user, 2026-10-23: stronger and more visible than '////' at 0.9
+HATCH = '/////'
+# user, 2026-10-23: '////' at 0.9 was too faint, '///' at 1.6 too thick; denser thin lines instead
+HATCH_LINEWIDTH = 0.9
 
 
 def darker(hex_color: str, factor: float = 0.55) -> tuple:
