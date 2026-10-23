@@ -30,24 +30,30 @@ Caching: the Figure 4 and 3b encodings serve one run each (new codebooks per see
 False). The 30 S1 encodings of QM9 (10 seeds x 3 depths, 2048 dimensions) serve 13 training sizes each: the stage
 writes them first (warmup barrier, about 2 GB each) and the S1 runs read them (HDC_CACHE True).
 
-Two stages of run_ex27.sbatch, each a whole node, submitted side by side (submit_ex29.sh):
-* ex29g: Figure 4 and Figure 3b, all on the GPU pool (GPU_J slots over the 4 GPUs; the HDF encodings run on the CPU
-  threads of a slot, so give the slots many threads: GPU_J=24, GPU_THREADS=12). File ex29g_gpu.txt.
-* ex29c: SI Figure S1 on the CPU pool: the 30 QM9 encodings as the warmup barrier (ex29c_warmup.txt), then the 780
-  runs (ex29c_cpu.txt), HDF and Morgan alternating and the largest training sets first.
+Two stages of run_ex27.sbatch, each a whole node, submitted side by side (submit_ex29.sh). JUPITER Booster production
+jobs must use all 4 GPUs, so both stages have GPU work:
+* ex29g: Figure 4 on the GPU pool (GPU_J slots over the 4 GPUs; the HDF encodings run on the CPU threads of a slot, so
+  the slots get many threads: GPU_J=24, GPU_THREADS=12). File ex29g_gpu.txt.
+* ex29c: SI Figure S1 on the CPU pool: the QM9 encodings as the warmup barrier (ex29c_warmup.txt), then the 780 runs
+  (ex29c_cpu.txt), HDF and Morgan alternating and the largest training sets first (CPU_J=30, CPU_THREADS=6); and
+  Figure 3b on the GPU pool (ex29c_gpu.txt; GPU_J=12, GPU_THREADS=9).
 Memory: the node has 480 GB of CPU memory, but "available" also counts the 4 x 96 GB of GPU memory, so MEMFREE=400G.
+A cache counts as written only if a completed warmup archive of its seed and depth exists and the cache file is
+complete (pycomex writes key.pkl, compresses it to key.pkl.gz and then deletes key.pkl); cache files without that
+(e.g. from a warmup killed while writing) are listed and the ex29c files are not written until they are removed.
 
 Usage (from the fingerprints folder of the ex_27 worktree on JUPITER):
     python _slurm_ex_29.py [g|c] # writes the files of stage ex29g, ex29c or both: only the runs without a completed
                                  # archive and the warmups of encodings that are not cached yet
     sbatch --export=ALL,EX27_STAGE=ex29g,GPU_J=24,GPU_THREADS=12,MEMFREE=400G run_ex27.sbatch
-    sbatch --export=ALL,EX27_STAGE=ex29c,CPU_J=30,CPU_THREADS=8,MEMFREE=400G run_ex27.sbatch
+    sbatch --export=ALL,EX27_STAGE=ex29c,CPU_J=30,CPU_THREADS=6,GPU_J=12,GPU_THREADS=9,MEMFREE=400G run_ex27.sbatch
     python analyze_ex_29.py      # the CSVs of the three figures in _ex27/ex29/
 """
 import os
 import sys
 import glob
 
+from _slurm_ex_14 import params_of_line
 from _slurm_ex_27 import PATH, HDF, METHOD, MLP, KNN, SEEDS, _command, group_of_note
 from _slurm_ex_28 import completed, line_is_done, interleave, _write
 
@@ -82,8 +88,9 @@ METHODS_29 = ['hdf', 'morgan']
 
 
 def encode_batch(dimension: int) -> int:
-    """Molecules per chunk of the HDF encoding: 600 at 2048 dimensions, fewer above and more below."""
-    return max(16, 600 * 2048 // dimension)
+    """Molecules per chunk of the HDF encoding: 600 at 2048 dimensions, fewer above and more below (at most 4800:
+    disentangling the results of a chunk costs time proportional to its size per molecule)."""
+    return min(4800, max(16, 600 * 2048 // dimension))
 
 
 def representation(method: str, dimension: int, depth: int) -> dict:
@@ -125,10 +132,32 @@ def train_warmup_command(seed: int, depth: int) -> str:
                     {**representation('hdf', TRAIN_DIMENSION, depth), 'HDC_CACHE': True, 'MODELS': []})
 
 
-def train_cache_exists(seed: int, depth: int) -> bool:
-    """Whether the encoding cache of a warmup exists (key of predict_molecules__hdc for CODEBOOK_SEED None)."""
+def train_cache_files(seed: int, depth: int) -> list:
+    """The files of the QM9 encoding cache of a seed and depth (key of predict_molecules__hdc for CODEBOOK_SEED None,
+    NUM_DATA 1.0): key.pkl.gz when complete, key.pkl while it is written."""
     key = f'hdc_qm9_smiles__seed_{seed}__size_{TRAIN_DIMENSION}__depth_{depth}__bidir__totalh__unitspec'
-    return bool(glob.glob(os.path.join(PATH, '.cache', key + '.pkl*')))
+    return sorted(glob.glob(os.path.join(PATH, '.cache', key + '.pkl*')))
+
+
+def train_cache_state(warmed: set) -> tuple:
+    """(complete, stale): the (seed, depth) whose cache is complete (a completed warmup archive and only key.pkl.gz),
+    and the cache files of the others (left by an interrupted warmup, or of unknown origin)."""
+    complete, stale = set(), []
+    for seed in SEEDS:
+        for depth in TRAIN_DEPTHS:
+            files = train_cache_files(seed, depth)
+            if (seed, depth) in warmed and len(files) == 1 and files[0].endswith('.pkl.gz'):
+                complete.add((seed, depth))
+            else:
+                stale += files
+    return complete, stale
+
+
+def warmed_up() -> set:
+    """The (seed, depth) of the completed warmup archives (the encodings they wrote)."""
+    return {(p['SEED'], p['NUM_LAYERS']) for module, p in completed(PREFIX_WARMUP) if module == 'hdc'
+            and p.get('DATASET_NAME') == 'qm9_smiles' and p.get('EMBEDDING_SIZE') == TRAIN_DIMENSION
+            and p.get('CODEBOOK_SEED') is None and p.get('NUM_DATA') == 1.0}
 
 
 def size_lines() -> list:
@@ -146,10 +175,6 @@ def knn_lines() -> list:
 def train_lines() -> list:
     return [train_command(PREFIX_TRAIN, seed, TRAIN_NOTES, method, depth, num_train)
             for method in METHODS_29 for depth in TRAIN_DEPTHS for num_train in TRAIN_SIZES for seed in SEEDS]
-
-
-def train_warmup_lines() -> list:
-    return [train_warmup_command(seed, depth) for seed in SEEDS for depth in TRAIN_DEPTHS]
 
 
 def gpu_cost(line: str) -> int:
@@ -197,17 +222,24 @@ if __name__ == '__main__':
     assert len(trains) == 2 * len(TRAIN_DEPTHS) * len(TRAIN_SIZES) * len(SEEDS)
     assert len(set(sizes + knns + trains)) == len(sizes) + len(knns) + len(trains)
     done = {prefix: completed(prefix) for prefix in (PREFIX_SIZE, PREFIX_KNN, PREFIX_TRAIN)}
-    gpu = ([line for line in sizes if not line_is_done(line, done[PREFIX_SIZE])]
-           + [line for line in knns if not line_is_done(line, done[PREFIX_KNN])])
+    gpu_g = [line for line in sizes if not line_is_done(line, done[PREFIX_SIZE])]
+    gpu_c = [line for line in knns if not line_is_done(line, done[PREFIX_KNN])]
     cpu = [line for line in trains if not line_is_done(line, done[PREFIX_TRAIN])]
-    warmup = [line for line, (seed, depth) in zip(train_warmup_lines(),
-                                                   [(s, d) for s in SEEDS for d in TRAIN_DEPTHS])
-              if not train_cache_exists(seed, depth)]
+    print(f'Figure 4: {len(sizes)} runs, Figure 3b: {len(knns)} runs, S1: {len(trains)} runs; without a completed '
+          f'archive: {len(gpu_g)} (ex29g GPU), {len(gpu_c)} (ex29c GPU), {len(cpu)} (ex29c CPU)')
     if stage in ('g', 'all'):
-        _write('ex29g_gpu.txt', gpu_order(gpu))
+        _write('ex29g_gpu.txt', gpu_order(gpu_g))
     if stage in ('c', 'all'):
-        _write('ex29c_warmup.txt', warmup if cpu else [])
+        complete, stale = train_cache_state(warmed_up())
+        if stale:
+            sys.exit('!!! QM9 encoding cache files without a completed warmup (an interrupted warmup?); remove them '
+                     'before writing the ex29c files:\n' + '\n'.join(stale))
+        # warmups only for the (seed, depth) of pending HDF runs whose encoding is not cached yet
+        pending = {(p['SEED'], p['NUM_LAYERS']) for p in map(params_of_line, cpu)
+                   if 'EMBEDDING_SIZE' in p}
+        warmup = [train_warmup_command(seed, depth) for seed in SEEDS for depth in TRAIN_DEPTHS
+                  if (seed, depth) in pending - complete]
+        _write('ex29c_warmup.txt', warmup)
         _write('ex29c_cpu.txt', spread(cpu, train_cost))
-    print(f'Figure 4: {len(sizes)} runs, Figure 3b: {len(knns)} runs, S1: {len(trains)} runs; '
-          f'{len(gpu)} GPU and {len(cpu)} CPU runs without a completed archive, '
-          f'{len(warmup)} S1 encodings to write')
+        _write('ex29c_gpu.txt', gpu_order(gpu_c))
+        print(f'{len(complete)} S1 encodings cached, {len(warmup)} to write')

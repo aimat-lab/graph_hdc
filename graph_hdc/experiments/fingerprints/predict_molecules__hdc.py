@@ -326,6 +326,7 @@ def process_dataset(
         chunk = e.HDC_ENCODE_BATCH
         for start in range(0, len(graphs), chunk):
             results = hyper_net.forward_graphs(graphs[start:start + chunk], batch_size=chunk)
+            assert len(results) == len(graphs[start:start + chunk]), 'one encoding per molecule of the chunk'
             for (index, graph), result in zip(items[start:start + chunk], results):
                 # a copy: the result is a view that would keep the batch tensors of the chunk alive
                 index_data_map[index]['graph_features'] = np.array(result['graph_embedding'])
