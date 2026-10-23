@@ -788,7 +788,9 @@ def run_task(task: dict) -> dict:
             time.sleep(30 * oom_retries)
     meta = {
         **{k: task[k] for k in ('objective', 'method', 'size', 'campaign')},
-        'hdf_seed': hdf_seed(task['campaign']) if task['method'].startswith('hdf') else None,
+        # the multi-codebook HDF records the seeds of its four codebooks
+        'hdf_seed': ([mcb_seed(task['campaign'], block) for block in range(4)] if task['method'] == 'hdf_mcb_rbf'
+                     else hdf_seed(task['campaign']) if task['method'].startswith('hdf') else None),
         'campaign_seed': campaign_seed(task['campaign']),
         'num_initial': spec['num_initial'], 'num_rounds': spec['num_rounds'],
         'num_molecules': num_molecules,
