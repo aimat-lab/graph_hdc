@@ -15,7 +15,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
-from matplotlib.ticker import LogLocator, NullFormatter, FuncFormatter  # noqa: E402
+from matplotlib.ticker import LogLocator, MaxNLocator, NullFormatter, FuncFormatter  # noqa: E402
 
 FONT_SIZE = 11
 TARGETS = [('qm9_energy', 'QM9 $U_0$'), ('qm9_gap', 'QM9 HOMO–LUMO gap'), ('qm9_cv', 'QM9 $C_v$'),
@@ -58,11 +58,16 @@ def main(path: str, out: str, png: bool):
                     markeredgecolor='black', markeredgewidth=0.5, zorder=3)
         ax.set_xscale('log')
         ax.set_yscale('log')
-        # 1-2-5 labels (plain numbers) on the MAE axis unless it spans more than about 2.5 decades; the minor ticks
-        # show the scale without labels
+        # 1-2-5 labels (plain numbers) on the MAE axis unless it spans more than about 2.5 decades, and four evenly
+        # spaced labels if fewer than two 1-2-5 values fall into a short range (matplotlib would otherwise fall back
+        # to dense linear ticks); the minor ticks show the scale without labels
         low, high = ax.get_ylim()
         if np.log10(high / low) <= 2.5:
-            ax.yaxis.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0)))
+            candidates = [k * 10.0 ** e for e in range(-5, 5) for k in (1, 2, 5)]
+            if sum(low <= c <= high for c in candidates) >= 2:
+                ax.yaxis.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0)))
+            else:
+                ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
             ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _pos: f'{v:g}'))
         ax.yaxis.set_minor_formatter(NullFormatter())
         ax.xaxis.set_minor_formatter(NullFormatter())

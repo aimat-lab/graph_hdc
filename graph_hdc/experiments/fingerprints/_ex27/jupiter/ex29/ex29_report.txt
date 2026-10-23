@@ -4,7 +4,6 @@ Figure 4 (ex_29_size): 960 completed runs, 960 results of 960 expected
 Figure 3b (ex_29_knn): 1120 completed runs, 1120 results of 1120 expected
    encoder: all HDF runs standard, new codebook per seed
    splits (target, seed; both methods, distances and dimensions): identical
-SI Figure S1 (ex_29_train): 200 completed runs, 800 results of 3120 expected
-   missing (2320): [('qm9_cv', 'hdf', 1, 10, 0), ('qm9_cv', 'hdf', 1, 10, 1), ('qm9_cv', 'hdf', 1, 10, 2), ('qm9_cv', 'hdf', 1, 10, 3), ('qm9_cv', 'hdf', 1, 10, 4), ('qm9_cv', 'hdf', 1, 10, 5), ('qm9_cv', 'hdf', 1, 10, 6), ('qm9_cv', 'hdf', 1, 10, 7), ('qm9_cv', 'hdf', 1, 10, 8), ('qm9_cv', 'hdf', 1, 10, 9), ('qm9_cv', 'hdf', 1, 50, 0), ('qm9_cv', 'hdf', 1, 50, 1)] ...
+SI Figure S1 (ex_29_train): 780 completed runs, 3120 results of 3120 expected
    encoder: all HDF runs standard, new codebook per seed
    test splits (seed; both methods, depths and training sizes): identical
