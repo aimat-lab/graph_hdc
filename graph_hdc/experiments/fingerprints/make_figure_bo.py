@@ -87,13 +87,15 @@ SI_SCALE = 0.95 * 472 / 562
 SI_STYLE = {
     'font': 7.5, 'tick': 7.0, 'title': 8.0, 'letter': 10.0, 'axes': 0.6, 'tick_length': 2.5, 'grid': 0.5,
     'curve': 1.6, 'random': 0.9, 'bracket': 0.7, 'box': BOX_LW / SI_SCALE, 'median': MEDIAN_LW / SI_SCALE,
-    'flier': 2.5, 'flier_edge': 0.3 / SI_SCALE,
+    'flier': 2.5, 'flier_edge': 0.3 / SI_SCALE, 'colors': COLORS,
 }
 MAIN_STYLE = {
     'font': 9.0, 'tick': 8.5, 'title': 9.0, 'letter': 11.0, 'axes': 0.8, 'tick_length': 3.0, 'grid': 0.6,
     'curve': 1.5, 'random': 1.0, 'bracket': 0.7, 'box': BOX_LW, 'median': MEDIAN_LW,
     # the outliers keep their printed size of before (2.5 pt drawn at 0.66 of the size)
     'flier': 1.65, 'flier_edge': 0.3,
+    # the only HDF surrogate of the main text takes the standard HDF green (user, 2026-10-23)
+    'colors': {**COLORS, 'hdf_linear': COLORS['hdf_matern']},
 }
 MAIN_WIDTH = 372 / 72
 
@@ -162,8 +164,8 @@ def progression_panel(ax, objective: str, size: int, methods: list, style: dict)
         rounds = np.arange(curves.shape[1])
         mean = curves.mean(axis=0)
         sem = curves.std(axis=0, ddof=1) / np.sqrt(len(curves))
-        ax.plot(rounds, mean, color=COLORS[method], lw=style['curve'], zorder=3, label=LABELS[method])
-        ax.fill_between(rounds, mean - sem, mean + sem, color=COLORS[method], alpha=0.15, lw=0, zorder=2)
+        ax.plot(rounds, mean, color=style['colors'][method], lw=style['curve'], zorder=3, label=LABELS[method])
+        ax.fill_between(rounds, mean - sem, mean + sem, color=style['colors'][method], alpha=0.15, lw=0, zorder=2)
     ax.set_xlim(0, rounds[-1])
     ax.set_xticks(np.arange(0, rounds[-1] + 1, 50))
     ax.set_ylim(bottom=0)
@@ -198,14 +200,14 @@ def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods
                 [values], positions=[i + offsets[method]], widths=box_width * 0.85, patch_artist=True,
                 showfliers=True,
                 # transparent fill in the colour itself, so that the black outline stays opaque
-                boxprops=dict(facecolor=to_rgba(COLORS[method], 0.7), edgecolor='black', linewidth=style['box']),
+                boxprops=dict(facecolor=to_rgba(style['colors'][method], 0.7), edgecolor='black', linewidth=style['box']),
                 medianprops=dict(color='black', linewidth=style['median']),
                 whiskerprops=dict(color='black', linewidth=style['box']),
                 capprops=dict(color='black', linewidth=style['box']),
-                flierprops=dict(marker='o', markerfacecolor=COLORS[method], markeredgecolor='black',
+                flierprops=dict(marker='o', markerfacecolor=style['colors'][method], markeredgecolor='black',
                                 markeredgewidth=style['flier_edge'], markersize=style['flier']),
             )
-    ax.axhline(random_median, color=COLORS['random'], ls='--', lw=style['random'], zorder=1)
+    ax.axhline(random_median, color=style['colors']['random'], ls='--', lw=style['random'], zorder=1)
     # the axis starts at zero unless all values lie far above it; then it starts just below the data, so that
     # the boxes fill the panel. Below the data, a strip holds the significance brackets.
     base = 0.0 if low < 0.15 * high else low - 0.06 * (high - low)
@@ -262,8 +264,8 @@ def main_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
         box_panel(ax, df, tests, objective, methods, sizes, style, MAIN_HDF)
         ax.set_xlabel('Embedding size')
         panel_title(ax, next(letters), TITLES[objective], style)
-    handles = [plt.Line2D([], [], color=COLORS[m], lw=style['curve'], label=LABELS[m]) for m in methods]
-    handles.append(plt.Line2D([], [], color=COLORS['random'], lw=style['curve'], label=LABELS['random']))
+    handles = [plt.Line2D([], [], color=style['colors'][m], lw=style['curve'], label=LABELS[m]) for m in methods]
+    handles.append(plt.Line2D([], [], color=style['colors']['random'], lw=style['curve'], label=LABELS['random']))
     fig.legend(handles=handles, loc='upper center', ncol=3, frameon=True, framealpha=0.9,
                bbox_to_anchor=(0.5, 0.998), handlelength=1.8, columnspacing=1.6)
     fig.savefig(path + '.pdf')
@@ -285,9 +287,9 @@ def si_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
             ax.set_ylabel('')
         if objective in ('qm9_gap', 'qm9_dipole', 'melting_point'):
             ax.set_xlabel('Embedding size')
-    handles = [Patch(facecolor=to_rgba(COLORS[m], 0.7), edgecolor='black', linewidth=style['box'], label=LABELS[m])
+    handles = [Patch(facecolor=to_rgba(style['colors'][m], 0.7), edgecolor='black', linewidth=style['box'], label=LABELS[m])
                for m in methods]
-    handles.append(plt.Line2D([], [], color=COLORS['random'], ls='--', lw=style['random'], label=LABELS['random']))
+    handles.append(plt.Line2D([], [], color=style['colors']['random'], ls='--', lw=style['random'], label=LABELS['random']))
     fig.legend(handles=handles, loc='upper center', ncol=5, frameon=True, framealpha=0.9,
                bbox_to_anchor=(0.5, 0.998), handlelength=1.8, columnspacing=1.4)
     fig.savefig(path + '.pdf')
