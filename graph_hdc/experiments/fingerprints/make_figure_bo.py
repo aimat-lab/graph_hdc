@@ -235,7 +235,7 @@ def main_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
     methods = MAIN_METHODS
     sizes = available(df, SIZES)
     fig = plt.figure(figsize=(MAIN_WIDTH, 4.3))
-    outer = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.15], hspace=0.45, wspace=0.2,
+    outer = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.15], hspace=0.45, wspace=0.3,
                              left=0.1, right=0.98, top=0.87, bottom=0.1)
     letters = iter('abcdef')
     for column, objective in enumerate(('clogp', 'qed')):
@@ -247,18 +247,16 @@ def main_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
             progression_panel(ax, objective, size, methods, style)
             # short titles, the details are in the caption (user, 2026-10-23)
             panel_title(ax, next(letters), f'{TITLES[objective].split(" (")[0]}, {size} dim.', style)
+            # one y-label per objective, on the left panel of each pair (user, 2026-10-23)
             if k == 0:
                 left = ax
-                if column == 0:
-                    ax.set_ylabel('Normalized regret $\\downarrow$')
+                ax.set_ylabel('Normalized regret $\\downarrow$')
             else:
                 ax.tick_params(labelleft=False)
     for column, objective in enumerate(('clogp', 'qed')):
         ax = fig.add_subplot(outer[1, column])
         box_panel(ax, df, tests, objective, methods, sizes, style)
         ax.set_xlabel('Embedding size')
-        if column == 1:
-            ax.set_ylabel('')
         panel_title(ax, next(letters), TITLES[objective], style)
     handles = [plt.Line2D([], [], color=COLORS[m], lw=style['curve'], label=LABELS[m]) for m in methods]
     handles.append(plt.Line2D([], [], color=COLORS['random'], lw=style['curve'], label=LABELS['random']))
