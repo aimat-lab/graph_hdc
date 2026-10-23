@@ -2,9 +2,9 @@
 Figure 2 of the main text (ex_28): the model comparison. Per target (one panel each) and model type (gradient boosting,
 KNN, random forest, neural network), the test R2 of HDF, Morgan and RDKit fingerprints with the fixed standard
 configuration (solid bar) and after tuning with the same budget (hatched outline drawn over it, so that the hatched
-part above the solid bar is the gain from tuning; a tuned result below the fixed one ends inside the solid bar). Error
-bars: standard deviation over the 10 repetitions. Style of the paper's figures (Roboto Condensed, panel letters,
-y-grid).
+part above the solid bar is the gain from tuning; a tuned result below the fixed one ends inside the solid bar). No
+error bars (user, 2026-10-23): the standard deviations over the 10 repetitions are at most 0.04 R2. Style of the
+paper's figures (Roboto Condensed, panel letters, y-grid), cropped tightly so that it fills the text width.
 
     python make_figure_model_comparison.py <fig2_runs.csv of analyze_ex_28.py> <output .pdf> [--png]
 """
@@ -43,9 +43,10 @@ def main(path: str, out: str, png: bool):
     plt.style.use('default')
     plt.rcParams.update({'font.family': 'Roboto Condensed', 'font.size': FONT_SIZE, 'hatch.linewidth': 0.9})
     stats = load(path)
-    # 6.9 in wide: at the main text's 0.95 linewidth (about 340 pt) the fonts print at about 8 pt, as in Figure 3
-    fig, axes = plt.subplots(2, 2, figsize=(6.9, 5.2), sharey=True)
-    lows = [m - s for (m, s, _n) in stats.values()] or [0.0]
+    # 7.4 in wide (about 7 in after cropping): at the full text width of the main text (about 372 pt) the fonts print
+    # at about 8.5 pt, as in Figure 3
+    fig, axes = plt.subplots(2, 2, figsize=(7.4, 5.4), sharey=True)
+    lows = [m for (m, _s, _n) in stats.values()] or [0.0]
     bottom = min(0.0, np.floor(min(lows) * 10) / 10)
     for k, (ax, (target, title)) in enumerate(zip(axes.flat, TARGETS)):
         x = np.arange(len(MODELS))
@@ -54,8 +55,6 @@ def main(path: str, out: str, png: bool):
             for setting in ('fixed', 'tuned'):
                 means = np.array([stats.get((target, method, model, setting), (np.nan, np.nan, 0))[0]
                                   for model in MODELS])
-                stds = np.array([stats.get((target, method, model, setting), (np.nan, np.nan, 0))[1]
-                                 for model in MODELS])
                 if setting == 'fixed':
                     # the solid fixed bar covers the overlap with the hatched tuned bar behind it
                     ax.bar(pos, means, WIDTH, color=color, edgecolor=color, linewidth=0.6, zorder=3)
@@ -65,9 +64,8 @@ def main(path: str, out: str, png: bool):
                            linewidth=0, zorder=2)
                     # its outline on top, so that a tuned result below the fixed one stays visible as a line
                     ax.bar(pos, means, WIDTH, facecolor='none', edgecolor=darker(color), linewidth=1.0, zorder=4)
-                ax.errorbar(pos + (-0.045 if setting == 'fixed' else 0.045), means, yerr=stds, fmt='none',
-                            ecolor='black', elinewidth=0.9, capsize=2.5, capthick=0.9, zorder=5)
         ax.set_xticks(x)
+        ax.set_xlim(-0.5, len(MODELS) - 0.5)
         ax.set_xticklabels(MODELS)
         ax.set_title(title, fontsize=FONT_SIZE + 1)
         ax.grid(axis='y', alpha=0.3, zorder=0)
@@ -85,9 +83,9 @@ def main(path: str, out: str, png: bool):
                handlelength=1.6, handletextpad=0.5, columnspacing=1.1,
                fontsize=FONT_SIZE)
     fig.tight_layout(rect=(0, 0, 1, 0.94), h_pad=1.2, w_pad=0.8)
-    fig.savefig(out, bbox_inches='tight')
+    fig.savefig(out, bbox_inches='tight', pad_inches=0.02)
     if png:
-        fig.savefig(out.rsplit('.', 1)[0] + '.png', dpi=200, bbox_inches='tight')
+        fig.savefig(out.rsplit('.', 1)[0] + '.png', dpi=200, bbox_inches='tight', pad_inches=0.02)
     missing = [(t, m, model, s) for t, _ in TARGETS for m, *_ in METHODS for model in MODELS
                for s in ('fixed', 'tuned') if (t, m, model, s) not in stats]
     print(f'wrote {out}; {len(missing)} bars without data' + (f', e.g. {missing[:3]}' if missing else ''))
