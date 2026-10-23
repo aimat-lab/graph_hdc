@@ -1,9 +1,9 @@
 """
 Figure 2 of the main text (ex_28): the model comparison. Per target (one panel each) and model type (gradient boosting,
 KNN, random forest, neural network), the test R2 of HDF, Morgan and RDKit fingerprints with the fixed standard
-configuration (solid bar) and after tuning with the same budget (hatched outline drawn over it, so that the hatched
-part above the solid bar is the gain from tuning; a tuned result below the fixed one ends inside the solid bar). No
-error bars (user, 2026-10-23): the standard deviations over the 10 repetitions are at most 0.04 R2. Style of the
+configuration and after tuning with the same budget, both in the colour of the representation (user, 2026-10-23): the
+standard bar carries a black hatch and stands in front of the plain tuned bar, so that the plain part above it is the
+gain from tuning (a tuned result below the standard one shows as a line inside the hatched bar). No error bars (user, 2026-10-23): the standard deviations over the 10 repetitions are at most 0.04 R2. Style of the
 paper's figures (Roboto Condensed, panel letters, y-grid), cropped tightly so that it fills the text width.
 
     python make_figure_model_comparison.py <fig2_runs.csv of analyze_ex_28.py> <output .pdf> [--png]
@@ -56,14 +56,15 @@ def main(path: str, out: str, png: bool):
                 means = np.array([stats.get((target, method, model, setting), (np.nan, np.nan, 0))[0]
                                   for model in MODELS])
                 if setting == 'fixed':
-                    # the solid fixed bar covers the overlap with the hatched tuned bar behind it
-                    ax.bar(pos, means, WIDTH, color=color, edgecolor=color, linewidth=0.6, zorder=3)
+                    # the standard bar in front: the colour of the representation with a black hatch on top
+                    ax.bar(pos, means, WIDTH, color=color, edgecolor=darker(color), linewidth=0.8, zorder=3)
+                    ax.bar(pos, means, WIDTH, facecolor='none', edgecolor='black', hatch='////', linewidth=0,
+                           zorder=4)
                 else:
-                    # hatched tuned bar behind the fixed one: only the part above it (the gain) shows the hatching
-                    ax.bar(pos, means, WIDTH, facecolor='white', edgecolor=darker(color), hatch='////',
-                           linewidth=0, zorder=2)
-                    # its outline on top, so that a tuned result below the fixed one stays visible as a line
-                    ax.bar(pos, means, WIDTH, facecolor='none', edgecolor=darker(color), linewidth=1.0, zorder=4)
+                    # the plain tuned bar behind it: its part above the standard bar is the gain from tuning
+                    ax.bar(pos, means, WIDTH, color=color, edgecolor=darker(color), linewidth=0.8, zorder=2)
+                    # its outline on top, so that a tuned result below the standard one stays visible as a line
+                    ax.bar(pos, means, WIDTH, facecolor='none', edgecolor=darker(color), linewidth=0.8, zorder=5)
         ax.set_xticks(x)
         ax.set_xlim(-0.5, len(MODELS) - 0.5)
         ax.set_xticklabels(MODELS)
@@ -77,8 +78,9 @@ def main(path: str, out: str, png: bool):
         ax.text(-0.13 if k % 2 == 0 else -0.06, 1.06, 'abcd'[k], transform=ax.transAxes, fontsize=FONT_SIZE + 4,
                 fontweight='bold', va='bottom', ha='left')
     handles = [Patch(facecolor=color, edgecolor=color, label=label) for _m, label, color in METHODS]
-    handles += [Patch(facecolor='#B0B0B0', edgecolor='#B0B0B0', label='standard configuration'),
-                Patch(facecolor='none', edgecolor='#404040', hatch='////', label='tuned')]
+    handles += [Patch(facecolor='#B0B0B0', edgecolor='black', hatch='////', linewidth=0.5,
+                      label='standard configuration'),
+                Patch(facecolor='#B0B0B0', edgecolor='#606060', linewidth=0.5, label='tuned')]
     fig.legend(handles=handles, loc='upper center', ncol=5, frameon=True, bbox_to_anchor=(0.5, 1.0),
                handlelength=1.6, handletextpad=0.5, columnspacing=1.1,
                fontsize=FONT_SIZE)
