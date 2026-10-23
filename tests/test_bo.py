@@ -8,6 +8,7 @@ import torch
 
 from graph_hdc.bo import (
     METHODS,
+    MeanBlockRBFKernel,
     TanimotoKernel,
     center_scale,
     normalized_regret,
@@ -45,6 +46,41 @@ def test_tanimoto_kernel_diag_and_identity():
     assert torch.allclose(torch.diagonal(full), torch.ones(6, dtype=torch.float64))
 
 
+def mean_block_rbf(x1: np.ndarray, x2: np.ndarray, num_blocks: int, lengthscale: float) -> np.ndarray:
+    """The mean of one RBF kernel per block, written out in numpy as an independent reference."""
+    size = x1.shape[1] // num_blocks
+    total = 0.0
+    for b in range(num_blocks):
+        a, c = x1[:, b * size:(b + 1) * size], x2[:, b * size:(b + 1) * size]
+        sq = ((a[:, None, :] - c[None, :, :]) ** 2).sum(-1)
+        total = total + np.exp(-sq / (2 * lengthscale ** 2))
+    return total / num_blocks
+
+
+def test_mean_block_rbf_kernel_matches_reference():
+    import gpytorch
+    rng = np.random.default_rng(11)
+    x1, x2 = rng.normal(size=(7, 8)), rng.normal(size=(5, 8))
+    kernel = MeanBlockRBFKernel(num_blocks=4)
+    kernel.lengthscale = 0.7
+    value = kernel(torch.tensor(x1), torch.tensor(x2)).to_dense().detach().numpy()
+    assert np.allclose(value, mean_block_rbf(x1, x2, 4, 0.7), atol=1e-12)
+    # one block is the ordinary RBF kernel
+    single = MeanBlockRBFKernel(num_blocks=1)
+    single.lengthscale = 0.7
+    rbf = gpytorch.kernels.RBFKernel()
+    rbf.lengthscale = 0.7
+    assert torch.allclose(single(torch.tensor(x1), torch.tensor(x2)).to_dense(),
+                          rbf(torch.tensor(x1), torch.tensor(x2)).to_dense(), atol=1e-12)
+    # the diagonal mode agrees with the full matrix (and is one on identical inputs)
+    full = kernel(torch.tensor(x1), torch.tensor(x1)).to_dense()
+    diag = kernel(torch.tensor(x1), torch.tensor(x1), diag=True)
+    assert torch.allclose(diag, torch.diagonal(full), atol=1e-12)
+    assert torch.allclose(diag, torch.ones(7, dtype=torch.float64), atol=1e-12)
+    with pytest.raises(ValueError):
+        kernel(torch.tensor(x1[:, :6]), torch.tensor(x2[:, :6])).to_dense()
+
+
 def test_center_scale_keeps_geometry():
     rng = np.random.default_rng(2)
     features = rng.normal(size=(50, 8)) * np.arange(1, 9) + 3.0
@@ -72,7 +108,7 @@ def test_regret_helpers():
     assert regret_auc(regret) == pytest.approx((0.75 + 0.25) / 2)
 
 
-@pytest.mark.parametrize('method', ['hdf_matern', 'morgan_tanimoto', 'hdf_linear'])
+@pytest.mark.parametrize('method', ['hdf_matern', 'morgan_tanimoto', 'hdf_linear', 'hdf_mcb_rbf'])
 def test_log_ei_scores_match_botorch(method):
     # the chunked joint-posterior LogEI equals BoTorch's LogExpectedImprovement on a batch of q = 1 candidates
     from botorch.acquisition.analytic import LogExpectedImprovement
@@ -136,6 +172,8 @@ def test_run_campaign_bookkeeping(method):
         'morgan_pca': center_scale(continuous),
         'hdf_linear': continuous / np.linalg.norm(continuous, axis=1, keepdims=True),
         'morgan_tanimoto': bits,
+        # four blocks need a dimension divisible by four
+        'hdf_mcb_rbf': center_scale(np.hstack([continuous, continuous[:, :2]])),
         'random': None,
     }[method]
     initial = [5, 17, 33, 48, 90]

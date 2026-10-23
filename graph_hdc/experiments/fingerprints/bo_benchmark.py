@@ -27,6 +27,10 @@ repeats the size sweep of ex_07 with a kernel that suits each representation and
                   morgan_pca       Morgan-2048 -> first D PCA components + Matern-5/2
                   random           random search
                   hdf_linear       HDF + linear (cosine) kernel (SI; on qed since 2026-10-13)
+                  hdf_mcb_rbf      multi-codebook HDF: four HDF vectors of D/4 dimensions from independent
+                                   codebooks, concatenated, with the mean of one RBF kernel per block (a
+                                   colleague's MCB construction; solubility only, branch revision/ex24-mcb, user
+                                   2026-10-23)
     sizes         D = 8, 16, 32, 64, 128, 256, 512, 1024 (the PCA needs more molecules than components: no
                   morgan_pca cell above num_molecules - 1 components)
     campaigns     100 per (objective, method, size) (25 until 2026-10-13); campaign k shares its initial
@@ -118,9 +122,15 @@ OBJECTIVES = {
 GP_METHODS = ['hdf_matern', 'morgan_tanimoto', 'morgan_pca', 'hdf_linear']
 
 
+# objectives with the multi-codebook HDF (user, 2026-10-23: one representative property first)
+MCB_OBJECTIVES = ['solubility']
+
+
 def methods_for(objective: str) -> List[str]:
-    """The methods of an objective: all of them (the linear-kernel HDF skipped ZINC250k until 2026-10-13)."""
-    return ['hdf_matern', 'morgan_tanimoto', 'morgan_pca', 'random', 'hdf_linear']
+    """The methods of an objective: all of them (the linear-kernel HDF skipped ZINC250k until 2026-10-13), plus
+    the multi-codebook HDF on MCB_OBJECTIVES."""
+    methods = ['hdf_matern', 'morgan_tanimoto', 'morgan_pca', 'random', 'hdf_linear']
+    return methods + ['hdf_mcb_rbf'] if objective in MCB_OBJECTIVES else methods
 
 
 def hdf_seed(campaign: int) -> int:
@@ -129,6 +139,15 @@ def hdf_seed(campaign: int) -> int:
     apart never share a random stream between campaigns.
     """
     return 1000 + 100 * campaign
+
+
+def mcb_seed(campaign: int, block: int) -> int:
+    """
+    Codebook seed of block ``block`` (0-3) of the multi-codebook HDF of a campaign: hdf_seed + 40 + block. With
+    the encoder offsets of up to +30 the four blocks use seeds +40 to +73, disjoint from each other, from the
+    campaign's single codebook (+0 to +30) and from the next campaign (+100).
+    """
+    return hdf_seed(campaign) + 40 + block
 
 
 def campaign_seed(campaign: int) -> int:
@@ -543,27 +562,43 @@ def encode_hdf(data_list, size: int, seed: int, max_size: float, max_diameter: f
     return np.concatenate(embeddings)
 
 
+def hdf_path(library: str, size: int, campaign: int, mcb: bool = False) -> str:
+    """File of the HDF embeddings of a campaign: one codebook (hdf_*) or the multi-codebook HDF (hdf_mcb4_*)."""
+    name = f'hdf_mcb4_{size}_c{campaign}.npy' if mcb else f'hdf_{size}_c{campaign}.npy'
+    return os.path.join(DATA, library, name)
+
+
 def _encode_one(job):
-    library, size, campaign = job
+    library, size, campaign, mcb = job
     _encode_load(library)
     meta = _ENCODE_STATE['meta']
-    path = os.path.join(DATA, library, f'hdf_{size}_c{campaign}.npy')
+    path = hdf_path(library, size, campaign, mcb)
     if os.path.exists(path):
         return path, 0.0
     start = time.perf_counter()
-    embeddings = encode_hdf(_ENCODE_STATE['data'], size, hdf_seed(campaign), meta['max_graph_size'],
-                            meta['max_graph_diameter'])
-    if not np.isfinite(embeddings).all():
-        raise RuntimeError(f'non-finite HDF embeddings for {library} D={size} campaign {campaign}')
+    if mcb:
+        # four unit-length HDF vectors of size/4 dimensions from independent codebooks, concatenated
+        from graph_hdc.bo import MCB_NUM_BLOCKS
+        embeddings = np.concatenate([
+            encode_hdf(_ENCODE_STATE['data'], size // MCB_NUM_BLOCKS, mcb_seed(campaign, block),
+                       meta['max_graph_size'], meta['max_graph_diameter'])
+            for block in range(MCB_NUM_BLOCKS)], axis=1)
+    else:
+        embeddings = encode_hdf(_ENCODE_STATE['data'], size, hdf_seed(campaign), meta['max_graph_size'],
+                                meta['max_graph_diameter'])
+    if not np.isfinite(embeddings).all() or embeddings.shape[1] != size:
+        raise RuntimeError(f'invalid HDF embeddings for {library} D={size} campaign {campaign} (mcb={mcb})')
     save_npy(path, embeddings)
     return path, time.perf_counter() - start
 
 
-def encode(libraries: List[str], sizes: List[int], campaigns: List[int], workers: int, threads: int) -> None:
+def encode(libraries: List[str], sizes: List[int], campaigns: List[int], workers: int, threads: int,
+           mcb: bool = False) -> None:
     """
     HDF embeddings of every (library, size, campaign) that is still missing, in one worker pool over all
     libraries, the most expensive encodings first (cost ~ number of atoms x size), so that the long ZINC250k
-    encodings run alongside the many short ones instead of leaving workers idle.
+    encodings run alongside the many short ones instead of leaving workers idle. With ``mcb`` the
+    multi-codebook HDF (four codebooks of size/4 dimensions) instead of the single-codebook HDF.
     """
     jobs = []
     for library in libraries:
@@ -571,8 +606,8 @@ def encode(libraries: List[str], sizes: List[int], campaigns: List[int], workers
         num_atoms = meta.get('num_atoms', meta['num_candidates'] * 20)
         for size in sizes:
             for campaign in campaigns:
-                if not os.path.exists(os.path.join(DATA, library, f'hdf_{size}_c{campaign}.npy')):
-                    jobs.append((num_atoms * size, (library, size, campaign)))
+                if not os.path.exists(hdf_path(library, size, campaign, mcb)):
+                    jobs.append((num_atoms * size, (library, size, campaign, mcb)))
     jobs = [job for _, job in sorted(jobs, key=lambda item: -item[0])]
     log(f'{len(jobs)} HDF encodings to compute with {workers} workers x {threads} threads')
     if not jobs:
@@ -618,7 +653,7 @@ def estimated_cost(task: dict, num_molecules: int) -> float:
 
 
 def make_tasks(objectives: Optional[List[str]] = None, sizes: Optional[List[int]] = None,
-               campaigns: Optional[List[int]] = None) -> List[dict]:
+               campaigns: Optional[List[int]] = None, methods: Optional[List[str]] = None) -> List[dict]:
     """All campaigns of the benchmark (or of a subset), the most expensive first."""
     tasks = []
     for objective, spec in OBJECTIVES.items():
@@ -626,6 +661,8 @@ def make_tasks(objectives: Optional[List[str]] = None, sizes: Optional[List[int]
             continue
         meta = library_meta(spec['library'])
         for method in methods_for(objective):
+            if methods is not None and method not in methods:
+                continue
             for size in [None] if method == 'random' else (sizes or SIZES):
                 # a PCA cannot have more components than the library allows (BEET: 127)
                 if method == 'morgan_pca' and size > meta['pca_components']:
@@ -692,6 +729,9 @@ def load_features(objective: str, method: str, size: Optional[int], campaign: in
         features = np.load(os.path.join(folder, f'morgan_{size}.npy')).astype(np.float32)
     elif method == 'morgan_pca':
         features = center_scale(np.load(os.path.join(folder, 'pca_scores.npy'), mmap_mode='r')[:, :size])
+    elif method == 'hdf_mcb_rbf':
+        # centred and globally scaled like the Matern inputs; one common factor keeps the four blocks comparable
+        features = center_scale(np.load(hdf_path(library, size, campaign, mcb=True)))
     else:
         raise ValueError(method)
     # keep only the deterministic (campaign-independent) features of the current library; HDF features change
@@ -998,15 +1038,19 @@ def cleanup(campaigns: List[int], dry_run: bool = False) -> int:
     objectives = [objective for objective, spec in OBJECTIVES.items() if spec['library'] in libraries]
     needed: Dict[tuple, List[str]] = {}
     for task in make_tasks(objectives=objectives, campaigns=campaigns):
-        if task['method'] in ('hdf_matern', 'hdf_linear'):
-            key = (OBJECTIVES[task['objective']]['library'], task['size'], task['campaign'])
+        if task['method'] in ('hdf_matern', 'hdf_linear', 'hdf_mcb_rbf'):
+            mcb = task['method'] == 'hdf_mcb_rbf'
+            key = (OBJECTIVES[task['objective']]['library'], mcb, task['size'], task['campaign'])
             needed.setdefault(key, []).append(result_path(task))
     kept, removed, freed = 0, 0, 0
     for library in libraries:
         for campaign in campaigns:
             for path in sorted(glob.glob(os.path.join(DATA, library, f'hdf_*_c{campaign}.npy'))):
-                size = int(os.path.basename(path).split('_')[1])
-                missing = [p for p in needed.get((library, size, campaign), []) if not os.path.exists(p)]
+                # hdf_<size>_c<k>.npy (one codebook) or hdf_mcb4_<size>_c<k>.npy (multi-codebook)
+                parts = os.path.basename(path).split('_')
+                mcb = parts[1] == 'mcb4'
+                size = int(parts[2] if mcb else parts[1])
+                missing = [p for p in needed.get((library, mcb, size, campaign), []) if not os.path.exists(p)]
                 if missing:
                     kept += 1
                     log(f'  keep {library}/{os.path.basename(path)}: {len(missing)} campaigns without result, '
@@ -1045,6 +1089,7 @@ def main(argv=None):
     p.add_argument('--campaigns', default=f'0-{NUM_CAMPAIGNS - 1}')
     p.add_argument('--workers', type=int, default=8)
     p.add_argument('--threads', type=int, default=1)
+    p.add_argument('--mcb', action='store_true', help='multi-codebook HDF (four codebooks of size/4) instead')
     p = sub.add_parser('objectives')
     p.add_argument('--objectives', nargs='+', required=True)
     p.add_argument('--verify-against', default=None,
@@ -1053,6 +1098,7 @@ def main(argv=None):
     p.add_argument('--objectives', nargs='+', default=None)
     p.add_argument('--sizes', nargs='+', type=int, default=None)
     p.add_argument('--campaigns', default=None)
+    p.add_argument('--methods', nargs='+', default=None, help='only these methods (default: all of an objective)')
     p.add_argument('--output', default=None, help='task file, default _ex24/tasks.jsonl (status and collect read it)')
     p.add_argument('--open-only', action='store_true', help='only campaigns without a result file')
     p = sub.add_parser('run')
@@ -1085,14 +1131,14 @@ def main(argv=None):
         for library in args.libraries:
             add_morgan(library, args.sizes, args.workers)
     elif args.stage == 'encode':
-        encode(args.libraries, args.sizes, parse_campaigns(args.campaigns), args.workers, args.threads)
+        encode(args.libraries, args.sizes, parse_campaigns(args.campaigns), args.workers, args.threads, args.mcb)
     elif args.stage == 'objectives':
         rewrite_objectives(args.objectives)
         if args.verify_against:
             verify_objectives(args.objectives, args.verify_against)
     elif args.stage == 'tasks':
         tasks = make_tasks(args.objectives, args.sizes,
-                           parse_campaigns(args.campaigns) if args.campaigns else None)
+                           parse_campaigns(args.campaigns) if args.campaigns else None, args.methods)
         if args.open_only:
             tasks = [task for task in tasks if not os.path.exists(result_path(task))]
         os.makedirs(ROOT, exist_ok=True)

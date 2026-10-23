@@ -16,6 +16,9 @@ The surrogate model depends on the representation of the molecules:
     morgan_tanimoto   binary Morgan fingerprint folded to D bits     Tanimoto
     morgan_pca        Morgan-2048 projected on D PCA components,     Matern-5/2 (one lengthscale)
                       globally scaled
+    hdf_mcb_rbf       four HDF vectors of D/4 dimensions from        mean of one RBF kernel per block (one
+                      independent codebooks, concatenated, centred   shared lengthscale), as the multi-codebook
+                      and globally scaled                            HDF of a colleague's BO study (MCB16 RBF)
     random            none: random search
 
 The inputs of the Matern kernels are centred and divided by *one* global factor, the root-mean-square norm
@@ -38,9 +41,11 @@ from gpytorch.kernels import LinearKernel, MaternKernel, ScaleKernel
 from gpytorch.mlls import ExactMarginalLogLikelihood
 
 
-METHODS = ('hdf_matern', 'hdf_linear', 'morgan_tanimoto', 'morgan_pca', 'random')
+METHODS = ('hdf_matern', 'hdf_linear', 'morgan_tanimoto', 'morgan_pca', 'hdf_mcb_rbf', 'random')
 # methods whose GP inputs go through ``center_scale``
 MATERN_METHODS = ('hdf_matern', 'morgan_pca')
+# number of codebooks (blocks) of the multi-codebook HDF: a vector of size D concatenates four HDF vectors of D/4
+MCB_NUM_BLOCKS = 4
 
 
 class TanimotoKernel(gpytorch.kernels.Kernel):
@@ -73,6 +78,43 @@ class TanimotoKernel(gpytorch.kernels.Kernel):
         norm1 = (x1 * x1).sum(dim=-1, keepdim=True)
         norm2 = (x2 * x2).sum(dim=-1, keepdim=True)
         return (dot + self.eps) / (self.eps + norm1 + norm2.transpose(-2, -1) - dot)
+
+
+class MeanBlockRBFKernel(gpytorch.kernels.Kernel):
+    """
+    Mean of RBF kernels on equal-sized blocks of the input dimensions, with one lengthscale shared by all blocks,
+
+        k(x, x') = 1/B sum_b exp(-|x_b - x'_b|^2 / (2 l^2)),
+
+    for inputs that concatenate B vectors of the same size, e.g. HDF vectors of B independent codebooks (the
+    "MCB RBF" kernel of a colleague's BO study). Unlike one RBF kernel on the concatenation, which multiplies the
+    block similarities, the mean adds them: a pair of molecules that is close in only some codebooks still gets a
+    part of the full similarity. Wrap it in a ScaleKernel for an output scale.
+
+    :param num_blocks: The number of blocks B; the input dimension must be divisible by it.
+    """
+    has_lengthscale = True
+
+    def __init__(self, num_blocks: int, **kwargs):
+        super().__init__(**kwargs)
+        self.num_blocks = num_blocks
+
+    def forward(self, x1: torch.Tensor, x2: torch.Tensor, diag: bool = False,
+                last_dim_is_batch: bool = False, **params) -> torch.Tensor:
+        if last_dim_is_batch:
+            raise NotImplementedError('MeanBlockRBFKernel does not support last_dim_is_batch')
+        dim = x1.shape[-1]
+        if dim % self.num_blocks != 0 or x2.shape[-1] != dim:
+            raise ValueError(f'input dimension {dim} is not divisible into {self.num_blocks} blocks')
+        size = dim // self.num_blocks
+        x1 = x1.div(self.lengthscale)
+        x2 = x2.div(self.lengthscale)
+        total = None
+        for block in range(self.num_blocks):
+            part = slice(block * size, (block + 1) * size)
+            value = self.covar_dist(x1[..., part], x2[..., part], square_dist=True, diag=diag).div(-2.0).exp()
+            total = value if total is None else total + value
+        return total / self.num_blocks
 
 
 def center_scale(features: np.ndarray) -> np.ndarray:
@@ -128,6 +170,8 @@ def make_gp(method: str, train_x: torch.Tensor, train_y: torch.Tensor) -> Single
         covar_module = LinearKernel()
     elif method == 'morgan_tanimoto':
         covar_module = ScaleKernel(TanimotoKernel())
+    elif method == 'hdf_mcb_rbf':
+        covar_module = ScaleKernel(MeanBlockRBFKernel(num_blocks=MCB_NUM_BLOCKS))
     else:
         raise ValueError(f'method "{method}" has no GP surrogate')
 
