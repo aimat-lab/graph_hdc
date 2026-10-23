@@ -15,7 +15,10 @@ left-aligned titles.
   panels stay readable (user, 2026-10-13).
 
 Random search is explained by the legend only, without a label in every panel (user, 2026-10-13). Significance
-brackets are black where HDF is better and red where Morgan + Tanimoto is better (user, 2026-10-14). Sizes without
+brackets are black where HDF is better and red where Morgan + Tanimoto is better (user, 2026-10-14). The main-text
+figure is drawn at its print size (text width 372 pt) with text at about 9 pt as printed and short panel titles, and
+the boxes of both figures have black outlines, whiskers and caps at 0.8 pt and medians at 1.2 pt as printed (user,
+2026-10-23: the fonts printed at about 5 pt before). Sizes without
 data (e.g. 256 before its campaigns ran) are left out. Reads ``_ex24/campaigns.tsv``, ``_ex24/runs/`` and
 ``_ex24/analysis/tests.tsv`` (``bo_benchmark.py collect`` and ``analyze_ex_24.py``; EX24_ROOT points elsewhere).
 
@@ -32,6 +35,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from matplotlib import font_manager  # noqa: E402
+from matplotlib.colors import to_rgba  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 from matplotlib.ticker import MaxNLocator  # noqa: E402
 
@@ -69,32 +73,53 @@ SIGNIFICANCE = [(0.001, '***'), (0.01, '**'), (0.05, '*')]
 # significance marks where Morgan + Tanimoto is significantly better than HDF + Matern
 MORGAN_BETTER_COLOR = '#D62728'
 
-# sizes in points at the final print size (the original figure: about 8 pt text, 10 pt panel letters)
-FONT_SIZE = 7.5
-TITLE_SIZE = 8.0
-LETTER_SIZE = 10.0
+# box plots: black outlines, whiskers and caps at 0.8 pt and medians at 1.2 pt as printed (user, 2026-10-23)
+BOX_LW = 0.8
+MEDIAN_LW = 1.2
+# the SI grid is 7.8 in (562 pt) wide and printed at 0.95 of the SI text width (472 pt), i.e. at about 0.8 of its size
+SI_SCALE = 0.95 * 472 / 562
+
+# sizes in points within each figure. The SI grid keeps its original sizes (about 8 pt text before scaling); the
+# main-text figure is drawn at its print size, with text at about 9 pt like Fig. 2 (user, 2026-10-23)
+SI_STYLE = {
+    'font': 7.5, 'tick': 7.0, 'title': 8.0, 'letter': 10.0, 'axes': 0.6, 'tick_length': 2.5, 'grid': 0.5,
+    'curve': 1.6, 'random': 0.9, 'bracket': 0.7, 'box': BOX_LW / SI_SCALE, 'median': MEDIAN_LW / SI_SCALE,
+    'flier': 2.5, 'flier_edge': 0.3 / SI_SCALE,
+}
+MAIN_STYLE = {
+    'font': 9.0, 'tick': 8.5, 'title': 9.0, 'letter': 11.0, 'axes': 0.8, 'tick_length': 3.0, 'grid': 0.6,
+    'curve': 1.5, 'random': 1.0, 'bracket': 0.7, 'box': BOX_LW, 'median': MEDIAN_LW,
+    # the outliers keep their printed size of before (2.5 pt drawn at 0.66 of the size)
+    'flier': 1.65, 'flier_edge': 0.3,
+}
+MAIN_WIDTH = 372 / 72
 
 
 def setup_style() -> None:
     plt.style.use('default')
     if any('Roboto Condensed' in f.name for f in font_manager.fontManager.ttflist):
         plt.rcParams['font.family'] = 'Roboto Condensed'
-    plt.rcParams.update({
-        'font.size': FONT_SIZE, 'axes.labelsize': FONT_SIZE, 'xtick.labelsize': FONT_SIZE - 0.5,
-        'ytick.labelsize': FONT_SIZE - 0.5, 'legend.fontsize': FONT_SIZE, 'axes.linewidth': 0.6,
-        'xtick.major.width': 0.6, 'ytick.major.width': 0.6, 'xtick.major.size': 2.5, 'ytick.major.size': 2.5,
-        'svg.fonttype': 'none', 'pdf.fonttype': 42,
-    })
+    plt.rcParams.update({'svg.fonttype': 'none', 'pdf.fonttype': 42})
 
 
-def panel_title(ax, letter: str, text: str) -> None:
+def style_rc(style: dict) -> dict:
+    """rcParams of one figure for ``plt.rc_context``."""
+    return {
+        'font.size': style['font'], 'axes.labelsize': style['font'], 'xtick.labelsize': style['tick'],
+        'ytick.labelsize': style['tick'], 'legend.fontsize': style['font'], 'axes.linewidth': style['axes'],
+        'xtick.major.width': style['axes'], 'ytick.major.width': style['axes'],
+        'xtick.major.size': style['tick_length'], 'ytick.major.size': style['tick_length'],
+    }
+
+
+def panel_title(ax, letter: str, text: str, style: dict) -> None:
     """Bold panel letter followed by a left-aligned title, as in the original figure."""
     from matplotlib.transforms import offset_copy
-    ax.text(0.0, 1.035, letter, transform=ax.transAxes, fontsize=LETTER_SIZE, fontweight='bold', ha='left',
+    ax.text(0.0, 1.035, letter, transform=ax.transAxes, fontsize=style['letter'], fontweight='bold', ha='left',
             va='bottom')
     # the title starts a fixed distance (in points) after the letter, whatever the panel width
-    shifted = offset_copy(ax.transAxes, fig=ax.figure, x=LETTER_SIZE * 0.95, y=0, units='points')
-    ax.text(0.0, 1.04, text, transform=shifted, fontsize=TITLE_SIZE, ha='left', va='bottom')
+    shifted = offset_copy(ax.transAxes, fig=ax.figure, x=style['letter'] * 0.95, y=0, units='points')
+    ax.text(0.0, 1.04, text, transform=shifted, fontsize=style['title'], ha='left', va='bottom')
 
 
 def load_campaigns() -> pd.DataFrame:
@@ -127,28 +152,31 @@ def regret_curves(objective: str, method: str, size) -> np.ndarray:
     return np.array(curves)
 
 
-def progression_panel(ax, objective: str, size: int, methods: list) -> None:
+def progression_panel(ax, objective: str, size: int, methods: list, style: dict) -> None:
     for method in ['random'] + methods:
         curves = regret_curves(objective, method, None if method == 'random' else size)
         rounds = np.arange(curves.shape[1])
         mean = curves.mean(axis=0)
         sem = curves.std(axis=0, ddof=1) / np.sqrt(len(curves))
-        ax.plot(rounds, mean, color=COLORS[method], lw=1.6, zorder=3, label=LABELS[method])
+        ax.plot(rounds, mean, color=COLORS[method], lw=style['curve'], zorder=3, label=LABELS[method])
         ax.fill_between(rounds, mean - sem, mean + sem, color=COLORS[method], alpha=0.15, lw=0, zorder=2)
     ax.set_xlim(0, rounds[-1])
+    ax.set_xticks(np.arange(0, rounds[-1] + 1, 50))
     ax.set_ylim(bottom=0)
     ax.set_xlabel('BO round')
-    ax.grid(True, alpha=0.3, linestyle='--', lw=0.5)
+    ax.grid(True, alpha=0.3, linestyle='--', lw=style['grid'])
 
 
-def bracket(ax, x0: float, x1: float, y: float, height: float, label: str, color: str = 'black') -> None:
+def bracket(ax, x0: float, x1: float, y: float, height: float, label: str, style: dict,
+            color: str = 'black') -> None:
     """Significance bracket between two box positions, opening upwards, with the label below (as before)."""
-    ax.plot([x0, x0, x1, x1], [y + height, y, y, y + height], color=color, lw=0.7, clip_on=False)
-    ax.text((x0 + x1) / 2, y - 0.4 * height, label, ha='center', va='top', fontsize=FONT_SIZE, color=color,
+    ax.plot([x0, x0, x1, x1], [y + height, y, y, y + height], color=color, lw=style['bracket'], clip_on=False)
+    ax.text((x0 + x1) / 2, y - 0.4 * height, label, ha='center', va='top', fontsize=style['font'], color=color,
             clip_on=False)
 
 
-def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods: list, sizes: list) -> None:
+def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods: list, sizes: list,
+              style: dict) -> None:
     group_width = 0.8
     box_width = group_width / len(methods)
     offsets = {m: (j - (len(methods) - 1) / 2) * box_width for j, m in enumerate(methods)}
@@ -165,14 +193,15 @@ def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods
             ax.boxplot(
                 [values], positions=[i + offsets[method]], widths=box_width * 0.85, patch_artist=True,
                 showfliers=True,
-                boxprops=dict(facecolor=COLORS[method], alpha=0.7, linewidth=0.6),
-                medianprops=dict(color='black', linewidth=1.2),
-                whiskerprops=dict(color=COLORS[method], linewidth=0.8),
-                capprops=dict(color=COLORS[method], linewidth=0.8),
-                flierprops=dict(marker='o', markerfacecolor=COLORS[method], markeredgecolor='none', markersize=2.5,
-                                alpha=0.5),
+                # transparent fill in the colour itself, so that the black outline stays opaque
+                boxprops=dict(facecolor=to_rgba(COLORS[method], 0.7), edgecolor='black', linewidth=style['box']),
+                medianprops=dict(color='black', linewidth=style['median']),
+                whiskerprops=dict(color='black', linewidth=style['box']),
+                capprops=dict(color='black', linewidth=style['box']),
+                flierprops=dict(marker='o', markerfacecolor=COLORS[method], markeredgecolor='black',
+                                markeredgewidth=style['flier_edge'], markersize=style['flier']),
             )
-    ax.axhline(random_median, color=COLORS['random'], ls='--', lw=0.9, zorder=1)
+    ax.axhline(random_median, color=COLORS['random'], ls='--', lw=style['random'], zorder=1)
     # the axis starts at zero unless all values lie far above it; then it starts just below the data, so that
     # the boxes fill the panel. Below the data, a strip holds the significance brackets.
     base = 0.0 if low < 0.15 * high else low - 0.06 * (high - low)
@@ -188,7 +217,7 @@ def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods
             # black where HDF is better, red where Morgan + Tanimoto is better (user, 2026-10-14)
             morgan_better = float(row.auc_median_b.iloc[0]) < float(row.auc_median_a.iloc[0])
             bracket(ax, i + offsets['morgan_tanimoto'], i + offsets['hdf_matern'], base - 0.05 * span,
-                    0.025 * span, label, MORGAN_BETTER_COLOR if morgan_better else 'black')
+                    0.025 * span, label, style, MORGAN_BETTER_COLOR if morgan_better else 'black')
     ax.set_xticks(range(len(sizes)))
     ax.set_xticklabels([str(s) for s in sizes])
     ax.set_xlim(-0.55, len(sizes) - 0.45)
@@ -197,24 +226,27 @@ def box_panel(ax, df: pd.DataFrame, tests: pd.DataFrame, objective: str, methods
     ax.set_yticks([t for t in ticks if base - 1e-12 <= t <= top])
     ax.set_ylim(base - 0.16 * span, top)
     ax.set_ylabel('Regret AUC $\\downarrow$')
-    ax.grid(True, alpha=0.3, axis='y', lw=0.5)
+    ax.grid(True, alpha=0.3, axis='y', lw=style['grid'])
 
 
+@plt.rc_context(style_rc(MAIN_STYLE))
 def main_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
+    style = MAIN_STYLE
     methods = MAIN_METHODS
     sizes = available(df, SIZES)
-    fig = plt.figure(figsize=(7.8, 4.6))
-    outer = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.15], hspace=0.4, wspace=0.17,
-                             left=0.065, right=0.985, top=0.875, bottom=0.085)
+    fig = plt.figure(figsize=(MAIN_WIDTH, 4.3))
+    outer = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.15], hspace=0.45, wspace=0.2,
+                             left=0.1, right=0.98, top=0.87, bottom=0.1)
     letters = iter('abcdef')
     for column, objective in enumerate(('clogp', 'qed')):
         # the two progression panels of one objective share their y-axis and sit close together
-        inner = outer[0, column].subgridspec(1, 2, wspace=0.13)
+        inner = outer[0, column].subgridspec(1, 2, wspace=0.24)
         left = None
         for k, size in enumerate(PROGRESSION_SIZES):
             ax = fig.add_subplot(inner[0, k], sharey=left)
-            progression_panel(ax, objective, size, methods)
-            panel_title(ax, next(letters), f'{TITLES[objective].split(" (")[0]}, {size} dimensions')
+            progression_panel(ax, objective, size, methods, style)
+            # short titles, the details are in the caption (user, 2026-10-23)
+            panel_title(ax, next(letters), f'{TITLES[objective].split(" (")[0]}, {size} dim.', style)
             if k == 0:
                 left = ax
                 if column == 0:
@@ -223,13 +255,13 @@ def main_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
                 ax.tick_params(labelleft=False)
     for column, objective in enumerate(('clogp', 'qed')):
         ax = fig.add_subplot(outer[1, column])
-        box_panel(ax, df, tests, objective, methods, sizes)
+        box_panel(ax, df, tests, objective, methods, sizes, style)
         ax.set_xlabel('Embedding size')
         if column == 1:
             ax.set_ylabel('')
-        panel_title(ax, next(letters), f'{TITLES[objective]}: regret AUC across embedding sizes')
-    handles = [plt.Line2D([], [], color=COLORS[m], lw=1.6, label=LABELS[m]) for m in methods]
-    handles.append(plt.Line2D([], [], color=COLORS['random'], lw=1.6, label=LABELS['random']))
+        panel_title(ax, next(letters), TITLES[objective], style)
+    handles = [plt.Line2D([], [], color=COLORS[m], lw=style['curve'], label=LABELS[m]) for m in methods]
+    handles.append(plt.Line2D([], [], color=COLORS['random'], lw=style['curve'], label=LABELS['random']))
     fig.legend(handles=handles, loc='upper center', ncol=3, frameon=True, framealpha=0.9,
                bbox_to_anchor=(0.5, 0.998), handlelength=1.8, columnspacing=1.6)
     fig.savefig(path + '.pdf')
@@ -237,20 +269,23 @@ def main_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
     plt.close(fig)
 
 
+@plt.rc_context(style_rc(SI_STYLE))
 def si_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
+    style = SI_STYLE
     methods = SI_METHODS
     sizes = available(df, SI_SIZES)
     fig, axes = plt.subplots(3, 3, figsize=(7.8, 7.0))
     fig.subplots_adjust(left=0.07, right=0.995, top=0.925, bottom=0.065, hspace=0.36, wspace=0.2)
     for ax, letter, objective in zip(axes.flat, 'abcdefghi', OBJECTIVES):
-        box_panel(ax, df, tests, objective, methods, sizes)
-        panel_title(ax, letter, TITLES[objective])
+        box_panel(ax, df, tests, objective, methods, sizes, style)
+        panel_title(ax, letter, TITLES[objective], style)
         if objective not in ('clogp', 'lipophilicity', 'qm9_gap'):
             ax.set_ylabel('')
         if objective in ('qm9_gap', 'qm9_dipole', 'melting_point'):
             ax.set_xlabel('Embedding size')
-    handles = [Patch(facecolor=COLORS[m], alpha=0.7, label=LABELS[m]) for m in methods]
-    handles.append(plt.Line2D([], [], color=COLORS['random'], ls='--', lw=0.9, label=LABELS['random']))
+    handles = [Patch(facecolor=to_rgba(COLORS[m], 0.7), edgecolor='black', linewidth=style['box'], label=LABELS[m])
+               for m in methods]
+    handles.append(plt.Line2D([], [], color=COLORS['random'], ls='--', lw=style['random'], label=LABELS['random']))
     fig.legend(handles=handles, loc='upper center', ncol=5, frameon=True, framealpha=0.9,
                bbox_to_anchor=(0.5, 0.998), handlelength=1.8, columnspacing=1.4)
     fig.savefig(path + '.pdf')
