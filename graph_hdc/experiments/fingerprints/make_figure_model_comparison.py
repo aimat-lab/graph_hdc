@@ -19,7 +19,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 
-FONT_SIZE = 12
+FONT_SIZE = 11   # user, 2026-10-23: slightly smaller than 12 (prints at about 8 pt)
 TARGETS = [('clogp', "Crippen's logP"), ('aqsoldb_logs', 'AqSolDB logS'), ('qm9_energy', 'QM9 $U_0$'),
            ('qm9_gap', 'QM9 HOMO–LUMO gap')]
 MODELS = ['GB', 'KNN', 'RF', 'NN']
