@@ -8,7 +8,8 @@
 #     EX27_STAGE=check|fixed|opt|opteval   (required; selects _ex27/<stage>_primer.txt, <stage>_warmup.txt,
 #                                           <stage>_gpu.txt and <stage>_cpu.txt; missing files are skipped)
 #     PRIMER_FILE / WARMUP_FILE / GPU_FILE / CPU_FILE   (optional overrides, relative to _ex27/)
-#     GPU_J (default 32), CPU_J (default 64), CPU_THREADS (default 4), MEMFREE (default 20G)
+#     GPU_J (default 32), GPU_THREADS (CPU threads per GPU slot, default 2), CPU_J (default 64), CPU_THREADS
+#     (default 4), MEMFREE (default 20G)
 # Example (from the fingerprints folder of the ex_27 worktree, after python _slurm_ex_27.py):
 #     sbatch --export=ALL,EX27_STAGE=check --time=04:00:00 run_ex27.sbatch
 #SBATCH --job-name=ex27
@@ -25,6 +26,7 @@ set -uo pipefail
 # not "STAGE": loading the Stages/... module sets an environment variable of that name
 RUN_STAGE="${EX27_STAGE:?set EX27_STAGE=check|fixed|opt|opteval|envtest}"
 GPU_J="${GPU_J:-32}"
+GPU_THREADS="${GPU_THREADS:-2}"
 CPU_J="${CPU_J:-64}"
 CPU_THREADS="${CPU_THREADS:-4}"
 MEMFREE="${MEMFREE:-20G}"   # GNU parallel starts a run only while this much RAM is free
@@ -94,7 +96,7 @@ run_cpu() {  # $1 = command file; returns the number of failed runs (0 = all suc
 run_gpu() {  # $1 = command file; slot s runs on GPU (s - 1) mod 4
     [ -s "$1" ] || { echo "(skip: empty or missing $1)"; return 0; }
     echo "--- GPU pool -j $GPU_J over 4 GPUs: $(wc -l < "$1") runs from $(basename "$1") $(date) ---"
-    OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 \
+    OMP_NUM_THREADS="$GPU_THREADS" MKL_NUM_THREADS="$GPU_THREADS" OPENBLAS_NUM_THREADS="$GPU_THREADS" \
         parallel -j "$GPU_J" --memfree "$MEMFREE" --halt never \
         --joblog "$OUT/joblog_$(basename "$1" .txt)_${SLURM_JOB_ID}.log" \
         'CUDA_VISIBLE_DEVICES=$(( ({%} - 1) % 4 )) bash -c {}' :::: "$1"

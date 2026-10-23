@@ -106,6 +106,18 @@ GRAPH_ATTRIBUTES: bool = True
 #       dictionaries are drawn once), so that the encoding of a full dataset is computed once and shared by all split
 #       seeds (cache key "codebook_<seed>" instead of "seed_<SEED>"; ex_27).
 CODEBOOK_SEED: Optional[int] = None
+# :param HDC_CACHE:
+#       Whether the HDF encoding of the dataset is read from and written to the experiment cache (default True). False
+#       encodes the dataset in the run without touching the cache, for sweeps in which an encoding serves only one or
+#       a few runs (ex_29: new codebooks in every repetition), so that they do not fill the disk with cache files.
+HDC_CACHE: bool = True
+# :param HDC_ENCODE_BATCH:
+#       Number of molecules per chunk of the HDF encoding (default 600, the batch size used so far). The encoder is
+#       called chunk by chunk and the embeddings are copied out of each chunk, so that the batch tensors of a chunk
+#       are released before the next one (the embeddings returned by forward_graphs are views that keep them alive).
+#       Smaller chunks lower the peak memory at large dimensions; the encodings do not depend on the chunk size
+#       (ex_29 uses max(16, 600 * 2048 // EMBEDDING_SIZE)).
+HDC_ENCODE_BATCH: int = 600
 # :param SPECTRUM_DIAGNOSTIC:
 #       If True, the median number of effective Fourier components of the embeddings (participation ratio of the
 #       power spectrum, over at most 1000 molecules) is stored as "embedding/effective_components" (ex_22).
@@ -272,7 +284,6 @@ def process_dataset(
         hdc_cache_name += '__unitspec'
     if not e.GRAPH_ATTRIBUTES:
         hdc_cache_name += '__noglobal'
-    @experiment.cache.cached(name=hdc_cache_name)
     def process_dataset():
         
         # --- graph representations ---
@@ -311,21 +322,28 @@ def process_dataset(
         e.log('doing the model forward pass on all the graphs...')
         
         time_start_forward = time.time()
-        results = hyper_net.forward_graphs(graphs, batch_size=600)
-        for (index, graph), result in zip(index_data_map.items(), results):
-            index_data_map[index]['graph_features'] = result['graph_embedding']
-            # Without graph attributes HyperNet returns the raw sum-pooled readout, whose norm grows with the
-            # molecule size. Normalizing it gives the original formula with the size/diameter part removed.
-            if not e.GRAPH_ATTRIBUTES:
-                embedding = index_data_map[index]['graph_features']
-                index_data_map[index]['graph_features'] = embedding / np.linalg.norm(embedding)
+        items = list(index_data_map.items())
+        chunk = e.HDC_ENCODE_BATCH
+        for start in range(0, len(graphs), chunk):
+            results = hyper_net.forward_graphs(graphs[start:start + chunk], batch_size=chunk)
+            for (index, graph), result in zip(items[start:start + chunk], results):
+                # a copy: the result is a view that would keep the batch tensors of the chunk alive
+                index_data_map[index]['graph_features'] = np.array(result['graph_embedding'])
+                # Without graph attributes HyperNet returns the raw sum-pooled readout, whose norm grows with the
+                # molecule size. Normalizing it gives the original formula with the size/diameter part removed.
+                if not e.GRAPH_ATTRIBUTES:
+                    embedding = index_data_map[index]['graph_features']
+                    index_data_map[index]['graph_features'] = embedding / np.linalg.norm(embedding)
+            del results
 
         time_end_forward = time.time()
         e.log(f'done the model forward pass after {time_end_forward - time_start_forward:.2f} seconds')
         e['encode_time'] = time_end_forward - time_start_encode
             
         return index_data_map
-    
+
+    if e.HDC_CACHE:
+        process_dataset = experiment.cache.cached(name=hdc_cache_name)(process_dataset)
     index_data_map_processed = process_dataset()
     for index in index_data_map:
         index_data_map[index]['graph_features'] = index_data_map_processed[index]['graph_features']
