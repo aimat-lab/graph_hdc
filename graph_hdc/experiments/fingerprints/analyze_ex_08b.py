@@ -154,13 +154,14 @@ def main():
             if not any(len(d) for d in data):
                 continue
             parts = ax.boxplot(data, positions=np.arange(1, 4) + offset, widths=0.3, patch_artist=True,
-                               showfliers=False)
+                               showfliers=False, manage_ticks=False)
             for box in parts['boxes']:
                 box.set_facecolor(COLORS[encoding])
                 box.set_alpha(0.7)
             for median in parts['medians']:
                 median.set_color('black')
-        ax.set_xticks([1, 2, 3])
+        ax.set_xticks([1, 2, 3], ['1', '2', '3'])
+        ax.set_xlim(0.4, 3.6)
         ax.set_xlabel('Edit steps')
         ax.set_title(f'{size} dimensions')
         ax.grid(axis='y', alpha=0.3)

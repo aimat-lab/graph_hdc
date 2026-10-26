@@ -58,6 +58,7 @@ import os
 import time
 import random
 import hashlib
+import tempfile
 from typing import Any, List, Union, Tuple, Dict
 from collections import defaultdict
 
@@ -317,10 +318,13 @@ def load_dataset(e: Experiment) -> dict[int, GraphDict]:
     """
     e.log(f'loading dataset "{e.DATASET_NAME}"...')
 
-    # Use experiment-specific download folder to avoid stale caches
-    download_folder = os.path.join('/tmp', f'chem_mat_{e.DATASET_NAME}')
+    # Use experiment-specific download folder to avoid stale caches. The folder lives in the temporary
+    # directory of the process (TMPDIR, /tmp by default), so that concurrent jobs on the same dataset, each
+    # with its own TMPDIR, do not delete each other's download (ex_11_b).
+    download_folder = os.path.join(tempfile.gettempdir(), f'chem_mat_{e.DATASET_NAME}')
 
-    # Clear old cache to ensure fresh download
+    # Clear the old folder. Note that chem_mat_data copies a dataset from its own cache (~/.cache/chem_mat_data)
+    # once it has been downloaded there, so only the first run on a dataset downloads it from the server.
     if os.path.exists(download_folder):
         e.log(f'clearing old cache at {download_folder}...')
         import shutil

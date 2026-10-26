@@ -14,9 +14,14 @@ and G the sum of the size and diameter encodings. S is computed with HyperNet wi
 with the graph encoders, so every (D, seed) needs one HyperNet pass per spectrum. As a check, the original arm is
 compared with the HDF distances stored in the subsets (ex_17 stage 2).
 
+With ``--trim``, the random-pair subsets are restricted to the central GED range of TRIM (user decision
+2026-10-12: a nearly uniform GED distribution, QM9 GED 4-15 and ZINC250k GED 7-16, i.e. the same draw without the
+sparse tails); in all subsets, pairs with GED 0 (distinct molecules with identical heavy-atom graphs, i.e. stereoisomers
+in the one such pair of ZINC250k) are left out as well.
+
 Writes ``_ex22/ged_arms.csv`` (Pearson r per subset, D, seed and arm) and ``_ex22/ged_arms.md`` (summary).
 
-    python analyze_ex_22_ged.py [--subsets qm9_smiles:random ...] [--tag _qm9]
+    python analyze_ex_22_ged.py [--subsets qm9_smiles:random ...] [--tag _qm9] [--trim]
 """
 import argparse
 import os
@@ -42,6 +47,8 @@ SUBSETS = ('/media/ssd2/Programming/graph_hdc/graph_hdc/experiments/fingerprints
 STATS = {'qm9_smiles': {'max_size': 9, 'max_diameter': 8}, 'zinc250k': {'max_size': 38, 'max_diameter': 23}}
 SIZES = [32, 128, 512, 2048]
 SEEDS = [1, 2, 3, 4, 5]
+# GED range kept in the random-pair subsets with --trim (inclusive)
+TRIM = {'qm9_smiles': (4, 15), 'zinc250k': (7, 16)}
 ARMS = {  # arm: (spectrum, graph attributes)
     'gaussian': ('gaussian', True),
     'unit': ('unit', True),
@@ -101,12 +108,18 @@ def main():
     parser.add_argument('--sizes', type=int, nargs='+', default=SIZES)
     parser.add_argument('--seeds', type=int, nargs='+', default=SEEDS)
     parser.add_argument('--tag', default='', help='suffix of the output files (for parallel runs)')
+    parser.add_argument('--trim', action='store_true', help='restrict the random-pair subsets to TRIM')
     args = parser.parse_args()
 
     rows, morgan_rows = [], []
     for key in args.subsets:
         dataset, pair_set = key.split(':')
         subset = pd.read_csv(SUBSETS.format(dataset=dataset, pair_set=pair_set))
+        if args.trim:
+            subset = subset[subset['ged'] > 0].reset_index(drop=True)
+        if args.trim and pair_set == 'random':
+            low, high = TRIM[dataset]
+            subset = subset[subset['ged'].between(low, high)].reset_index(drop=True)
         ged = subset['ged'].to_numpy(float)
         smiles = sorted(set(subset['smiles_1']) | set(subset['smiles_2']))
         index = {s: i for i, s in enumerate(smiles)}

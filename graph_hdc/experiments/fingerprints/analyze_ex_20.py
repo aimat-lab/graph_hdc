@@ -32,6 +32,7 @@ from matplotlib import font_manager
 from matplotlib.patches import Patch
 
 from analyze_ex_15 import iter_archives
+from _slurm_ex_20 import ROUNDS
 
 PATH = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(PATH, '_ex20')
@@ -56,10 +57,15 @@ def collect(prefix: str, spectrum: str = None) -> dict:
     spectra = defaultdict(int)
     for _, _, params, _ in archives:
         spectra[params.get('SPECTRUM') or 'gaussian'] += 1
+    if not spectra:
+        raise SystemExit(f'prefix {prefix}: no completed archives found')
     if spectrum is None:
         if len(spectra) > 1:
             raise SystemExit(f'prefix {prefix} mixes HDF codebooks {dict(spectra)}; select one with --spectrum')
-        spectrum = next(iter(spectra), 'gaussian')
+        spectrum = next(iter(spectra))
+    # a known round must have been run with its intended codebooks
+    if prefix in ROUNDS and spectrum != ROUNDS[prefix]:
+        raise SystemExit(f'prefix {prefix} is the SPECTRUM={ROUNDS[prefix]!r} round, but its archives use {dict(spectra)}')
     print(f'HDF codebooks: SPECTRUM={spectrum!r} ({spectra.get(spectrum, 0)} archives)')
     runs = defaultdict(dict)
     for _, meta, params, data in archives:
