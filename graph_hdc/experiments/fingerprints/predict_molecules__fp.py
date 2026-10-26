@@ -42,6 +42,13 @@ FINGERPRINT_TORSION_ATOMS: int = 4
 #       divided by their maximum over the dataset, from which HDF derives the bandwidths of their encodings, so
 #       that they lie in [0, 1] like the fingerprint bits. Default False: the fingerprint alone.
 GRAPH_DESCRIPTORS: bool = False
+# :param FINGERPRINT_CHIRALITY:
+#       Whether the Morgan fingerprints ('morgan', 'count_morgan') are computed with RDKit's ``includeChirality``,
+#       which takes the CIP descriptors (R/S) of the stereocenters into account. RDKit does not distinguish every
+#       pair of stereoisomers this way (in ex_21, some enantiomers keep identical fingerprints at radius 2). The
+#       default (False) ignores stereochemistry, as in all fingerprints of the paper; True is the stereo-aware
+#       reference for the optional stereo attribute of HDF (ex_21).
+FINGERPRINT_CHIRALITY: bool = False
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -91,6 +98,10 @@ def process_dataset(e: Experiment,
 def encode_fingerprints(e: Experiment, index_data_map: dict) -> None:
     """Store the fingerprint of FINGERPRINT_TYPE of every molecule as its "graph_features"."""
 
+    if e.FINGERPRINT_CHIRALITY and e.FINGERPRINT_TYPE not in ('morgan', 'count_morgan'):
+        raise ValueError(f'FINGERPRINT_CHIRALITY is only implemented for Morgan fingerprints, '
+                         f'not for "{e.FINGERPRINT_TYPE}"')
+
     if e.FINGERPRINT_TYPE == 'sort_slice':
         # The vocabulary is fitted on the training molecules of this split, then all molecules are encoded.
         fingerprint = SortAndSliceFingerprint(size=e.FINGERPRINT_SIZE, radius=e.FINGERPRINT_RADIUS)
@@ -105,8 +116,9 @@ def encode_fingerprints(e: Experiment, index_data_map: dict) -> None:
 
     if e.FINGERPRINT_TYPE == 'morgan':
         gen = rdFingerprintGenerator.GetMorganGenerator(
-            radius=e.FINGERPRINT_RADIUS, 
+            radius=e.FINGERPRINT_RADIUS,
             fpSize=e.FINGERPRINT_SIZE,
+            includeChirality=e.FINGERPRINT_CHIRALITY,
         )
         
     elif e.FINGERPRINT_TYPE == 'rdkit':
@@ -133,6 +145,7 @@ def encode_fingerprints(e: Experiment, index_data_map: dict) -> None:
         gen = rdFingerprintGenerator.GetMorganGenerator(
             radius=e.FINGERPRINT_RADIUS,
             fpSize=e.FINGERPRINT_SIZE,
+            includeChirality=e.FINGERPRINT_CHIRALITY,
         )
 
     elif e.FINGERPRINT_TYPE == 'secfp':

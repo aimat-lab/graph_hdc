@@ -9,6 +9,7 @@ import rdkit.Chem as Chem
 from rdkit.Chem import GetPeriodicTable
 from rdkit.Chem import Descriptors3D
 from rdkit.Chem import rdmolops
+from rdkit.Chem import rdCIPLabeler
 from chem_mat_data.processing import MoleculeProcessing
 from graph_hdc.utils import AbstractEncoder
 from graph_hdc.utils import CategoricalIntegerEncoder
@@ -94,6 +95,99 @@ class AtomEncoder(AbstractEncoder):
         return dict(zip(self.atoms, self.embeddings))
 
 
+# The categories of the optional "node_stereo" atom attribute (see ``stereo_labels``): the CIP descriptors of
+# stereocenters (R/S, and r/s for pseudoasymmetric centers such as in cis/trans-1,4-disubstituted cyclohexanes)
+# and of stereogenic double bonds (E/Z, assigned to both atoms of the bond). Index 0 marks all other atoms,
+# including stereocenters whose configuration is not specified in the input.
+STEREO_LABELS: List[str] = ['none', 'R', 'S', 'r', 's', 'E', 'Z']
+
+
+def stereo_labels(mol: Chem.Mol) -> np.ndarray:
+    """
+    Returns the index of the CIP stereo descriptor (see ``STEREO_LABELS``) of every atom of the given ``mol``,
+    as determined by RDKit's CIP labeler. Only stereo elements that are specified in ``mol`` receive a
+    descriptor. Descriptors of other kinds (e.g. M/P for axial chirality) are ignored, and an atom that is both
+    a stereocenter and part of a stereogenic double bond keeps the descriptor of the stereocenter.
+
+    The descriptors are determined on a copy of the molecule in canonical atom order and mapped back, because
+    the labeler can assign different descriptors to a few double bonds (e.g. next to a deprotonated azole ring)
+    depending on the atom order of the input.
+
+    :param mol: The rdkit.Mol instance, which is not modified.
+
+    :returns: A float array with one category index per atom.
+    """
+    # Atom j of the canonical copy is atom order[j] of mol. If the round trip through the canonical SMILES does
+    # not reproduce the atoms (e.g. explicit hydrogen atoms), the labels are determined in the input order.
+    copy = Chem.Mol(mol)
+    smiles = Chem.MolToSmiles(copy)
+    order = [int(i) for i in copy.GetPropsAsDict(includePrivate=True, includeComputed=True)['_smilesAtomOutputOrder']]
+    canonical = Chem.MolFromSmiles(smiles)
+    if canonical is None or canonical.GetNumAtoms() != mol.GetNumAtoms():
+        canonical, order = Chem.Mol(mol), list(range(mol.GetNumAtoms()))
+
+    # The labeler stores its results as "_CIPCode" properties, which the legacy stereo perception of
+    # MolFromSmiles also sets, so these properties are removed first.
+    for item in list(canonical.GetAtoms()) + list(canonical.GetBonds()):
+        item.ClearProp('_CIPCode')
+    rdCIPLabeler.AssignCIPLabels(canonical)
+
+    labels = np.zeros(shape=(mol.GetNumAtoms(), ), dtype=float)
+    for bond in canonical.GetBonds():
+        if bond.HasProp('_CIPCode') and bond.GetProp('_CIPCode') in ('E', 'Z'):
+            index = STEREO_LABELS.index(bond.GetProp('_CIPCode'))
+            labels[order[bond.GetBeginAtomIdx()]] = index
+            labels[order[bond.GetEndAtomIdx()]] = index
+    for atom in canonical.GetAtoms():
+        if atom.HasProp('_CIPCode') and atom.GetProp('_CIPCode') in ('R', 'S', 'r', 's'):
+            labels[order[atom.GetIdx()]] = STEREO_LABELS.index(atom.GetProp('_CIPCode'))
+
+    return labels
+
+
+class StereoEncoder(AbstractEncoder):
+    """
+    Encodes the optional "node_stereo" atom attribute (see ``STEREO_LABELS``). Every stereo descriptor gets a
+    random hypervector, like the categories of the other atom attributes. The first category (no descriptor) is
+    encoded as the identity of the circular convolution (1, 0, ..., 0), so that binding it leaves the node
+    hypervector unchanged: molecules without specified stereo elements receive the same fingerprint as without
+    the stereo attribute.
+
+    The random hypervectors are drawn from a private generator, so creating this encoder does not change the
+    global random state that the other encoders and the downstream models depend on.
+
+    :param unit_modulus: If True (default, as for AtomEncoder), the random descriptor vectors get unit Fourier
+        magnitudes with the phases of the Gaussian draw. The identity vector already has a flat spectrum.
+    """
+
+    def __init__(self,
+                 dim: int,
+                 seed: int = 0,
+                 unit_modulus: bool = True,
+                 ) -> None:
+        AbstractEncoder.__init__(self, dim, seed)
+        self.num_categories = len(STEREO_LABELS)
+        self.unit_modulus = unit_modulus
+
+        generator = torch.Generator().manual_seed(seed)
+        self.embeddings = (torch.randn((self.num_categories, dim), generator=generator) / np.sqrt(dim))
+        self.embeddings = self.embeddings.to(torch.float64)
+        if unit_modulus:
+            # same random draw, Fourier magnitudes set to one (the inverse FFT of a unit-modulus spectrum has norm 1)
+            self.embeddings = torch.fft.ifft(to_unit_modulus(torch.fft.fft(self.embeddings, dim=-1)), dim=-1).real
+        self.embeddings[0] = 0.0
+        self.embeddings[0, 0] = 1.0
+
+    def encode(self, value: Any) -> torch.Tensor:
+        return self.embeddings[int(value)]
+
+    def decode(self, hv: torch.Tensor) -> Any:
+        distances = torch.norm(self.embeddings - hv, dim=1)
+        return int(torch.argmin(distances))
+
+    def get_encoder_hv_dict(self) -> Dict[Any, torch.Tensor]:
+        return dict(enumerate(self.embeddings))
+
 
 def nx_from_graph_dict(graph: dict) -> nx.Graph:
     """
@@ -132,6 +226,7 @@ def nx_from_graph_dict(graph: dict) -> nx.Graph:
 def graph_dict_from_mol(mol: Chem.Mol,
                         processing: MoleculeProcessing = MoleculeProcessing(),
                         hydrogens: str = 'implicit',
+                        stereo: bool = False,
                         ) -> dict:
     """
     Creates a new graph dict representation from the given rdkit ``mol`` object using the given
@@ -142,6 +237,8 @@ def graph_dict_from_mol(mol: Chem.Mol,
         ``GetNumImplicitHs``, which is 0 for every atom written in brackets ([nH], [NH3+], [C@@H], ...).
         "total" uses ``GetTotalNumHs`` and counts all bonded hydrogens. The default keeps the original
         behavior, on which the decoders rely.
+    :param stereo: Whether to add the "node_stereo" attribute with the CIP stereo descriptor of every atom
+        (see ``stereo_labels``). The encoder maps only encode it when they are created with ``stereo=True``.
 
     :returns: A graph dict
     """
@@ -195,7 +292,11 @@ def graph_dict_from_mol(mol: Chem.Mol,
         node_valences[i] = atom.GetTotalNumHs() if hydrogens == 'total' else atom.GetNumImplicitHs()
     
     graph['node_valences'] = node_valences
-    
+
+    # --- Stereochemistry (optional) ---
+    if stereo:
+        graph['node_stereo'] = stereo_labels(mol)
+
     # --- Determining graph properties ---
     # We also add some global graph properties that might be useful for the encoding of the molecular 
     # graphs later on. This includes something like the size of the graph (number of nodes) or the 
@@ -216,48 +317,58 @@ def make_molecule_node_encoder_map(
     #atoms: List[str] = [1.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 13.0, 14.0, 15.0, 16.0, 17.0, 20.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 32.0, 33.0, 34.0, 35.0, 38.0, 39.0, 40.0, 41.0, 42.0, 48.0, 50.0, 51.0, 52.0, 53.0, 58.0, 74.0, 80.0, 82.0, 83.0],
     seed: int = None,
     unit_modulus: bool = False,
+    stereo: bool = False,
 ) -> dict:
     """
     This function returns a dictionary that will act as a "node_encoder_map" that can be supplied to a HyperNet encoder
     to encode the node properties specifically for a molecular graph (as returned by the "graph_dict_from_mol" function).
     The created encoders will create hypervector encodings of the given dimensionality ``dim``.
-    
+
     This encoder map will contain three key-value pairs:
     - node_atoms: An AtomEncoder instance which encodes the given ``atoms`` list of atom symbols.
     - node_degrees: A CategoricalIntegerEncoder instance which encodes the integer degree of the nodes
-    - node_valences: A CategoricalIntegerEncoder instance which encodes the integer valence (number of implicitly 
+    - node_valences: A CategoricalIntegerEncoder instance which encodes the integer valence (number of implicitly
       attached hydrogens) of the nodes.
-      
+    - node_stereo (only if ``stereo``): A StereoEncoder instance which encodes the CIP stereo descriptors.
+
     :param dim: The dimensionality of the hyperdimensional vectors to be used for encoding.
     :param atoms: A list of atom symbols that should be encoded.
     :param unit_modulus: Whether the element vectors get unit Fourier magnitudes (see AtomEncoder). Default False:
         this categorical encoder map, which the decoding code uses, keeps the original Gaussian element vectors. The
         unit-modulus default of 2026-10-09 applies to the continuous encoder maps (``make_molecule_*_map_cont``).
+    :param stereo: Whether to encode the "node_stereo" attribute, which the graph dicts then have to contain
+        (``graph_dict_from_mol(..., stereo=True)``). Its codebook follows ``unit_modulus``.
 
     :returns: A dictionary mapping node attribute names to their respective implementations of the AbstractEncoder
         interface.
     """
-    return {
+    encoder_map = {
         'node_atoms': AtomEncoder(dim=dim, atoms=atoms, seed=seed, unit_modulus=unit_modulus),
         'node_degrees': CategoricalIntegerEncoder(dim=dim, num_categories=8, seed=seed+10),
         'node_valences': CategoricalIntegerEncoder(dim=dim, num_categories=6, seed=seed+20),
         # 'node_degrees': ContinuousEncoder(dim=dim, size=10.0, bandwidth=2.0, seed=seed+10),
         # 'node_valences': ContinuousEncoder(dim=dim, size=10.0, bandwidth=2.0, seed=seed+20),
     }
-    
+    if stereo:
+        encoder_map['node_stereo'] = StereoEncoder(dim=dim, seed=seed+40, unit_modulus=unit_modulus)
+
+    return encoder_map
+
 
 def make_molecule_node_encoder_map_cont(
     dim: int,
     atoms: List[Union[str, int]] = [1.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 13.0, 14.0, 15.0, 16.0, 17.0, 20.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 32.0, 33.0, 34.0, 35.0, 38.0, 39.0, 40.0, 41.0, 42.0, 48.0, 50.0, 51.0, 52.0, 53.0, 58.0, 74.0, 80.0, 82.0, 83.0],
     seed: int = 0,
     unit_modulus: bool = True,
+    stereo: bool = False,
 ) -> Dict[str, AbstractEncoder]:
     """
     Node encoders of HDF: the element (categorical) and the heavy-atom degree and hydrogen count (fractional
     power encoding). ``unit_modulus`` (default True) gives all codebook vectors unit Fourier magnitudes (see
-    AtomEncoder and ContinuousEncoder); False reproduces the original encoder.
+    AtomEncoder and ContinuousEncoder); False reproduces the original encoder. With ``stereo``, the map also
+    encodes the "node_stereo" attribute (StereoEncoder, whose codebook follows ``unit_modulus``).
     """
-    return {
+    encoder_map = {
         'node_atoms': AtomEncoder(
             dim=dim,
             atoms=atoms,
@@ -279,7 +390,11 @@ def make_molecule_node_encoder_map_cont(
             unit_modulus=unit_modulus,
         ),
     }
-    
+    if stereo:
+        encoder_map['node_stereo'] = StereoEncoder(dim=dim, seed=seed+40, unit_modulus=unit_modulus)
+
+    return encoder_map
+
 
 def make_molecule_graph_encoder_map_cont(
     dim: int,

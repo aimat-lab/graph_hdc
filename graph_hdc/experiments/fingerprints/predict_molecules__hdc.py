@@ -80,6 +80,13 @@ BIDIRECTIONAL: bool = True
 #       counts implicit hydrogens, which is 0 for every atom written in brackets ([nH], [NH3+], [C@@H], ...).
 #       Embedding caches of "total" runs carry a "__totalh" suffix.
 HYDROGEN_COUNT: str = 'total'
+# :param STEREO:
+#       Whether the atom attributes include the CIP stereo descriptor of every atom (R/S, r/s for stereocenters,
+#       E/Z for both atoms of a stereogenic double bond; see graph_hdc.special.molecules.stereo_labels). Atoms
+#       without a specified descriptor are encoded with the binding identity, so molecules without stereo
+#       annotations keep exactly their fingerprint. False (the default) ignores stereochemistry, as in all HDF
+#       results of the paper. Embedding caches of stereo runs carry a "__stereo" suffix.
+STEREO: bool = False
 # :param QUANTIZE_BITS:
 #       If set, every component of the HDF vectors is quantized to 2**QUANTIZE_BITS levels before the models are
 #       trained: per embedding dimension, equal-frequency bins are fitted on the training split and each value is
@@ -225,6 +232,7 @@ def process_dataset(
             dim=e.EMBEDDING_SIZE,
             seed=codebook_seed,
             unit_modulus=(e.SPECTRUM == 'unit'),
+            stereo=e.STEREO,
         )
         graph_encoder_map = make_molecule_graph_encoder_map_cont(
             dim=e.EMBEDDING_SIZE,
@@ -240,6 +248,7 @@ def process_dataset(
         node_encoder_map = make_molecule_node_encoder_map(
             dim=e.EMBEDDING_SIZE,
             seed=codebook_seed,
+            stereo=e.STEREO,
         )
         graph_encoder_map = {}
 
@@ -280,6 +289,7 @@ def process_dataset(
     e.log(f' * ENCODING_MODE: {e.ENCODING_MODE}')
     e.log(f' * SPECTRUM: {e.SPECTRUM}')
     e.log(f' * GRAPH_ATTRIBUTES: {e.GRAPH_ATTRIBUTES} ({", ".join(graph_encoder_map) or "none"})')
+    e.log(f' * STEREO: {e.STEREO}')
 
     hyper_net = HyperNet(
         hidden_dim=e.EMBEDDING_SIZE,
@@ -321,6 +331,8 @@ def process_dataset(
         hdc_cache_name += '__noglobal'
     if e.GRAPH_CLOGP:
         hdc_cache_name += '__clogp'
+    if e.STEREO:
+        hdc_cache_name += '__stereo'
     def process_dataset():
         
         # --- graph representations ---
@@ -338,7 +350,7 @@ def process_dataset(
             smiles: str = data['graph_repr']
             mol: Chem.Mol = Chem.MolFromSmiles(smiles)
             
-            graph = graph_dict_from_mol(mol, hydrogens=e.HYDROGEN_COUNT)
+            graph = graph_dict_from_mol(mol, hydrogens=e.HYDROGEN_COUNT, stereo=e.STEREO)
             if e.GRAPH_CLOGP:
                 graph['graph_clogp'] = clogp_of[index]
 

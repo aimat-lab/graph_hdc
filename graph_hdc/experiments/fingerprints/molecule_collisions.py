@@ -20,6 +20,12 @@ on the expressivity of HDF relative to the 1-WL test.
 
 Each run handles one dataset and the embedding sizes in EMBEDDING_SIZES; the 1-WL hashes are computed in every run
 and cross-tabulated with the HDF collisions.
+
+Stereochemistry (experiment ex_21): with DEDUPLICATION = "isomeric", molecules are distinct when their canonical
+isomeric SMILES differ, so that stereoisomers count as different molecules. STEREO adds the CIP stereo descriptors to
+the HDF atom attributes (and to the 1-WL labels), MORGAN_CHIRALITY adds them to the Morgan atom invariants (RDKit
+includeChirality). Collisions among molecules that differ only in their stereochemistry are reported separately
+("stereo-only" collisions). SPECTRUM selects the HDF codebooks (unit-modulus since 2026-10-09; ex_16 used "gaussian").
 """
 import inspect
 import random
@@ -37,7 +43,7 @@ from chem_mat_data import load_smiles_dataset
 
 from graph_hdc.models import HyperNet
 from graph_hdc.special.molecules import (graph_dict_from_mol, make_molecule_node_encoder_map_cont,
-                                         make_molecule_graph_encoder_map_cont)
+                                         make_molecule_graph_encoder_map_cont, stereo_labels)
 
 RDLogger.DisableLog('rdApp.*')
 
@@ -68,6 +74,18 @@ WL_ITERATIONS: int = 2
 #       Hydrogen count of the HDF node attributes and of the 1-WL labels on the HDF graph: "total" counts all bonded
 #       hydrogens (RDKit GetTotalNumHs), "implicit" only implicit ones (0 for bracket atoms such as [nH]).
 HYDROGEN_COUNT: str = 'total'
+# :param DEDUPLICATION:
+#       Which molecules count as distinct: "flat" compares canonical SMILES without stereochemistry, so that all
+#       stereoisomers of a molecule count once (ex_16); "isomeric" compares canonical isomeric SMILES, so that
+#       stereoisomers are distinct molecules (ex_21).
+DEDUPLICATION: str = 'flat'
+# :param STEREO:
+#       Whether HDF encodes the CIP stereo descriptor of every atom (graph_dict_from_mol(stereo=True)). The 1-WL
+#       labels then include the descriptors as well, so that 1-WL on the HDF graph remains the reference for HDF.
+STEREO: bool = False
+# :param MORGAN_CHIRALITY:
+#       Whether the Morgan fingerprints include the CIP descriptors of the stereocenters (RDKit includeChirality).
+MORGAN_CHIRALITY: bool = False
 # :param SPECTRUM:
 #       Fourier magnitudes of the random HDF codebook vectors: "unit" (the HDF default since 2026-10-09) or
 #       "gaussian" (the original encoder, used by the runs ex_16_collisions and ex_16_collisions_totalh).
@@ -120,14 +138,19 @@ experiment = Experiment(
 HDF_ELEMENTS = {int(z) for z in inspect.signature(make_molecule_node_encoder_map_cont).parameters['atoms'].default}
 
 
-def wl_hash(mol: Chem.Mol, iterations: int, bond_labels: bool, hydrogens: str) -> str:
-    """1-WL hash of the graph that HDF encodes (optionally with bond types as edge labels)."""
+def wl_hash(mol: Chem.Mol, iterations: int, bond_labels: bool, hydrogens: str, stereo: bool = False) -> str:
+    """1-WL hash of the graph that HDF encodes (optionally with bond types as edge labels and with the CIP stereo
+    descriptors in the atom labels)."""
     graph = nx.Graph()
+    descriptors = stereo_labels(mol) if stereo else None
     for atom in mol.GetAtoms():
         z = atom.GetAtomicNum()
         element = z if z in HDF_ELEMENTS else 'other'
         h = atom.GetTotalNumHs() if hydrogens == 'total' else atom.GetNumImplicitHs()
-        graph.add_node(atom.GetIdx(), label=f'{element}|{h}|{atom.GetDegree()}')
+        label = f'{element}|{h}|{atom.GetDegree()}'
+        if stereo:
+            label += f'|{int(descriptors[atom.GetIdx()])}'
+        graph.add_node(atom.GetIdx(), label=label)
     for bond in mol.GetBonds():
         graph.add_edge(bond.GetBeginAtomIdx(), bond.GetEndAtomIdx(), bond=str(bond.GetBondType()))
     return nx.weisfeiler_lehman_graph_hash(graph, node_attr='label', edge_attr='bond' if bond_labels else None,
@@ -174,14 +197,20 @@ def summarize(groups: List[List[int]], n: int, smiles: List[str], num_examples: 
     }
 
 
+def num_in_stereo_only_groups(groups: List[List[int]], flat: List[str]) -> int:
+    """Molecules in collision groups whose members all share one SMILES without stereochemistry, i.e. collisions
+    that only the stereochemistry could resolve."""
+    return sum(len(g) for g in groups if len({flat[i] for i in g}) == 1)
+
+
 def encode_hdf(net: HyperNet, mols: List[Chem.Mol], chunk_size: int, batch_size: int,
-               hydrogens: str) -> np.ndarray:
+               hydrogens: str, stereo: bool = False) -> np.ndarray:
     """Unit-normalized float64 HDF vectors; graph dicts are built per chunk to bound the memory."""
     out = np.empty((len(mols), net.hidden_dim), dtype=np.float64)
     for start in range(0, len(mols), chunk_size):
         graphs = []
         for mol in mols[start:start + chunk_size]:
-            graph = graph_dict_from_mol(mol, hydrogens=hydrogens)
+            graph = graph_dict_from_mol(mol, hydrogens=hydrogens, stereo=stereo)
             graph.pop('graph_labels', None)
             graphs.append(graph)
         results = net.forward_graphs(graphs, batch_size=batch_size)
@@ -226,10 +255,14 @@ def close_pairs(x: np.ndarray, radius: float, num_projections: int, seed: int, c
 @experiment
 def experiment(e: Experiment):
 
+    # --- distinct molecules ---
+    if e.DEDUPLICATION not in ('flat', 'isomeric'):
+        raise ValueError(f'unknown DEDUPLICATION "{e.DEDUPLICATION}", expected "flat" or "isomeric"')
+    # with "flat", the molecules are rebuilt from SMILES without stereochemistry, so there is nothing to encode
+    if (e.STEREO or e.MORGAN_CHIRALITY) and e.DEDUPLICATION != 'isomeric':
+        raise ValueError('STEREO and MORGAN_CHIRALITY require DEDUPLICATION = "isomeric"')
     if e.SPECTRUM not in ('gaussian', 'unit'):
         raise ValueError(f'SPECTRUM must be "gaussian" or "unit", got {e.SPECTRUM!r}')
-
-    # --- distinct molecules ---
     e.log(f'loading dataset "{e.DATASET_NAME}"...')
     df = load_smiles_dataset(e.DATASET_NAME)
     raw = [str(s).strip() for s in df['smiles']]
@@ -247,7 +280,7 @@ def experiment(e: Experiment):
         if mol.GetNumAtoms() < 2:
             counts['single_atom'] += 1
             continue
-        canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
+        canonical = Chem.MolToSmiles(mol, isomericSmiles=(e.DEDUPLICATION == 'isomeric'))
         if canonical in seen:
             counts['duplicates'] += 1
             continue
@@ -264,13 +297,20 @@ def experiment(e: Experiment):
     e['dataset/num_molecules'] = n
     e.log(f'{n} distinct molecules ({dict(counts)})')
 
+    # molecules that differ only in their stereochemistry (only with isomeric deduplication)
+    flat = [Chem.MolToSmiles(m, isomericSmiles=False) for m in mols]
+    e['dataset/stereo_groups'] = summarize(groups_from_keys(flat), n, smiles, e.NUM_EXAMPLES)
+    e.log(f'{e["dataset/stereo_groups"]["num_in_collisions"]} molecules differ from another one only in their '
+          f'stereochemistry')
+
     # --- 1-WL ---
     wl_keys = {}
     for variant, bond_labels in (('hdf_graph', False), ('bond_orders', True)):
         start = time.time()
-        wl_keys[variant] = [wl_hash(m, e.WL_ITERATIONS, bond_labels, e.HYDROGEN_COUNT) for m in mols]
+        wl_keys[variant] = [wl_hash(m, e.WL_ITERATIONS, bond_labels, e.HYDROGEN_COUNT, e.STEREO) for m in mols]
         groups = groups_from_keys(wl_keys[variant])
         e[f'wl/{variant}/collisions'] = summarize(groups, n, smiles, e.NUM_EXAMPLES)
+        e[f'wl/{variant}/num_in_stereo_only_collisions'] = num_in_stereo_only_groups(groups, flat)
         e[f'wl/{variant}/time'] = time.time() - start
         e.log(f'1-WL ({variant}): collision rate {e[f"wl/{variant}/collisions"]["collision_rate"]:.5f}')
 
@@ -285,9 +325,12 @@ def experiment(e: Experiment):
 
         # --- Morgan ---
         start = time.time()
-        generator = rdFingerprintGenerator.GetMorganGenerator(radius=e.MORGAN_RADIUS, fpSize=dim)
+        generator = rdFingerprintGenerator.GetMorganGenerator(radius=e.MORGAN_RADIUS, fpSize=dim,
+                                                              includeChirality=e.MORGAN_CHIRALITY)
         keys = [np.packbits(generator.GetFingerprintAsNumPy(m)).tobytes() for m in mols]
-        e[f'morgan/{dim}/collisions'] = summarize(groups_from_keys(keys), n, smiles, e.NUM_EXAMPLES)
+        groups = groups_from_keys(keys)
+        e[f'morgan/{dim}/collisions'] = summarize(groups, n, smiles, e.NUM_EXAMPLES)
+        e[f'morgan/{dim}/num_in_stereo_only_collisions'] = num_in_stereo_only_groups(groups, flat)
         e[f'morgan/{dim}/time'] = time.time() - start
         e.log(f'D={dim} Morgan: collision rate {e[f"morgan/{dim}/collisions"]["collision_rate"]:.5f}')
 
@@ -295,7 +338,7 @@ def experiment(e: Experiment):
         net = HyperNet(
             hidden_dim=dim,
             depth=e.NUM_LAYERS,
-            node_encoder_map=make_molecule_node_encoder_map_cont(dim=dim, seed=e.SEED,
+            node_encoder_map=make_molecule_node_encoder_map_cont(dim=dim, seed=e.SEED, stereo=e.STEREO,
                                                                  unit_modulus=(e.SPECTRUM == 'unit')),
             graph_encoder_map=make_molecule_graph_encoder_map_cont(dim=dim, seed=e.SEED, max_graph_size=max_size,
                                                                    max_graph_diameter=max_diameter,
@@ -319,9 +362,9 @@ def experiment(e: Experiment):
                 permuted.append(mol)
                 owners.append(i)
         reference = encode_hdf(net, [mols[i] for i in owners], e.ENCODING_CHUNK_SIZE, e.ENCODING_BATCH_SIZE,
-                               e.HYDROGEN_COUNT)
+                               e.HYDROGEN_COUNT, e.STEREO)
         noise = np.linalg.norm(encode_hdf(net, permuted, e.ENCODING_CHUNK_SIZE, e.ENCODING_BATCH_SIZE,
-                                          e.HYDROGEN_COUNT) - reference, axis=1)
+                                          e.HYDROGEN_COUNT, e.STEREO) - reference, axis=1)
         if not np.isfinite(noise).all():
             raise ValueError('non-finite HDF vectors in the noise measurement')
         tolerance = max(e.TOLERANCE_FLOOR, e.TOLERANCE_FACTOR * float(noise.max()))
@@ -332,7 +375,7 @@ def experiment(e: Experiment):
         e[f'hdf/{dim}/tolerance'] = tolerance
 
         start = time.time()
-        x = encode_hdf(net, mols, e.ENCODING_CHUNK_SIZE, e.ENCODING_BATCH_SIZE, e.HYDROGEN_COUNT)
+        x = encode_hdf(net, mols, e.ENCODING_CHUNK_SIZE, e.ENCODING_BATCH_SIZE, e.HYDROGEN_COUNT, e.STEREO)
         if not np.isfinite(x).all():
             raise ValueError('non-finite HDF vectors')
         e[f'hdf/{dim}/encode_time'] = time.time() - start
@@ -345,6 +388,7 @@ def experiment(e: Experiment):
         collision = pd <= tolerance
         groups = groups_from_pairs(n, pi[collision], pj[collision])
         e[f'hdf/{dim}/collisions'] = summarize(groups, n, smiles, e.NUM_EXAMPLES)
+        e[f'hdf/{dim}/num_in_stereo_only_collisions'] = num_in_stereo_only_groups(groups, flat)
         close = ~collision
         e[f'hdf/{dim}/collision_max_distance'] = float(pd[collision].max()) if collision.any() else None
         e[f'hdf/{dim}/num_close_pairs'] = int(close.sum())
