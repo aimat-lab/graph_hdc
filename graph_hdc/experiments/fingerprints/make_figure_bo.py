@@ -49,8 +49,9 @@ PROGRESSION_SIZES = [16, 1024]
 MAIN_METHODS = ['morgan_tanimoto', 'hdf_linear']
 # the HDF surrogate that the significance brackets compare with Morgan + Tanimoto
 MAIN_HDF = 'hdf_linear'
-SI_HDF = 'hdf_matern'
-SI_METHODS = ['morgan_tanimoto', 'morgan_pca', 'hdf_matern', 'hdf_linear']
+# HDF + linear is the main HDF surrogate in the SI as well; HDF + Matern is the kernel control (user, 2026-10-26)
+SI_HDF = 'hdf_linear'
+SI_METHODS = ['morgan_tanimoto', 'morgan_pca', 'hdf_linear', 'hdf_matern']
 COLORS = {
     'random': '#808080',
     'morgan_tanimoto': '#7C92FF',
@@ -73,7 +74,7 @@ TITLES = {
     'qm9_gap': 'HOMO-LUMO gap (QM9)', 'qm9_dipole': 'Dipole moment (QM9)', 'melting_point': 'Melting point',
 }
 SIGNIFICANCE = [(0.001, '***'), (0.01, '**'), (0.05, '*')]
-# significance marks where Morgan + Tanimoto is significantly better than HDF + Matern
+# significance marks where Morgan + Tanimoto is significantly better than HDF
 MORGAN_BETTER_COLOR = '#D62728'
 
 # box plots: black outlines, whiskers and caps at 0.8 pt and medians at 1.2 pt as printed (user, 2026-10-23)
@@ -87,7 +88,9 @@ SI_SCALE = 0.95 * 472 / 562
 SI_STYLE = {
     'font': 7.5, 'tick': 7.0, 'title': 8.0, 'letter': 10.0, 'axes': 0.6, 'tick_length': 2.5, 'grid': 0.5,
     'curve': 1.6, 'random': 0.9, 'bracket': 0.7, 'box': BOX_LW / SI_SCALE, 'median': MEDIAN_LW / SI_SCALE,
-    'flier': 2.5, 'flier_edge': 0.3 / SI_SCALE, 'colors': COLORS,
+    'flier': 2.5, 'flier_edge': 0.3 / SI_SCALE,
+    # the main HDF surrogate (linear) takes the standard HDF green, the Matern control the darker green
+    'colors': {**COLORS, 'hdf_linear': COLORS['hdf_matern'], 'hdf_matern': COLORS['hdf_linear']},
 }
 MAIN_STYLE = {
     'font': 9.0, 'tick': 8.5, 'title': 9.0, 'letter': 11.0, 'axes': 0.8, 'tick_length': 3.0, 'grid': 0.6,
@@ -278,15 +281,13 @@ def si_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
     style = SI_STYLE
     methods = SI_METHODS
     sizes = available(df, SI_SIZES)
-    fig, axes = plt.subplots(3, 3, figsize=(7.8, 7.0))
-    fig.subplots_adjust(left=0.07, right=0.995, top=0.925, bottom=0.065, hspace=0.36, wspace=0.2)
+    fig, axes = plt.subplots(3, 3, figsize=(7.8, 7.4))
+    fig.subplots_adjust(left=0.07, right=0.995, top=0.93, bottom=0.06, hspace=0.42, wspace=0.27)
     for ax, letter, objective in zip(axes.flat, 'abcdefghi', OBJECTIVES):
         box_panel(ax, df, tests, objective, methods, sizes, style, SI_HDF)
         panel_title(ax, letter, TITLES[objective], style)
-        if objective not in ('clogp', 'lipophilicity', 'qm9_gap'):
-            ax.set_ylabel('')
-        if objective in ('qm9_gap', 'qm9_dipole', 'melting_point'):
-            ax.set_xlabel('Embedding size')
+        # every panel has its own scale, so every panel gets both axis labels (Pascal, 2026-10-20)
+        ax.set_xlabel('Embedding size')
     handles = [Patch(facecolor=to_rgba(style['colors'][m], 0.7), edgecolor='black', linewidth=style['box'], label=LABELS[m])
                for m in methods]
     handles.append(plt.Line2D([], [], color=style['colors']['random'], ls='--', lw=style['random'], label=LABELS['random']))
