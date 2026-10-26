@@ -108,7 +108,7 @@ def panel_b(ax, data: dict):
     ax.minorticks_off()
     ax.set_xlim(DIMENSIONS_B[0] / 1.25, DIMENSIONS_B[-1] * 1.25)
     ax.set_xlabel('Embedding size', fontsize=FONT_SIZE + 1)
-    ax.set_ylabel('MAE$_{\\mathrm{Morgan}}$ / MAE$_{\\mathrm{HDF}}$ $\\uparrow$', fontsize=FONT_SIZE + 1)
+    ax.set_ylabel('Error$_{\\mathrm{FP}}$ / Error$_{\\mathrm{HDF}}$ $\\uparrow$', fontsize=FONT_SIZE + 1)  # notation of the caption
     ax.set_title('KNN error ratio', fontsize=FONT_SIZE + 1)
     handles = [Line2D([], [], color='black', linestyle=style, linewidth=1.0, marker=marker, markerfacecolor='white',
                       markeredgecolor='black', markersize=5.5, label=label) for _t, label, marker, style, _a in DATASETS]
