@@ -55,11 +55,11 @@ def main(path: str, out: str, png: bool):
         ax.set_xscale('log')
         ax.set_title(title, fontsize=FONT_SIZE + 1)
         ax.set_xlabel('Embedding dimension', fontsize=FONT_SIZE + 1)
-        if k == 0:
-            ax.set_ylabel('Test MAE $\\downarrow$', fontsize=FONT_SIZE + 1)
+        # both panels have their own scale, so both get the y-label (Pascal, 2026-10-20)
+        ax.set_ylabel('Test MAE $\\downarrow$', fontsize=FONT_SIZE + 1)
         ax.grid(True, which='major', linestyle='--', alpha=0.3)
         ax.set_axisbelow(True)
-        ax.text(-0.14 if k == 0 else -0.10, 1.06, 'ab'[k], transform=ax.transAxes, fontsize=FONT_SIZE + 4,
+        ax.text(-0.14, 1.06, 'ab'[k], transform=ax.transAxes, fontsize=FONT_SIZE + 4,
                 fontweight='bold', va='bottom', ha='left')
     handles = [Line2D([], [], color=color, linestyle=style, linewidth=1.6, marker=marker, markersize=4.5,
                       markeredgecolor='black', markeredgewidth=0.6, label=label)

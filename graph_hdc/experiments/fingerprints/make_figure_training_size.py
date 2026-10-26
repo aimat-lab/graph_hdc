@@ -74,11 +74,11 @@ def main(path: str, out: str, png: bool):
         ax.set_title(title, fontsize=FONT_SIZE + 1)
         if k >= 2:
             ax.set_xlabel('Number of training molecules', fontsize=FONT_SIZE + 1)
-        if k % 2 == 0:
-            ax.set_ylabel('Test MAE $\\downarrow$', fontsize=FONT_SIZE + 1)
+        # every panel has its own scale, so every panel gets the y-label (Pascal, 2026-10-20)
+        ax.set_ylabel('Test MAE $\\downarrow$', fontsize=FONT_SIZE + 1)
         ax.grid(True, which='major', linestyle='--', alpha=0.3)
         ax.set_axisbelow(True)
-        ax.text(-0.15 if k % 2 == 0 else -0.10, 1.06, 'abcd'[k], transform=ax.transAxes, fontsize=FONT_SIZE + 4,
+        ax.text(-0.15, 1.06, 'abcd'[k], transform=ax.transAxes, fontsize=FONT_SIZE + 4,
                 fontweight='bold', va='bottom', ha='left')
     handles = [Line2D([], [], color=color, linestyle=style, linewidth=1.5, marker=marker, markersize=4,
                       markeredgecolor='black', markeredgewidth=0.5, label=label)
