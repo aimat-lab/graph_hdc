@@ -310,7 +310,43 @@ def make_molecule_graph_encoder_map_cont(
         ),
     }
 
-    
+
+def make_value_graph_encoder(
+    values: List[float],
+    dim: int,
+    seed: int,
+    unit_modulus: bool = True,
+    min_bandwidth: float = 1.0,
+    quantile: float = 0.01,
+) -> ContinuousEncoder:
+    """
+    Fractional power encoder for a further continuous graph-level attribute, for example Crippen's logP (ex_26). It is
+    built like the graph size encoder of ``make_molecule_graph_encoder_map_cont``, whose bandwidth is one seventh of
+    the value range: here the range between the ``quantile`` and 1 - ``quantile`` quantiles of ``values`` (the
+    attribute over the whole dataset), so that a few extreme molecules do not coarsen the resolution of the bulk, and
+    at least ``min_bandwidth``. With unit-modulus base vectors, the similarity of two encoded values depends only on
+    their difference (about zero at one bandwidth), so no offset is needed. Add the encoder to the graph encoder map
+    under the key of the graph dict entry that holds the value (e.g. "graph_clogp"); HyperNet then sums its hypervector
+    with those of the graph size and diameter.
+
+    :param values: The attribute values of all molecules of the dataset (only their quantiles are used).
+    :param dim: The dimension of the hypervectors.
+    :param seed: The seed of the random base vector. Use an offset that no other encoder of the map uses.
+    :param unit_modulus: Whether the base vector has unit Fourier magnitudes (see ContinuousEncoder). Without it, the
+        random magnitudes are raised to the power value / bandwidth, which grows without bound for negative values.
+    :param min_bandwidth: The lower bound of the bandwidth, in units of the attribute.
+    :param quantile: The lower quantile of the range (0 uses the minimum and the maximum).
+    """
+    low, high = (float(x) for x in np.quantile(np.asarray(values, dtype=float), [quantile, 1.0 - quantile]))
+    return ContinuousEncoder(
+        dim=dim,
+        size=high - low,
+        bandwidth=max(min_bandwidth, (high - low) / 7.0),
+        seed=seed,
+        unit_modulus=unit_modulus,
+    )
+
+
 def mol_from_graph_dict(graph: dict) -> Chem.Mol:
     """
     Create an RDKit molecule from a graph dict representation.
