@@ -29,6 +29,9 @@ WIDTH = 0.26
 HATCH = '/////'
 # user, 2026-10-23: '////' at 0.9 was too faint, '///' at 1.6 too thick; denser thin lines instead
 HATCH_LINEWIDTH = 0.9
+# black bar outlines like the box plots of the other figures (user, 2026-10-26: thicker black borders)
+EDGE = 'black'
+EDGE_LINEWIDTH = 1.2
 
 
 def darker(hex_color: str, factor: float = 0.55) -> tuple:
@@ -62,14 +65,14 @@ def main(path: str, out: str, png: bool):
                                   for model in MODELS])
                 if setting == 'fixed':
                     # the standard bar in front: the colour of the representation with a black hatch on top
-                    ax.bar(pos, means, WIDTH, color=color, edgecolor=darker(color), linewidth=0.8, zorder=3)
+                    ax.bar(pos, means, WIDTH, color=color, edgecolor=EDGE, linewidth=EDGE_LINEWIDTH, zorder=3)
                     ax.bar(pos, means, WIDTH, facecolor='none', edgecolor='black', hatch=HATCH, linewidth=0,
                            zorder=4)
                 else:
                     # the plain tuned bar behind it: its part above the standard bar is the gain from tuning
-                    ax.bar(pos, means, WIDTH, color=color, edgecolor=darker(color), linewidth=0.8, zorder=2)
+                    ax.bar(pos, means, WIDTH, color=color, edgecolor=EDGE, linewidth=EDGE_LINEWIDTH, zorder=2)
                     # its outline on top, so that a tuned result below the standard one stays visible as a line
-                    ax.bar(pos, means, WIDTH, facecolor='none', edgecolor=darker(color), linewidth=0.8, zorder=5)
+                    ax.bar(pos, means, WIDTH, facecolor='none', edgecolor=EDGE, linewidth=EDGE_LINEWIDTH, zorder=5)
         ax.set_xticks(x)
         ax.set_xlim(-0.5, len(MODELS) - 0.5)
         ax.set_xticklabels(MODELS)
@@ -82,10 +85,10 @@ def main(path: str, out: str, png: bool):
             ax.set_ylabel('$R^2$ $\\uparrow$', fontsize=FONT_SIZE + 1)
         ax.text(-0.13 if k % 2 == 0 else -0.06, 1.06, 'abcd'[k], transform=ax.transAxes, fontsize=FONT_SIZE + 4,
                 fontweight='bold', va='bottom', ha='left')
-    handles = [Patch(facecolor=color, edgecolor=color, label=label) for _m, label, color in METHODS]
-    handles += [Patch(facecolor='#B0B0B0', edgecolor='black', hatch=HATCH, linewidth=0.5,
+    handles = [Patch(facecolor=color, edgecolor=EDGE, linewidth=EDGE_LINEWIDTH, label=label) for _m, label, color in METHODS]
+    handles += [Patch(facecolor='#B0B0B0', edgecolor=EDGE, hatch=HATCH, linewidth=EDGE_LINEWIDTH,
                       label='standard configuration'),
-                Patch(facecolor='#B0B0B0', edgecolor='#606060', linewidth=0.5, label='tuned')]
+                Patch(facecolor='#B0B0B0', edgecolor=EDGE, linewidth=EDGE_LINEWIDTH, label='tuned')]
     fig.legend(handles=handles, loc='upper center', ncol=5, frameon=True, bbox_to_anchor=(0.5, 1.0),
                handlelength=1.6, handletextpad=0.5, columnspacing=1.1,
                fontsize=FONT_SIZE)
