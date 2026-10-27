@@ -4,6 +4,13 @@ Analysis of Experiment 27 (see _slurm_ex_27.py): the re-run of Table 1 and of th
     python analyze_ex_27.py check     # the GPU equivalence check and the smoke test of the fixed stage
     python analyze_ex_27.py fixed     # the fixed MLP and KNN tables
     python analyze_ex_27.py opt       # the optimized MLP table and the chosen configurations
+    python analyze_ex_27.py tables [DIR]  # the KNN and optimized tables from fixed_runs.csv / opt_runs.csv in DIR
+
+``tables`` needs only the per-seed CSVs (DIR defaults to _ex27/jupiter, the copy of the JUPITER results) and writes
+dataset_comparison_ex27_knn.tex and dataset_comparison_ex27_opt.tex to DIR. In these two tables (SI Tables S8 and
+S9), every baseline cell carries a triangle that points down for a lower and up for a higher mean MAE than HDF,
+filled if the two-sided Wilcoxon signed-rank test over the paired seeds, Holm-corrected over the four baselines of a
+target, gives p < 0.05 (the convention of analyze_ex_14.py). The fixed MLP table (Table 1) has no triangles.
 
 ``opt`` writes opt_runs.csv, opt_configs.csv (the best trial of every study: its validation MAE and parameters) and,
 once every cell has results, dataset_comparison_ex27_opt.tex (the format of the fixed tables).
@@ -253,8 +260,57 @@ def decimals(values) -> int:
     return max(3, 2 - int(np.floor(np.log10(smallest))))
 
 
-def tabular(summary: dict, model: str, datapoints: dict) -> str:
-    """The table of one model in the format of the paper's tabulars/dataset_comparison*.tex."""
+def by_seed(records: list, column: int) -> dict:
+    """{(note, method): {seed: value}} from records (note, method, seed, ...), with the value in ``column``."""
+    out = {}
+    for record in records:
+        if record[column] is not None:
+            out.setdefault((record[0], record[1]), {})[record[2]] = record[column]
+    return out
+
+
+def holm(pvalues: list) -> list:
+    """Holm-Bonferroni adjusted p-values (None entries are passed through), as in analyze_ex_14.py."""
+    idx = [i for i, p in enumerate(pvalues) if p is not None]
+    order = sorted(idx, key=lambda i: pvalues[i])
+    adjusted = list(pvalues)
+    running = 0.0
+    for rank, i in enumerate(order):
+        running = max(running, min(1.0, (len(order) - rank) * pvalues[i]))
+        adjusted[i] = running
+    return adjusted
+
+
+def marks(per_seed: dict, note: str, methods: list) -> dict:
+    """
+    Triangle macro per baseline of a target: down / up for a lower / higher mean MAE than HDF (the first method),
+    filled if the two-sided Wilcoxon signed-rank test over the paired seeds, Holm-corrected over the baselines of the
+    target, gives p < 0.05, hollow otherwise (the macros are defined in the preamble of supplementary.tex).
+    """
+    from scipy.stats import wilcoxon
+    ref = per_seed[(note, methods[0])]
+    pvalues = []
+    for method in methods[1:]:
+        cell = per_seed[(note, method)]
+        seeds = sorted(set(ref) & set(cell))
+        if len(seeds) >= 5 and any(ref[s] != cell[s] for s in seeds):
+            pvalues.append(wilcoxon([ref[s] for s in seeds], [cell[s] for s in seeds]).pvalue)
+        else:
+            pvalues.append(None)
+    pvalues = holm(pvalues)
+    out = {}
+    for method, p in zip(methods[1:], pvalues):
+        lower = np.mean(list(per_seed[(note, method)].values())) < np.mean(list(ref.values()))
+        significant = p is not None and p < 0.05
+        out[method] = ('trilow' if lower else 'trihigh') + ('sig' if significant else '')
+    return out
+
+
+def tabular(summary: dict, model: str, datapoints: dict, per_seed: dict = None) -> str:
+    """
+    The table of one model in the format of the paper's tabulars/dataset_comparison*.tex. With ``per_seed``
+    ({(note, method): {seed: MAE}}), every baseline cell carries the triangle of ``marks``.
+    """
     methods = [method for method, *_ in METHODS]
     rounded, cells = [], []
     for note, _, _ in ROWS:
@@ -262,17 +318,19 @@ def tabular(summary: dict, model: str, datapoints: dict) -> str:
         d = decimals(means)
         row_means = [round(m, d) for m in means]
         best = min(row_means)
+        triangles = marks(per_seed, note, methods) if per_seed else {}
         row_cells = []
         for method, mean in zip(methods, row_means):
             std = summary[(note, method, model)][1]
             value = f'{mean:.{d}f}'
             value = rf'\mathbf{{ {value} }}' if mean == best else f' {value} '
+            if method in triangles:
+                value += rf'^{{\{triangles[method]}}}'
             row_cells.append(rf'$\underset{{\color{{darkgray}} \pm{std:.{max(2, d - 1)}f}}}{{{value}}}$')
         rounded.append(row_means)
         cells.append(row_cells)
     X = np.array(rounded)
     best = X.min(axis=1, keepdims=True)
-    deviation = 100 * (X - best) / best
     ranks = np.array([np.argsort(np.argsort(row)) + 1.0 for row in X])
     # average ranks for ties (as scipy.stats.rankdata, used by the paper's table_stats.py)
     for i, row in enumerate(X):
@@ -281,9 +339,13 @@ def tabular(summary: dict, model: str, datapoints: dict) -> str:
             ranks[i, tied] = ranks[i, tied].mean()
     out = [r'\begin{tabular}{llrccccc}', r'\toprule',
            ' &  &  & ' + ' & '.join(COLUMN_LABELS[m] for m in methods) + r' \\', r'\midrule', '']
+    # summary rows as in the paper (scripts/table_stats.py): geometric mean of the error ratios to the best result, as
+    # a deviation in %, and the number of properties within 10% of the best result
+    geo_mean = 100 * (np.exp(np.log(X / best).mean(axis=0)) - 1)
+    within = (X <= 1.1 * best).sum(axis=0)
     for title, values in [('Median Rank', [f'${v:g}$' for v in np.median(ranks, axis=0)]),
-                          ('Median rel. deviation', [f'${v:.1f}\\%$' for v in np.median(deviation, axis=0)]),
-                          ('Max. rel. deviation', [f'${v:,.0f}\\%$'.replace(',', '{,}') for v in deviation.max(axis=0)])]:
+                          (r'Geo.\ mean rel.\ deviation', [f'${v:.1f}\\%$' for v in geo_mean]),
+                          (r'Within 10\% of best', [f'${v:d}$' for v in within])]:
         out += [rf'\multicolumn{{3}}{{l}}{{{title}}} &'] + [f'{v} &' for v in values[:-1]] + [f'{values[-1]} \\\\', '']
     out += [r'\arrayrulecolor{gray}\midrule\arrayrulecolor{black}', '',
             'Dataset & Quantity & Datapoints & ' + ' & '.join(COLUMN_LABELS[m] for m in methods) + r' \\', '',
@@ -351,8 +413,10 @@ def report_fixed(lines: list):
     for model in ('mlp', 'knn'):
         path = os.path.join(OUT, f'dataset_comparison_ex27_{model}.tex')
         if complete:
+            # triangles against HDF only in the KNN table (SI); Table 1 has none
+            per_seed = by_seed(records, 4) if model == 'knn' else None
             with open(path, 'w') as f:
-                f.write(tabular(summary, model, datapoints))
+                f.write(tabular(summary, model, datapoints, per_seed))
         elif os.path.exists(path):
             os.remove(path)
     if complete:
@@ -429,12 +493,48 @@ def report_opt(lines: list):
     path = os.path.join(OUT, 'dataset_comparison_ex27_opt.tex')
     if all(summary[(note, method, 'mlp')][2] == len(SEEDS) for note, *_ in ROWS for method, *_ in METHODS):
         with open(path, 'w') as f:
-            f.write(tabular(summary, 'mlp', datapoints))
+            f.write(tabular(summary, 'mlp', datapoints, by_seed(records, 3)))
         say('\nwrote _ex27/opt_runs.csv, opt_configs.csv, dataset_comparison_ex27_opt.tex')
     else:
         if os.path.exists(path):
             os.remove(path)
         say(f'\nnot every cell has all {len(SEEDS)} seeds: wrote only opt_runs.csv and opt_configs.csv')
+
+
+# Number of molecules per target (train + validation + test), as in the tables written by ``fixed`` and ``opt``;
+# ``tables`` reads only the per-seed CSVs, which do not contain it.
+DATAPOINTS = {'hopv15_pce': 176, 'hopv15_voc': 176, 'freesolv_hfe': 639, 'bace_ic50': 1513, 'lipophilicity_logD': 4199,
+              'aqsoldb_logs': 9887, 'clogp': 9887, 'compas_energy': 39482, 'compas_gap': 39482, 'compas_dipole': 39482,
+              **{note: 133882 for note in ('qm9_dipole', 'qm9_cv', 'qm9_zpve', 'qm9_alpha', 'qm9_enthalpy',
+                                           'qm9_energy', 'qm9_gap')}}
+
+
+def write_tables(lines: list, directory: str):
+    """The KNN and optimized tables, with the triangles against HDF, from fixed_runs.csv and opt_runs.csv."""
+    say = lines.append
+    for csv_name, column, model, tex_name in (('fixed_runs.csv', 4, 'knn', 'dataset_comparison_ex27_knn.tex'),
+                                              ('opt_runs.csv', 3, 'mlp', 'dataset_comparison_ex27_opt.tex')):
+        records = []
+        with open(os.path.join(directory, csv_name)) as f:
+            next(f)
+            for line in f:
+                fields = line.strip().split(',')
+                value = None if fields[column] == 'None' else float(fields[column])
+                records.append((fields[0], fields[1], int(fields[2])) + (None,) * (column - 3) + (value,))
+        per_seed = by_seed(records, column)
+        summary = {}
+        for (note, method), values in per_seed.items():
+            values = list(values.values())
+            summary[(note, method, model)] = (float(np.mean(values)), float(np.std(values, ddof=1)), len(values))
+        incomplete = [key for key, (_, _, n) in summary.items() if n != len(SEEDS)]
+        if incomplete:
+            say(f'{csv_name}: cells without all {len(SEEDS)} seeds: {incomplete}')
+        with open(os.path.join(directory, tex_name), 'w') as f:
+            f.write(tabular(summary, model, DATAPOINTS, per_seed))
+        say(f'{csv_name} -> {tex_name}')
+        for note, _, _ in ROWS:
+            triangles = marks(per_seed, note, [m for m, *_ in METHODS])
+            say(f'   {note:20s} ' + '  '.join(f'{m} {t}' for m, t in triangles.items()))
 
 
 if __name__ == '__main__':
@@ -446,6 +546,8 @@ if __name__ == '__main__':
         report_fixed(lines)
     elif mode == 'opt':
         report_opt(lines)
+    elif mode == 'tables':
+        write_tables(lines, sys.argv[2] if len(sys.argv) > 2 else os.path.join(OUT, 'jupiter'))
     else:
         sys.exit(f'unknown mode {mode}')
     text = '\n'.join(lines)
