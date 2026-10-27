@@ -234,18 +234,18 @@ def report_check(lines: list):
 # unit of the dataset), as in the revised table.
 ROWS = [
     ('hopv15_pce', 'HOPV15', r'PCE \qunit{\%}'),
-    ('hopv15_voc', '', r'$V_{oc}$ \qunit{V}'),
+    ('hopv15_voc', '', r'$V_\mathrm{oc}$ \qunit{V}'),
     ('freesolv_hfe', 'FreeSolv', r'$\Delta G$ \qunit{kcal/mol}'),
-    ('bace_ic50', 'BACE', r'IC50 \qunit{pIC50}'),
-    ('lipophilicity_logD', 'LIPOP', 'LogD'),
+    ('bace_ic50', 'BACE', r'IC$_{50}$ \qunit{pIC$_{50}$}'),
+    ('lipophilicity_logD', 'Lipophilicity', 'logD'),
     ('aqsoldb_logs', 'AqSolDB', r'logS \qunit{log\,M}'),
-    ('clogp', 'clogp', 'ClogP'),
+    ('clogp', '', 'ClogP'),   # computed for the molecules of AqSolDB, so listed under it
     ('compas_energy', 'COMPAS-3X', r'$U_0$ \qunit{eV}'),
     ('compas_gap', '', r'Gap \qunit{eV}'),
     ('compas_dipole', '', r'$\mu$ \qunit{D}'),
     ('qm9_dipole', 'QM9', r'$\mu$ \qunit{D}'),
     ('qm9_cv', '', r'$C_v$ \qunit{cal/(mol\,K)}'),
-    ('qm9_zpve', '', r'$ZPVE$ \qunit{mHa}'),
+    ('qm9_zpve', '', r'ZPVE \qunit{mHa}'),
     ('qm9_alpha', '', r'$\alpha$ \qunit{$a_0^3$}'),
     ('qm9_enthalpy', '', r'$\Delta H$ \qunit{Ha}'),
     ('qm9_energy', '', r'$U_0$ \qunit{Ha}'),
@@ -254,7 +254,7 @@ ROWS = [
 # Display scale of a row's MAE (the paired tests do not depend on it): ZPVE in mHa, as in the other SI tables, so
 # that its values do not need five or six decimals.
 ROW_SCALE = {'qm9_zpve': 1000.0}
-COLUMN_LABELS = {'hdf': 'HDF', 'morgan': 'Morgan', 'rdkit': 'RDKit', 'torsion': 'Torsion', 'atompair': 'AtomPair'}
+COLUMN_LABELS = {'hdf': 'HDF', 'morgan': 'Morgan', 'rdkit': 'RDKit', 'torsion': 'Torsion', 'atompair': 'Atom Pair'}
 
 
 def decimals(values) -> int:
@@ -355,7 +355,9 @@ def tabular(summary: dict, model: str, datapoints: dict, per_seed: dict = None) 
             'Dataset & Quantity & Datapoints & ' + ' & '.join(COLUMN_LABELS[m] for m in methods) + r' \\', '',
             r'\arrayrulecolor{gray}\midrule\arrayrulecolor{black}', '']
     for (note, dataset, quantity), row_cells in zip(ROWS, cells):
-        out += [f'{dataset} &', f'{quantity} &', f'{datapoints.get(note, "")} &']
+        points = datapoints.get(note, '')
+        points = f'{points:,}'.replace(',', '{,}') if isinstance(points, int) else points
+        out += [f'{dataset} &', f'{quantity} &', f'{points} &']
         out += [f'{c} &' for c in row_cells[:-1]] + [f'{row_cells[-1]} \\\\', '']
     out += [r'\bottomrule', r'\end{tabular}']
     return '\n'.join(out) + '\n'
@@ -506,8 +508,9 @@ def report_opt(lines: list):
 
 # Number of molecules per target (train + validation + test), as in the tables written by ``fixed`` and ``opt``;
 # ``tables`` reads only the per-seed CSVs, which do not contain it.
+# AqSolDB and ClogP: 9,889 molecules as in SI Table S1 (user, 2026-10-27; the runs report 9,887 after processing).
 DATAPOINTS = {'hopv15_pce': 176, 'hopv15_voc': 176, 'freesolv_hfe': 639, 'bace_ic50': 1513, 'lipophilicity_logD': 4199,
-              'aqsoldb_logs': 9887, 'clogp': 9887, 'compas_energy': 39482, 'compas_gap': 39482, 'compas_dipole': 39482,
+              'aqsoldb_logs': 9889, 'clogp': 9889, 'compas_energy': 39482, 'compas_gap': 39482, 'compas_dipole': 39482,
               **{note: 133882 for note in ('qm9_dipole', 'qm9_cv', 'qm9_zpve', 'qm9_alpha', 'qm9_enthalpy',
                                            'qm9_energy', 'qm9_gap')}}
 

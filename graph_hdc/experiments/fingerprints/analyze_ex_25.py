@@ -74,7 +74,7 @@ DATASET_OF = {ds[0]: ds[1] for ds in DATASETS}
 # on logS and the reported ClogP errors were the true ones times the standard deviation of logS, about 2.3).
 ROW_META = {
     **EX14_ROW_META,
-    'hopv15_voc': ('HOPV15', '$V_{oc}$', 'V', 1.0),
+    'hopv15_voc': ('HOPV15', r'$V_\mathrm{oc}$', 'V', 1.0),
     'clogp': ('AqSolDB', 'ClogP', '', 1.0),   # computed for the molecules of AqSolDB (mixin_clogp)
     'compas_energy': ('COMPAS-3X', '$U_0$', 'eV', 1.0),
     'compas_dipole': ('COMPAS-3X', r'$\mu$', 'D', 1.0),
@@ -83,9 +83,9 @@ ROW_META = {
     'qm9_alpha': ('QM9', r'$\alpha$', '$a_0^3$', 1.0),
     'qm9_enthalpy': ('QM9', r'$\Delta H$', 'Ha', 1.0),
 }
-assert set(ROW_META) >= set(TABLE1_NOTES) and ROW_META['compas_gap'][3] == 1000.0 / HARTREE_EV
+assert set(ROW_META) >= set(TABLE1_NOTES) and ROW_META['compas_gap'][3] == 1.0
 # decimals of the table cells: three as in the SI tables of ex_14, four for the small COMPAS-3X dipole errors
-DECIMALS = {'compas_dipole': 4}
+DECIMALS = {'compas_dipole': 4, 'compas_gap': 4, 'qm9_gap': 5}
 
 
 def si_cell(values: list, bold: bool, mark: str = None, significant: bool = False, digits: int = 3) -> str:

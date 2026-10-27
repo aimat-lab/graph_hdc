@@ -58,22 +58,24 @@ DATASET_LABEL = {
     'qm9_gap': 'QM9 (gap)', 'qm9_energy': r'QM9 ($U_0$)', 'qm9_zpve': 'QM9 (ZPVE)',
 }
 # Rows of the SI tables: dataset name (printed on the first row of a dataset), quantity, unit and the factor
-# that converts the raw MAE into that unit. The raw QM9 targets are in hartree, COMPAS-3X in eV. All cells are
-# printed with TABLE_DECIMALS decimals, so the small energy errors are given in millihartree: the QM9 gap and
-# ZPVE scaled from Ha, the COMPAS-3X gap converted from eV. U0 stays in Ha (its errors are ~600x larger).
+# that converts the raw MAE into that unit. The raw QM9 targets are in hartree, COMPAS-3X in eV, and the tables
+# keep these units (as Table 1 of the paper), except for the ZPVE, which is given in millihartree (user,
+# 2026-10-27). Cells have TABLE_DECIMALS decimals, or ROW_DECIMALS for the small gap errors (three significant
+# digits).
 HARTREE_EV = 27.211386245988   # CODATA 2018
 TABLE_DECIMALS = 3
 ROW_META = {
     'freesolv_hfe': ('FreeSolv', r'$\Delta G$', 'kcal/mol', 1.0),
     'aqsoldb_logs': ('AqSolDB', 'logS', r'log\,M', 1.0),
     'lipophilicity_logD': ('Lipophilicity', 'logD', '', 1.0),
-    'bace_ic50': ('BACE', 'IC50', 'pIC50', 1.0),
+    'bace_ic50': ('BACE', 'IC$_{50}$', 'pIC$_{50}$', 1.0),
     'hopv15_pce': ('HOPV15', 'PCE', r'\%', 1.0),
-    'compas_gap': ('COMPAS-3X', 'Gap', 'mHa', 1000.0 / HARTREE_EV),
-    'qm9_gap': ('QM9', 'Gap', 'mHa', 1000.0),
+    'compas_gap': ('COMPAS-3X', 'Gap', 'eV', 1.0),
+    'qm9_gap': ('QM9', 'Gap', 'Ha', 1.0),
     'qm9_energy': ('QM9', '$U_0$', 'Ha', 1.0),
     'qm9_zpve': ('QM9', 'ZPVE', 'mHa', 1000.0),
 }
+ROW_DECIMALS = {'compas_gap': 4, 'qm9_gap': 5}
 # architectures in the SI tables
 TABLE_ARCHS = ['gin', 'gatv2']
 
@@ -213,7 +215,7 @@ def holm(pvalues: list) -> list:
     return adjusted
 
 
-def si_cell(values: list, bold: bool, mark: str = None, significant: bool = False) -> str:
+def si_cell(values: list, bold: bool, mark: str = None, significant: bool = False, digits: int = TABLE_DECIMALS) -> str:
     """
     Mean with the standard deviation set below it in gray, as in the other SI tables, with TABLE_DECIMALS
     decimals (the units in ROW_META are chosen such that this keeps at least three significant digits).
@@ -222,7 +224,6 @@ def si_cell(values: list, bold: bool, mark: str = None, significant: bool = Fals
     \\trilow, \\trihigh) and their colors are defined in the preamble of supplementary.tex.
     """
     mean, std = np.mean(values), np.std(values)
-    digits = TABLE_DECIMALS
     text = f'{mean:.{digits}f}'
     if bold:
         text = f'\\mathbf{{{text}}}'
@@ -268,7 +269,8 @@ def table(records: list, columns: list, header: list, note: str) -> str:
         for i, cell in enumerate(cells):
             significant = i > 0 and pvals[i - 1] is not None and pvals[i - 1] < 0.05
             mark = ('down' if means[i] < means[0] else 'up') if i > 0 else None
-            text = si_cell(list(cell.values()), bold=(i == best), mark=mark, significant=significant)
+            text = si_cell(list(cell.values()), bold=(i == best), mark=mark, significant=significant,
+                           digits=ROW_DECIMALS.get(dataset, TABLE_DECIMALS))
             if len(cell) < 10:
                 text += f' ({len(cell)})'   # flags incomplete cells (fewer seeds than planned)
             out.append(text)
