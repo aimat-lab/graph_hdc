@@ -28,7 +28,8 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import FixedLocator, NullFormatter
 
 PATH = os.path.dirname(os.path.abspath(__file__))
-RESULTS = os.path.join(PATH, 'results', 'decode_composition')
+# HDF_DATA_ROOT: folder with the results/ archives (default: this folder)
+RESULTS = os.path.join(os.environ.get('HDF_DATA_ROOT', PATH), 'results', 'decode_composition')
 OUT = os.path.join(PATH, '_ex23')
 
 DATASETS = [('qm9_smiles', 'QM9'), ('zinc250k', 'ZINC250k')]
@@ -67,7 +68,8 @@ def figure(summary: pd.DataFrame, counts: dict, path: str):
         plt.rcParams['font.family'] = 'Roboto Condensed'
     plt.rcParams['font.size'] = FONT_SIZE
 
-    fig, axes = plt.subplots(len(DATASETS), len(METRICS), figsize=(10, 6.4), sharex=True)
+    # drawn close to its printed size (the full SI text width), so that the text prints at about 8-9 pt (user, 2026-10-27)
+    fig, axes = plt.subplots(len(DATASETS), len(METRICS), figsize=(8.8, 5.65), sharex=True)
     letters = iter('abcdefghij')
     for row, (dataset, dataset_label) in enumerate(DATASETS):
         for col, (metric, title, ylabel) in enumerate(METRICS):

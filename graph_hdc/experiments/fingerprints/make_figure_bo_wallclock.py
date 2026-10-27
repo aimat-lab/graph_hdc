@@ -27,7 +27,8 @@ SIZES = [8, 16, 32, 64, 128, 512]
 METHODS = ['random', 'fp', 'hdc']
 FOLDERS = {'random': 'optimize_molecule_bo__random', 'fp': 'optimize_molecule_bo__fp',
            'hdc': 'optimize_molecule_bo__hdc'}
-COLORS = {'random': '#808080', 'fp': '#7C92FF', 'hdc': '#69F7AE'}
+# HDF in the standard HDF green that the caption names (\green; user, 2026-10-27)
+COLORS = {'random': '#808080', 'fp': '#7C92FF', 'hdc': '#4CEB99'}
 LABELS = {'random': 'Random vectors', 'fp': 'Morgan FP', 'hdc': 'HDF'}
 FONT_SIZE = 11
 
@@ -62,8 +63,9 @@ def main():
     if any('Roboto Condensed' in f.name for f in font_manager.fontManager.ttflist):
         plt.rcParams['font.family'] = 'Roboto Condensed'
     plt.rcParams.update({'font.size': FONT_SIZE, 'axes.labelsize': FONT_SIZE + 1, 'pdf.fonttype': 42})
-    # the size of the original figure (407 x 223 pt), which this one replaces at the same width in the SI
-    fig, ax = plt.subplots(figsize=(5.65, 3.1))
+    # drawn at 7.0 in (504 pt) and printed at 0.8 of the SI text width (378 pt), i.e. at 0.75 of its size like the other
+    # SI figures (user, 2026-10-27: the text printed at about 11 pt before)
+    fig, ax = plt.subplots(figsize=(7.0, 3.6))
     width = 0.26
     for i, size in enumerate(SIZES):
         for j, method in enumerate(METHODS):

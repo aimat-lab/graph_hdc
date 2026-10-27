@@ -30,6 +30,7 @@ to recompute them; the figure only takes the numbers of available pairs from it)
     python make_figure_ged_balanced_subset.py
 """
 import os
+import sys
 
 import matplotlib
 matplotlib.use('Agg')
@@ -44,16 +45,19 @@ import ged_exact_correlation as gec
 from analyze_ex_22_ged import TRIM
 
 PATH = os.path.dirname(os.path.abspath(__file__))
+# HDF_DATA_ROOT: folder with the results/ archives and the _ex17/_ex22 tables (default: this folder)
+DATA_ROOT = os.environ.get('HDF_DATA_ROOT', PATH)
+analyze_ex_17.RESULTS = os.path.join(DATA_ROOT, 'results', 'ged_exact_correlation')
 OUT = '/media/ssd2/Programming/latex_hyperdimensional_fingerprints/revision/response_figures'
-SI_OUT = '/media/ssd2/Programming/latex_hyperdimensional_fingerprints/figures'
-CACHE = os.path.join(PATH, '_ex17', 'analysis', 'balanced_subset_correlations.csv')
-SUBSETS = os.path.join(PATH, '_ex17', 'analysis', 'balanced_subset_{dataset}_{pair_set}.csv')
-ARMS = os.path.join(PATH, '_ex22', 'ged_arms.csv')
-MORGAN = os.path.join(PATH, '_ex22', 'ged_morgan.csv')
-ARMS_TRIMMED = os.path.join(PATH, '_ex22', 'ged_arms_trimmed_{dataset}.csv')
-MORGAN_TRIMMED = os.path.join(PATH, '_ex22', 'ged_morgan_trimmed_{dataset}.csv')
-ARMS_NEAR = os.path.join(PATH, '_ex22', 'ged_arms_trimmed_near.csv')
-MORGAN_NEAR = os.path.join(PATH, '_ex22', 'ged_morgan_trimmed_near.csv')
+SI_OUT = os.environ.get('SI_OUT', '/media/ssd2/Programming/latex_hyperdimensional_fingerprints/figures')
+CACHE = os.path.join(DATA_ROOT, '_ex17', 'analysis', 'balanced_subset_correlations.csv')
+SUBSETS = os.path.join(DATA_ROOT, '_ex17', 'analysis', 'balanced_subset_{dataset}_{pair_set}.csv')
+ARMS = os.path.join(DATA_ROOT, '_ex22', 'ged_arms.csv')
+MORGAN = os.path.join(DATA_ROOT, '_ex22', 'ged_morgan.csv')
+ARMS_TRIMMED = os.path.join(DATA_ROOT, '_ex22', 'ged_arms_trimmed_{dataset}.csv')
+MORGAN_TRIMMED = os.path.join(DATA_ROOT, '_ex22', 'ged_morgan_trimmed_{dataset}.csv')
+ARMS_NEAR = os.path.join(DATA_ROOT, '_ex22', 'ged_arms_trimmed_near.csv')
+MORGAN_NEAR = os.path.join(DATA_ROOT, '_ex22', 'ged_morgan_trimmed_near.csv')
 # figure representation -> ex_22 arm (HDF of 2026-10-09 with and without the size and diameter encodings)
 ARM_OF = {'hdf': 'unit', 'hdf_no_global': 'unit_noglobal'}
 
@@ -163,7 +167,7 @@ def panel_letter(ax, letter: str, title: str):
 
 
 def draw_row(ax_left, ax_right, dataset: str, label: str, pair_set: str, table: pd.DataFrame, letters,
-             legend: bool = True):
+             legend: bool = True, short_title: bool = False):
     """Left: GED distribution of the fixed subset. Right: Pearson r with the exact GED vs. embedding size."""
     x = np.arange(len(SIZES))
     subset = load_subset(dataset, pair_set)
@@ -178,8 +182,9 @@ def draw_row(ax_left, ax_right, dataset: str, label: str, pair_set: str, table: 
     ax.set_ylim(0, SUBSET_CAP * 1.1)
     ax.grid(True, alpha=0.3, axis='y')
     ax.set_axisbelow(True)
-    panel_letter(ax, next(letters), f'{label}: {len(subset):,} of {int(part["num_available"].iloc[0]):,} '
-                                    f'{PAIR_SET_LABEL[pair_set]}')
+    # SI figure: only the dataset in the title (the pair counts are given in the text; user, 2026-10-27)
+    panel_letter(ax, next(letters), label if short_title else
+                 f'{label}: {len(subset):,} of {int(part["num_available"].iloc[0]):,} {PAIR_SET_LABEL[pair_set]}')
 
     ax = ax_right
     morgan = part[part['representation'] == 'morgan'].set_index('size').loc[SIZES, 'pearson']
@@ -195,7 +200,7 @@ def draw_row(ax_left, ax_right, dataset: str, label: str, pair_set: str, table: 
                     capsize=4, label=text, zorder=3)
     ax.set_xticks(x, SIZES)
     ax.set_xlabel('Embedding size', fontsize=FONT_SIZE + 1)
-    ax.set_ylabel('Pearson correlation w. GED $\\uparrow$', fontsize=FONT_SIZE + 1)
+    ax.set_ylabel('Pearson correlation with GED $\\uparrow$', fontsize=FONT_SIZE + 1)
     low = min(part['pearson'].min(), 0.0) if pair_set == 'near' else 0.0
     ax.set_ylim(low, 1.0)
     ax.grid(True, linestyle='--', alpha=0.3)
@@ -218,10 +223,12 @@ def save(fig, folder: str, name: str):
 
 def figure(pair_set: str, table: pd.DataFrame, si: bool = False):
     """One pair set, QM9 and ZINC250k. Response figure, or with ``si`` the SI figure (one legend, PDF only)."""
-    fig, axes = plt.subplots(2, 2, figsize=(10, 7.4), gridspec_kw={'width_ratios': [1.1, 1]})
+    # the SI figure is drawn close to its printed size (the full SI text width), so that the text prints at about 8-9 pt
+    fig, axes = plt.subplots(2, 2, figsize=(8.85, 6.6) if si else (10, 7.4), gridspec_kw={'width_ratios': [1.1, 1]})
     letters = iter('abcd')
     for row, (dataset, label) in enumerate(DATASETS):
-        draw_row(axes[row][0], axes[row][1], dataset, label, pair_set, table, letters, legend=(row == 0 or not si))
+        draw_row(axes[row][0], axes[row][1], dataset, label, pair_set, table, letters, legend=(row == 0 or not si),
+                 short_title=si)
     fig.tight_layout(h_pad=2.2, w_pad=3.0)
     if si:
         save(fig, SI_OUT, f'figure_si_ged_exact_{pair_set}')
@@ -233,8 +240,10 @@ def main():
     archive = analyze_ex_17.latest_archive()
     pairs = pd.read_csv(os.path.join(archive, 'pairs_with_distances.csv'))
     table = current_correlations(pairs)
+    # --si: only the SI figure(s), leaving the response figures as they are
     for pair_set in ('random', 'near'):
-        figure(pair_set, table)
+        if '--si' not in sys.argv:
+            figure(pair_set, table)
         figure(pair_set, table, si=True)
     summary = (table.groupby(['pair_set', 'dataset', 'representation', 'size'])['pearson'].agg(['mean', 'std', 'count'])
                .round(3).reset_index())

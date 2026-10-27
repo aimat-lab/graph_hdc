@@ -70,6 +70,7 @@ GED_ARM_OF = {'hdc': 'unit', 'hdc_noglobal': 'unit_noglobal'}
 
 # Paper palette and style (main text, Supplementary Figures S5 and S6)
 FONT_SIZE = 11
+FIG_WIDTH, FIG_HEIGHT = 9.9, 5.6
 COLOR_FP = '#4C64EB'      # Morgan fingerprints (blue)
 COLOR_HDC = '#4CEB99'     # hyperdimensional fingerprints (green)
 COLOR_HDC_LIGHT = '#B8F5D6'  # HDF without size/diameter (light green, hatched bars; dashed lines)
@@ -240,7 +241,7 @@ def draw_ged(ax, entry: dict, letter: str, title: str, legend: bool):
                     markersize=7, markeredgecolor='black', markeredgewidth=1.0, capsize=4, label=label, zorder=3)
     ax.set_xticks(x, GED_SIZES)
     ax.set_ylim(0.0, 1.0)
-    ax.set_ylabel('Pearson correlation w. GED $\\uparrow$', fontsize=FONT_SIZE + 1)
+    ax.set_ylabel('Pearson correlation with GED $\\uparrow$', fontsize=FONT_SIZE + 1)
     ax.grid(True, linestyle='--', alpha=0.3)
     ax.set_axisbelow(True)
     if legend:
@@ -264,15 +265,16 @@ def main():
         print(f'Exact GED, {pair_set} pairs ({entry["n"]}): Morgan {np.round(entry["morgan"], 2)}, '
               f'HDF {np.round(entry["hdc"][0], 2)}, without size/diameter {np.round(entry["hdc_noglobal"][0], 2)}')
 
-    fig = plt.figure(figsize=(13, 6.6))
-    outer = fig.add_gridspec(1, 2, width_ratios=[1.15, 1.0], wspace=0.2)
+    # drawn close to its printed size (0.95 of the SI text width), so that the text prints at about 8-9 pt
+    fig = plt.figure(figsize=(FIG_WIDTH, FIG_HEIGHT))
+    outer = fig.add_gridspec(1, 2, width_ratios=[1.35, 1.0], wspace=0.2)
     left = outer[0].subgridspec(2, 1, hspace=0.1)
     ax_auc = fig.add_subplot(left[0])
     ax_ef = fig.add_subplot(left[1], sharex=ax_auc)
     ax_random = fig.add_subplot(outer[1])
 
     draw_screening(ax_auc, ax_ef, bio, tests)
-    draw_ged(ax_random, ged['random'], 'b', 'Exact GED: random pairs', legend=True)
+    draw_ged(ax_random, ged['random'], 'b', 'Correlation with exact GED (ZINC250k)', legend=True)
     ax_random.set_xlabel('Embedding size', fontsize=FONT_SIZE + 1)
 
     # ---- Save ----

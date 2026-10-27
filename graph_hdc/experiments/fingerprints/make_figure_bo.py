@@ -80,17 +80,20 @@ MORGAN_BETTER_COLOR = '#D62728'
 # box plots: black outlines, whiskers and caps at 0.8 pt and medians at 1.2 pt as printed (user, 2026-10-23)
 BOX_LW = 0.8
 MEDIAN_LW = 1.2
-# the SI grid is 7.8 in (562 pt) wide and printed at 0.95 of the SI text width (472 pt), i.e. at about 0.8 of its size
-SI_SCALE = 0.95 * 472 / 562
+# the SI grid is 8.3 in (598 pt) wide and printed at 0.95 of the SI text width (472 pt), i.e. at about 0.75 of its
+# size, like the other SI figures (text of 11 pt prints at about 8 pt; user, 2026-10-27: the fonts printed at 5.6-6.4 pt)
+SI_WIDTH, SI_HEIGHT = 8.3, 8.6
+SI_SCALE = 0.95 * 472 / (SI_WIDTH * 72)
 
 # sizes in points within each figure. The SI grid keeps its original sizes (about 8 pt text before scaling); the
 # main-text figure is drawn at its print size, with text at about 9 pt like Fig. 2 (user, 2026-10-23)
 SI_STYLE = {
-    'font': 7.5, 'tick': 7.0, 'title': 8.0, 'letter': 10.0, 'axes': 0.6, 'tick_length': 2.5, 'grid': 0.5,
-    'curve': 1.6, 'random': 0.9, 'bracket': 0.7, 'box': BOX_LW / SI_SCALE, 'median': MEDIAN_LW / SI_SCALE,
-    'flier': 2.5, 'flier_edge': 0.3 / SI_SCALE,
-    # the main HDF surrogate (linear) takes the standard HDF green, the Matern control the darker green
-    'colors': {**COLORS, 'hdf_linear': COLORS['hdf_matern'], 'hdf_matern': COLORS['hdf_linear']},
+    'font': 11.0, 'tick': 11.0, 'title': 12.0, 'letter': 15.0, 'axes': 0.8, 'tick_length': 3.0, 'grid': 0.6,
+    'curve': 1.6, 'random': 1.2, 'bracket': 0.9, 'box': BOX_LW / SI_SCALE, 'median': MEDIAN_LW / SI_SCALE,
+    'flier': 3.0, 'flier_edge': 0.3 / SI_SCALE,
+    # the main HDF surrogate (linear) takes the standard HDF green #4CEB99 that the caption names (\green), the Matern
+    # control the darker green (user, 2026-10-27)
+    'colors': {**COLORS, 'hdf_linear': '#4CEB99', 'hdf_matern': COLORS['hdf_linear']},
 }
 MAIN_STYLE = {
     'font': 9.0, 'tick': 8.5, 'title': 9.0, 'letter': 11.0, 'axes': 0.8, 'tick_length': 3.0, 'grid': 0.6,
@@ -281,8 +284,8 @@ def si_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
     style = SI_STYLE
     methods = SI_METHODS
     sizes = available(df, SI_SIZES)
-    fig, axes = plt.subplots(3, 3, figsize=(7.8, 7.4))
-    fig.subplots_adjust(left=0.07, right=0.995, top=0.93, bottom=0.06, hspace=0.42, wspace=0.27)
+    fig, axes = plt.subplots(3, 3, figsize=(SI_WIDTH, SI_HEIGHT))
+    fig.subplots_adjust(left=0.085, right=0.995, top=0.89, bottom=0.06, hspace=0.5, wspace=0.3)
     for ax, letter, objective in zip(axes.flat, 'abcdefghi', OBJECTIVES):
         box_panel(ax, df, tests, objective, methods, sizes, style, SI_HDF)
         panel_title(ax, letter, TITLES[objective], style)
@@ -291,7 +294,7 @@ def si_figure(df: pd.DataFrame, tests: pd.DataFrame, path: str) -> None:
     handles = [Patch(facecolor=to_rgba(style['colors'][m], 0.7), edgecolor='black', linewidth=style['box'], label=LABELS[m])
                for m in methods]
     handles.append(plt.Line2D([], [], color=style['colors']['random'], ls='--', lw=style['random'], label=LABELS['random']))
-    fig.legend(handles=handles, loc='upper center', ncol=5, frameon=True, framealpha=0.9,
+    fig.legend(handles=handles, loc='upper center', ncol=3, frameon=True, framealpha=0.9,
                bbox_to_anchor=(0.5, 0.998), handlelength=1.8, columnspacing=1.4)
     fig.savefig(path + '.pdf')
     fig.savefig(path + '.png', dpi=300)
