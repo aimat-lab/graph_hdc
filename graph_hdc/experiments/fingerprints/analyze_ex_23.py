@@ -67,6 +67,7 @@ def figure(summary: pd.DataFrame, counts: dict, path: str):
     if any('Roboto Condensed' in f.name for f in font_manager.fontManager.ttflist):
         plt.rcParams['font.family'] = 'Roboto Condensed'
     plt.rcParams['font.size'] = FONT_SIZE
+    plt.rcParams['pdf.fonttype'] = 42  # TrueType: Type 3 glyph widths differ between viewers (user, 2026-10-27)
 
     # drawn close to its printed size (the full SI text width), so that the text prints at about 8-9 pt (user, 2026-10-27)
     fig, axes = plt.subplots(len(DATASETS), len(METRICS), figsize=(8.8, 5.65), sharex=True)

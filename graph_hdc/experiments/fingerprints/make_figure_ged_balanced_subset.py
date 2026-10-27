@@ -77,6 +77,7 @@ plt.style.use('default')
 if any('Roboto Condensed' in f.name for f in font_manager.fontManager.ttflist):
     plt.rcParams['font.family'] = 'Roboto Condensed'
 plt.rcParams['font.size'] = FONT_SIZE
+plt.rcParams['pdf.fonttype'] = 42  # TrueType: Type 3 glyph widths differ between viewers (user, 2026-10-27)
 
 
 def balanced_subset(frame: pd.DataFrame) -> pd.DataFrame:

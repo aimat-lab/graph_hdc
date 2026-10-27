@@ -79,6 +79,9 @@ if any('Roboto Condensed' in f.name for f in font_manager.fontManager.ttflist):
     plt.rcParams['font.family'] = 'Roboto Condensed'
 plt.rcParams['font.size'] = FONT_SIZE
 plt.rcParams['svg.fonttype'] = 'none'
+# TrueType instead of Type 3 fonts: viewers render Type 3 glyphs with slightly different widths, which made the
+# legend of panel a run past the axes in the SI (user, 2026-10-27)
+plt.rcParams['pdf.fonttype'] = 42
 plt.rcParams['hatch.color'] = '#2E9E66'
 plt.rcParams['hatch.linewidth'] = 0.8
 
@@ -188,7 +191,9 @@ def draw_screening(ax_auc, ax_ef, bio: dict, tests: dict):
     auc_lo = min(v['auc'][0] - v['auc'][1] for v in values)
     ax_auc.axhline(0.5, color='gray', linestyle='--', linewidth=1.1, alpha=0.8, zorder=0)
     # headroom for the significance brackets and, above them, the legend
-    ax_auc.set_ylim(min(0.5, auc_lo) - 0.04, auc_hi + 0.22)
+    ax_auc.set_ylim(min(0.5, auc_lo) - 0.04, auc_hi + 0.36)
+    # ticks only up to 1.0 (the largest possible ROC-AUC); the space above holds the legend
+    ax_auc.set_yticks([0.6, 0.8, 1.0])
     ax_auc.set_ylabel('ROC-AUC $\\uparrow$', fontsize=FONT_SIZE + 1)
     ax_auc.grid(True, axis='y', alpha=0.3)
     ax_auc.set_axisbelow(True)
@@ -223,8 +228,9 @@ def draw_screening(ax_auc, ax_ef, bio: dict, tests: dict):
 
     handles = [Patch(facecolor=color, hatch=hatch, edgecolor='black', label=label)
                for _, color, hatch, label in BIO_ARMS]
-    ax_auc.legend(handles=handles, loc='upper left', fontsize=FONT_SIZE - 1, ncol=3, framealpha=0.9,
-                  columnspacing=1.0, handlelength=1.6)
+    # two rows, so that the legend keeps a clear margin to the right edge of the panel
+    ax_auc.legend(handles=handles, loc='upper left', fontsize=FONT_SIZE - 1, ncol=2, framealpha=0.9,
+                  columnspacing=1.2, handlelength=1.6)
     panel_letter(ax_auc, 'a', 'Similarity-based virtual screening', x=-0.13)
 
 
