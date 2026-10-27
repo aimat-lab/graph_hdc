@@ -4,13 +4,13 @@ Analysis of Experiment 27 (see _slurm_ex_27.py): the re-run of Table 1 and of th
     python analyze_ex_27.py check     # the GPU equivalence check and the smoke test of the fixed stage
     python analyze_ex_27.py fixed     # the fixed MLP and KNN tables
     python analyze_ex_27.py opt       # the optimized MLP table and the chosen configurations
-    python analyze_ex_27.py tables [DIR]  # the KNN and optimized tables from fixed_runs.csv / opt_runs.csv in DIR
+    python analyze_ex_27.py tables [DIR]  # the three tables from fixed_runs.csv / opt_runs.csv in DIR
 
 ``tables`` needs only the per-seed CSVs (DIR defaults to _ex27/jupiter, the copy of the JUPITER results) and writes
-dataset_comparison_ex27_knn.tex and dataset_comparison_ex27_opt.tex to DIR. In these two tables (SI Tables S8 and
-S9), every baseline cell carries a triangle that points down for a lower and up for a higher mean MAE than HDF,
-filled if the two-sided Wilcoxon signed-rank test over the paired seeds, Holm-corrected over the four baselines of a
-target, gives p < 0.05 (the convention of analyze_ex_14.py). The fixed MLP table (Table 1) has no triangles.
+dataset_comparison_ex27_{mlp,knn,opt}.tex to DIR. In all three tables (Table 1, SI Tables S8 and S9), every baseline
+cell carries a triangle that points down for a lower and up for a higher mean MAE than HDF, filled if the two-sided
+Wilcoxon signed-rank test over the paired seeds, Holm-corrected over the four baselines of a target, gives p < 0.05
+(the convention of analyze_ex_14.py). ZPVE is shown in mHa (ROW_SCALE).
 
 ``opt`` writes opt_runs.csv, opt_configs.csv (the best trial of every study: its validation MAE and parameters) and,
 once every cell has results, dataset_comparison_ex27_opt.tex (the format of the fixed tables).
@@ -245,12 +245,15 @@ ROWS = [
     ('compas_dipole', '', r'$\mu$ \qunit{D}'),
     ('qm9_dipole', 'QM9', r'$\mu$ \qunit{D}'),
     ('qm9_cv', '', r'$C_v$ \qunit{cal/(mol\,K)}'),
-    ('qm9_zpve', '', r'$ZPVE$ \qunit{Ha}'),
+    ('qm9_zpve', '', r'$ZPVE$ \qunit{mHa}'),
     ('qm9_alpha', '', r'$\alpha$ \qunit{$a_0^3$}'),
     ('qm9_enthalpy', '', r'$\Delta H$ \qunit{Ha}'),
     ('qm9_energy', '', r'$U_0$ \qunit{Ha}'),
     ('qm9_gap', '', r'Gap \qunit{Ha}'),
 ]
+# Display scale of a row's MAE (the paired tests do not depend on it): ZPVE in mHa, as in the other SI tables, so
+# that its values do not need five or six decimals.
+ROW_SCALE = {'qm9_zpve': 1000.0}
 COLUMN_LABELS = {'hdf': 'HDF', 'morgan': 'Morgan', 'rdkit': 'RDKit', 'torsion': 'Torsion', 'atompair': 'AtomPair'}
 
 
@@ -314,14 +317,15 @@ def tabular(summary: dict, model: str, datapoints: dict, per_seed: dict = None) 
     methods = [method for method, *_ in METHODS]
     rounded, cells = [], []
     for note, _, _ in ROWS:
-        means = [summary[(note, method, model)][0] for method in methods]
+        scale = ROW_SCALE.get(note, 1.0)
+        means = [scale * summary[(note, method, model)][0] for method in methods]
         d = decimals(means)
         row_means = [round(m, d) for m in means]
         best = min(row_means)
         triangles = marks(per_seed, note, methods) if per_seed else {}
         row_cells = []
         for method, mean in zip(methods, row_means):
-            std = summary[(note, method, model)][1]
+            std = scale * summary[(note, method, model)][1]
             value = f'{mean:.{d}f}'
             value = rf'\mathbf{{ {value} }}' if mean == best else f' {value} '
             if method in triangles:
@@ -413,8 +417,7 @@ def report_fixed(lines: list):
     for model in ('mlp', 'knn'):
         path = os.path.join(OUT, f'dataset_comparison_ex27_{model}.tex')
         if complete:
-            # triangles against HDF only in the KNN table (SI); Table 1 has none
-            per_seed = by_seed(records, 4) if model == 'knn' else None
+            per_seed = by_seed(records, 3 if model == 'mlp' else 4)
             with open(path, 'w') as f:
                 f.write(tabular(summary, model, datapoints, per_seed))
         elif os.path.exists(path):
@@ -510,9 +513,10 @@ DATAPOINTS = {'hopv15_pce': 176, 'hopv15_voc': 176, 'freesolv_hfe': 639, 'bace_i
 
 
 def write_tables(lines: list, directory: str):
-    """The KNN and optimized tables, with the triangles against HDF, from fixed_runs.csv and opt_runs.csv."""
+    """The fixed MLP, KNN and optimized tables, with the triangles against HDF, from fixed_runs.csv and opt_runs.csv."""
     say = lines.append
-    for csv_name, column, model, tex_name in (('fixed_runs.csv', 4, 'knn', 'dataset_comparison_ex27_knn.tex'),
+    for csv_name, column, model, tex_name in (('fixed_runs.csv', 3, 'mlp', 'dataset_comparison_ex27_mlp.tex'),
+                                              ('fixed_runs.csv', 4, 'knn', 'dataset_comparison_ex27_knn.tex'),
                                               ('opt_runs.csv', 3, 'mlp', 'dataset_comparison_ex27_opt.tex')):
         records = []
         with open(os.path.join(directory, csv_name)) as f:
