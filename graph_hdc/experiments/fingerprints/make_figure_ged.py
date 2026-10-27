@@ -40,7 +40,9 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
 PATH = str(pathlib.Path(__file__).parent.absolute())
-RESULTS_PATH = os.path.join(PATH, 'results')
+# HDF_DATA_ROOT: folder with the results/ archives and the _ex22 tables (default: this folder)
+DATA_ROOT = os.environ.get('HDF_DATA_ROOT', PATH)
+RESULTS_PATH = os.path.join(DATA_ROOT, 'results')
 
 # ----------------------------------------------------------------------------
 # CONFIGURATION
@@ -110,19 +112,42 @@ def load_bioactivity(draft: bool = False) -> dict:
             df = pd.read_csv(csv_path).set_index('metric')
             data[key] = {'auc': (float(df.loc['auc', 'mean']), float(df.loc['auc', 'std'])),
                          'ef': (float(df.loc['ef1', 'mean']), float(df.loc['ef1', 'std'])),
-                         'src': os.path.relpath(path, RESULTS_PATH)}
+                         'src': os.path.relpath(path, RESULTS_PATH),
+                         'per_target': os.path.join(path, 'per_target_results.csv')}
     missing = [(d, a) for d in BIO_DATASETS for a, *_ in BIO_ARMS if (d, a) not in data]
     if missing and not draft:
         raise SystemExit(f'missing virtual-screening runs: {missing} (use --draft for a preview)')
     return data
 
 
+# significance brackets of panel a: HDF without size/diameter vs. Morgan, two-sided Wilcoxon signed-rank test over the
+# targets of a benchmark (all runs use the same targets and query actives), as in the Bayesian optimization figures
+TEST_ARMS = ('fp', 'hdc_noglobal')
+SIGNIFICANCE = [(0.001, '***'), (0.01, '**'), (0.05, '*')]
+MORGAN_BETTER_COLOR = '#D62728'
+
+
+def bio_tests(bio: dict) -> dict:
+    """(dataset, metric) -> (p, Morgan better) for HDF without size/diameter vs. Morgan over the targets."""
+    from scipy.stats import wilcoxon
+    tests = {}
+    for dataset in BIO_DATASETS:
+        if any((dataset, arm) not in bio for arm in TEST_ARMS):
+            continue
+        fp, hdf = (pd.read_csv(bio[(dataset, arm)]['per_target']).set_index('target_id') for arm in TEST_ARMS)
+        common = fp.index.intersection(hdf.index)
+        for metric, column in (('auc', 'auc_mean'), ('ef', 'ef1_mean')):
+            x, y = hdf.loc[common, column].to_numpy(), fp.loc[common, column].to_numpy()
+            tests[(dataset, metric)] = (float(wilcoxon(x, y).pvalue), float(np.mean(y)) > float(np.mean(x)))
+    return tests
+
+
 def load_ged_exact() -> dict:
     """pair set -> {'morgan': r per size, 'hdc'/'hdc_noglobal': (mean, std) per size over the codebooks, 'n': pairs}"""
     result = {}
     for pair_set, (arms_file, morgan_file) in GED_FILES.items():
-        arms = pd.read_csv(os.path.join(PATH, arms_file))
-        morgan = pd.read_csv(os.path.join(PATH, morgan_file))
+        arms = pd.read_csv(os.path.join(DATA_ROOT, arms_file))
+        morgan = pd.read_csv(os.path.join(DATA_ROOT, morgan_file))
         arms = arms[(arms['dataset'] == GED_DATASET) & (arms['pair_set'] == pair_set)]
         morgan = morgan[(morgan['dataset'] == GED_DATASET) & (morgan['pair_set'] == pair_set)]
         entry = {'morgan': morgan.set_index('size').loc[GED_SIZES, 'pearson'].to_numpy(),
@@ -146,7 +171,7 @@ def panel_letter(ax, letter: str, title: str, x: float = -0.1):
             va='bottom', ha='left')
 
 
-def draw_screening(ax_auc, ax_ef, bio: dict):
+def draw_screening(ax_auc, ax_ef, bio: dict, tests: dict):
     x = np.arange(len(BIO_DATASETS))
     bw = 0.27
     for i, (arm, color, hatch, _) in enumerate(BIO_ARMS):
@@ -161,7 +186,8 @@ def draw_screening(ax_auc, ax_ef, bio: dict):
     auc_hi = max(v['auc'][0] + v['auc'][1] for v in values)
     auc_lo = min(v['auc'][0] - v['auc'][1] for v in values)
     ax_auc.axhline(0.5, color='gray', linestyle='--', linewidth=1.1, alpha=0.8, zorder=0)
-    ax_auc.set_ylim(min(0.5, auc_lo) - 0.04, auc_hi + 0.12)
+    # headroom for the significance brackets and, above them, the legend
+    ax_auc.set_ylim(min(0.5, auc_lo) - 0.04, auc_hi + 0.22)
     ax_auc.set_ylabel('ROC-AUC $\\uparrow$', fontsize=FONT_SIZE + 1)
     ax_auc.grid(True, axis='y', alpha=0.3)
     ax_auc.set_axisbelow(True)
@@ -171,12 +197,28 @@ def draw_screening(ax_auc, ax_ef, bio: dict):
 
     ef_hi = max(v['ef'][0] + v['ef'][1] for v in values)
     ax_ef.axhline(1.0, color='gray', linestyle='--', linewidth=1.1, alpha=0.8, zorder=0)
-    ax_ef.set_ylim(0, ef_hi * 1.08)
+    ax_ef.set_ylim(0, ef_hi * 1.2)
     ax_ef.set_ylabel('EF$_{1\\%}$ $\\uparrow$', fontsize=FONT_SIZE + 1)
     ax_ef.grid(True, axis='y', alpha=0.3)
     ax_ef.set_axisbelow(True)
     ax_ef.set_xticks(x)
     ax_ef.set_xticklabels([BIO_DATASET_LABELS[d] for d in BIO_DATASETS], fontsize=FONT_SIZE)
+
+    for ax, metric in ((ax_auc, 'auc'), (ax_ef, 'ef')):
+        span = ax.get_ylim()[1] - ax.get_ylim()[0]
+        for i, dataset in enumerate(BIO_DATASETS):
+            if (dataset, metric) not in tests:
+                continue
+            p, morgan_better = tests[(dataset, metric)]
+            label = next((mark for threshold, mark in SIGNIFICANCE if p < threshold), None)
+            if not label:
+                continue
+            top = max(sum(bio[(dataset, arm)][metric]) for arm, *_ in BIO_ARMS)
+            y, h = top + 0.03 * span, 0.025 * span
+            color = MORGAN_BETTER_COLOR if morgan_better else 'black'
+            x0, x1 = x[i] - bw, x[i] + bw
+            ax.plot([x0, x0, x1, x1], [y, y + h, y + h, y], color=color, lw=1.0)
+            ax.text((x0 + x1) / 2, y + h, label, ha='center', va='bottom', fontsize=FONT_SIZE, color=color)
 
     handles = [Patch(facecolor=color, hatch=hatch, edgecolor='black', label=label)
                for _, color, hatch, label in BIO_ARMS]
@@ -209,7 +251,10 @@ def draw_ged(ax, entry: dict, letter: str, title: str, legend: bool):
 def main():
     draft = '--draft' in sys.argv
     bio = load_bioactivity(draft)
+    tests = bio_tests(bio)
     ged = load_ged_exact()
+    for (dataset, metric), (p, morgan_better) in sorted(tests.items()):
+        print(f'  test {dataset} {metric}: p = {p:.2g}, {"Morgan" if morgan_better else "HDF"} better')
 
     print('Virtual-screening runs used:')
     for k in sorted(bio):
@@ -226,7 +271,7 @@ def main():
     ax_ef = fig.add_subplot(left[1], sharex=ax_auc)
     ax_random = fig.add_subplot(outer[1])
 
-    draw_screening(ax_auc, ax_ef, bio)
+    draw_screening(ax_auc, ax_ef, bio, tests)
     draw_ged(ax_random, ged['random'], 'b', 'Exact GED: random pairs', legend=True)
     ax_random.set_xlabel('Embedding size', fontsize=FONT_SIZE + 1)
 
